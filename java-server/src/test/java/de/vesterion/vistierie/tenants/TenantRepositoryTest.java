@@ -1,0 +1,42 @@
+package de.vesterion.vistierie.tenants;
+
+import de.vesterion.vistierie.PostgresTestBase;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+
+import java.time.Instant;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+class TenantRepositoryTest extends PostgresTestBase {
+    @Autowired TenantRepository repo;
+
+    @Test void insertAndFindByName() {
+        var id = UUID.randomUUID();
+        repo.insert(id, "hivemem", "hash-x");
+        var t = repo.findByName("hivemem").orElseThrow();
+        assertThat(t.id()).isEqualTo(id);
+        assertThat(t.name()).isEqualTo("hivemem");
+        assertThat(t.tokenHash()).isEqualTo("hash-x");
+        assertThat(t.killUntil()).isNull();
+    }
+
+    @Test void setKill() {
+        var id = UUID.randomUUID();
+        repo.insert(id, "draczl", "hash-y");
+        repo.setKill(id, Instant.parse("2099-01-01T00:00:00Z"), "test", "operator");
+        var t = repo.findByName("draczl").orElseThrow();
+        assertThat(t.killUntil()).isEqualTo(Instant.parse("2099-01-01T00:00:00Z"));
+        assertThat(t.killReason()).isEqualTo("test");
+        assertThat(t.killSetBy()).isEqualTo("operator");
+    }
+
+    @Test void clearKill() {
+        var id = UUID.randomUUID();
+        repo.insert(id, "lord", "h");
+        repo.setKill(id, Instant.parse("2099-01-01T00:00:00Z"), "r", "o");
+        repo.clearKill(id);
+        assertThat(repo.findByName("lord").orElseThrow().killUntil()).isNull();
+    }
+}
