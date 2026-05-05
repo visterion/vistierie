@@ -1,4 +1,5 @@
 docs/
+CLAUDE.md
 target/
 node_modules/
 dist/
