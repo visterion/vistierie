@@ -24,3 +24,28 @@ vistierie:
   mock-llm: ${VISTIERIE_MOCK_LLM:false}
   routing:
     config-path: classpath:routing.yaml
+
+routing:
+  tenants:
+    hivemem:
+      default:
+        provider: anthropic
+        model: claude-sonnet-4-6
+        allow-override: false
+      purposes:
+        summarize_cell:
+          provider: anthropic
+          model: claude-haiku-4-5
+          allow-override: false
+        vision_attachment:
+          provider: anthropic
+          model: claude-haiku-4-5
+          allow-override: false
+        vision_diagram:
+          provider: anthropic
+          model: claude-sonnet-4-6
+          allow-override: false
+        free_pick:
+          provider: anthropic
+          model: claude-sonnet-4-6
+          allow-override: true
