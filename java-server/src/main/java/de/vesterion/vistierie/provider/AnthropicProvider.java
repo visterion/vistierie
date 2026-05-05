@@ -1,7 +1,9 @@
 package de.vesterion.vistierie.provider;
 
 import de.vesterion.vistierie.pricing.Usage;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import tools.jackson.databind.JsonNode;
@@ -19,11 +21,13 @@ public class AnthropicProvider implements LlmProvider {
     private final int timeoutSeconds;
     private final ObjectMapper mapper = new ObjectMapper();
 
+    @Autowired
     public AnthropicProvider(
             @Value("${vistierie.anthropic.base-url:https://api.anthropic.com}") String baseUrl,
             @Value("${vistierie.anthropic.api-key}") String apiKey,
             @Value("${vistierie.anthropic.timeout-seconds:60}") int timeoutSeconds) {
-        this(RestClient.builder().baseUrl(baseUrl).build(), apiKey, timeoutSeconds);
+        this(RestClient.builder().baseUrl(baseUrl)
+                .requestFactory(new SimpleClientHttpRequestFactory()).build(), apiKey, timeoutSeconds);
     }
 
     // package-private ctor for tests
