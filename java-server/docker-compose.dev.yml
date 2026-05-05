@@ -1,0 +1,30 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: vistierie
+      POSTGRES_PASSWORD: vistierie
+      POSTGRES_DB: vistierie
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "vistierie"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+  vistierie:
+    build:
+      context: ../
+      dockerfile: java-server/Dockerfile
+    environment:
+      VISTIERIE_DB_URL: jdbc:postgresql://postgres:5432/vistierie
+      VISTIERIE_DB_USER: vistierie
+      VISTIERIE_DB_PASSWORD: vistierie
+      VISTIERIE_ADMIN_TOKEN_HASH: ${VISTIERIE_ADMIN_TOKEN_HASH}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-mock}
+      VISTIERIE_MOCK_LLM: ${VISTIERIE_MOCK_LLM:-false}
+    ports:
+      - "8090:8090"
+    depends_on:
+      postgres:
+        condition: service_healthy
