@@ -7,6 +7,9 @@ spring:
     password: ${VISTIERIE_DB_PASSWORD:vistierie}
   flyway:
     enabled: true
+    default-schema: vistierie
+    create-schemas: true
+    schemas: vistierie
 
 server:
   port: 8090
