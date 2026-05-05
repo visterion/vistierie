@@ -13,6 +13,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+        value = "vistierie.mock-llm", havingValue = "false", matchIfMissing = true)
+
 @Component
 public class AnthropicProvider implements LlmProvider {
 
