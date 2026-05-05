@@ -1,24 +1,28 @@
 # Vistierie
 
-Standalone LLM gateway, subagent framework, and scheduler.
+Vistierie is a slim, tenant-scoped LLM gateway that gives consumer applications
+(HiveMem, Draczl, and future tenants) a single, audited, kill-switchable
+entry-point into LLM providers. Every call is authenticated with a bearer token,
+resolved against a per-tenant routing policy, forwarded to the configured
+provider (Anthropic in Slice 1), and recorded in a Postgres audit log with token
+counts and micro-EUR cost. Slice 1 ships the gateway only — two synchronous
+endpoints (`POST /llm/complete`, `POST /llm/vision`), admin tenant management,
+and the kill-switch. The subagent framework, run management, and scheduler are
+planned for Slice 2.
 
-**Status:** v1 design phase. No code yet.
+See [documentation/architecture.md](documentation/architecture.md) for the
+request-flow diagram and data model.
 
-## What it is
+## Documentation
 
-One Java/Spring Boot service that consumer apps (HiveMem, Draczl, future
-tenants) talk to over REST + webhooks for:
-
-- **LLM gateway** — provider-abstracted `complete` / `embed` / `vision`
-  with policy-driven routing per tenant / realm / purpose.
-- **Subagent framework** — register agents, dispatch via webhook,
-  reconstruct parent/child run hierarchy.
-- **Scheduler** — cron-based wake-ups firing webhooks on schedule.
-- **Cost tracking + audit** — every LLM call and agent run logged.
-- **Kill-switch** — central point to stop autonomous activity.
-
-It is **not** an MCP server, workflow engine, prompt library, or vector
-store. Prompts live with the consumer.
+| Document | Contents |
+|---|---|
+| [architecture.md](documentation/architecture.md) | System overview, data model, request flow |
+| [api.md](documentation/api.md) | REST endpoint reference |
+| [configuration.md](documentation/configuration.md) | All config properties and env vars |
+| [providers.md](documentation/providers.md) | Anthropic plugin, mock mode, adding providers |
+| [routing.md](documentation/routing.md) | Routing config schema and resolution rules |
+| [operations.md](documentation/operations.md) | Seeding tenants, kill-switch, cost queries, backup order |
 
 ## License
 
