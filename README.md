@@ -97,7 +97,7 @@ differs.
 ```mermaid
 flowchart TB
     subgraph Triggers["How a run starts"]
-        M[manual<br/>POST /agents/{name}/run]
+        M["manual<br/>POST /agents/{name}/run"]
         S[subagent<br/>parent agent emits tool_use<br/>with type=subagent]
         C[cron<br/>scheduler tick fires<br/>on schedule boundary]
     end
@@ -138,7 +138,7 @@ flowchart TB
     subgraph Child["Bee run (subagent)"]
         Bsys[system prompt: bee-isolation]
         Bmsg[messages_snapshot:<br/>full conversation,<br/>tool calls,<br/>system prompt]
-        Bout[output:<br/>{finding: '…'}]
+        Bout["output:<br/>{finding: '…'}"]
     end
 
     Qmsg ==>|"input via tool_use<br/>{cell_id: 'c1'}"| Bsys
