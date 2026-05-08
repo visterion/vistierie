@@ -1,5 +1,6 @@
 package de.vesterion.vistierie.runs;
 
+import de.vesterion.vistierie.agent.webhooks.CompletionWebhookDispatcher;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 
@@ -11,9 +12,14 @@ public class RunStore {
     private final RunRepository repo;
     private final RunEventRecorder events;
     private final LongPollService longPoll;
+    private final CompletionWebhookDispatcher webhook;
 
-    public RunStore(RunRepository repo, RunEventRecorder events, LongPollService longPoll) {
-        this.repo = repo; this.events = events; this.longPoll = longPoll;
+    public RunStore(RunRepository repo, RunEventRecorder events, LongPollService longPoll,
+                    CompletionWebhookDispatcher webhook) {
+        this.repo = repo;
+        this.events = events;
+        this.longPoll = longPoll;
+        this.webhook = webhook;
     }
 
     public void create(String runId, UUID tenantId, UUID agentId,
@@ -43,6 +49,7 @@ public class RunStore {
         events.record(runId, status.equals("done") ? "info" : "error",
                 status.equals("done") ? "turn_finished" : "error", null);
         longPoll.notifyTerminal(runId);
+        webhook.fire(runId);
     }
 
     public Run get(String runId) {
