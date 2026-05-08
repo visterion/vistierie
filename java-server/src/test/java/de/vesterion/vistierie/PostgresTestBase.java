@@ -14,7 +14,7 @@ public abstract class PostgresTestBase {
     static final PostgreSQLContainer<?> POSTGRES;
 
     static {
-        POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine")
+        POSTGRES = new PostgreSQLContainer<>("postgres:17-alpine")
                 .withPrivilegedMode(true);
         POSTGRES.start();
     }
