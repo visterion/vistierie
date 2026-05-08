@@ -26,6 +26,27 @@ Notes for any agent (human or LLM) working in this repo. The goal is to avoid re
 - Run a single test class: `./mvnw -Dtest=<ClassName> test`.
 - Run a single method: `./mvnw -Dtest=<ClassName>#<method> test`.
 
+## Commit identity
+
+Always commit as the GitHub user `visterion` (id 46775082). Both repos are configured locally:
+
+```bash
+git config user.name visterion
+git config user.email "46775082+visterion@users.noreply.github.com"
+```
+
+Verify with `git config user.name` / `git config user.email` before the first commit on a new clone — the system default (`vivu <vufelmann@initse.com>`) shows up as a different person on GitHub. If a commit slipped through under the wrong identity, rewrite with:
+
+```bash
+git filter-branch -f --env-filter '
+export GIT_AUTHOR_NAME=visterion
+export GIT_AUTHOR_EMAIL=46775082+visterion@users.noreply.github.com
+export GIT_COMMITTER_NAME=visterion
+export GIT_COMMITTER_EMAIL=46775082+visterion@users.noreply.github.com
+' main..HEAD
+git push --force-with-lease
+```
+
 ## GitHub remotes
 
 - **Vistierie repo:** `https://github.com/visterion/vistierie.git` (the org spelling is **`visterion`**, not `vesterion`).
