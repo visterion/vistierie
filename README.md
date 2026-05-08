@@ -80,7 +80,7 @@ flowchart LR
     Runner -.->|HTTP tool calls<br/>Bearer agent.webhook_token| Tools
     Runner --> DB
     Runner --> Webhook
-    Webhook -.->|status=done\|failed| Cb
+    Webhook -.->|"status=done | failed"| Cb
 ```
 
 Three things never leave Vistierie: provider API keys, the routing policy,
