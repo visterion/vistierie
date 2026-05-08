@@ -1,6 +1,7 @@
 package de.vesterion.vistierie.agent.runner;
 
 import de.vesterion.vistierie.agents.dto.ToolDef;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -19,6 +20,7 @@ public class ToolDispatcher {
     private final RestClient http;
     private final ExecutorService executor;
 
+    @Autowired
     public ToolDispatcher(@Value("${vistierie.agents.tool-default-timeout-seconds:30}") int defaultTimeout) {
         this(RestClient.builder()
                 .requestFactory(new SimpleClientHttpRequestFactory())
