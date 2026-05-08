@@ -26,36 +26,39 @@ public class AgentRepository {
                        String systemPrompt, String modelPurpose,
                        JsonNode tools, JsonNode outputSchema,
                        int maxTurns, int maxRunSeconds,
-                       String webhookToken, boolean paused) {
+                       String webhookToken, boolean paused,
+                       String schedule) {
         jdbc.sql("""
                 INSERT INTO vistierie.agents
                   (id, tenant_id, name, system_prompt, model_purpose,
                    tools, output_schema, max_turns, max_run_seconds,
-                   webhook_token, paused)
-                VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?)
+                   webhook_token, paused, schedule)
+                VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?)
                 """)
                 .params(id, tenantId, name, systemPrompt, modelPurpose,
                         toJsonString(tools), toJsonString(outputSchema),
-                        maxTurns, maxRunSeconds, webhookToken, paused)
+                        maxTurns, maxRunSeconds, webhookToken, paused, schedule)
                 .update();
     }
 
     public void replace(UUID id, String systemPrompt, String modelPurpose,
                         JsonNode tools, JsonNode outputSchema,
                         int maxTurns, int maxRunSeconds,
-                        String webhookToken, boolean paused) {
+                        String webhookToken, boolean paused,
+                        String schedule) {
         jdbc.sql("""
                 UPDATE vistierie.agents
                 SET system_prompt = ?, model_purpose = ?,
                     tools = ?::jsonb, output_schema = ?::jsonb,
                     max_turns = ?, max_run_seconds = ?,
                     webhook_token = ?, paused = ?,
+                    schedule = ?,
                     version = version + 1, updated_at = now()
                 WHERE id = ?
                 """)
                 .params(systemPrompt, modelPurpose,
                         toJsonString(tools), toJsonString(outputSchema),
-                        maxTurns, maxRunSeconds, webhookToken, paused, id)
+                        maxTurns, maxRunSeconds, webhookToken, paused, schedule, id)
                 .update();
     }
 
