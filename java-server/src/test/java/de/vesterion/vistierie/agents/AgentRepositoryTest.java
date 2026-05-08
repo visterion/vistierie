@@ -4,8 +4,11 @@ import de.vesterion.vistierie.PostgresTestBase;
 import de.vesterion.vistierie.tenants.TenantRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.JsonNodeFactory;
 
+import java.time.Instant;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -13,6 +16,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 class AgentRepositoryTest extends PostgresTestBase {
     @Autowired AgentRepository repo;
     @Autowired TenantRepository tenants;
+    @Autowired ObjectMapper mapper;
+    @Autowired JdbcClient jdbc;
 
     @Test void insertAndFindByName() {
         var tenantId = UUID.randomUUID();
@@ -68,5 +73,41 @@ class AgentRepositoryTest extends PostgresTestBase {
         repo.insert(UUID.randomUUID(), tenantId, "a", "p", "purpose", tools, null, 5, 60, "t", false);
         repo.insert(UUID.randomUUID(), tenantId, "b", "p", "purpose", tools, null, 5, 60, "t", false);
         assertThat(repo.findByTenant(tenantId)).extracting(Agent::name).containsExactlyInAnyOrder("a", "b");
+    }
+
+    @Test
+    void findScheduledIgnoresUnscheduledAndPaused() throws Exception {
+        var tenantId = UUID.randomUUID();
+        tenants.insert(tenantId, "tn-" + tenantId, "h");
+
+        repo.insert(UUID.randomUUID(), tenantId, "unscheduled", "p", "summarize_cell",
+                mapper.createArrayNode(), null, 3, 30, "wt", false);
+        var schedId = UUID.randomUUID();
+        repo.insert(schedId, tenantId, "scheduled", "p", "summarize_cell",
+                mapper.createArrayNode(), null, 3, 30, "wt", false);
+        var pausedSchedId = UUID.randomUUID();
+        repo.insert(pausedSchedId, tenantId, "paused-scheduled", "p", "summarize_cell",
+                mapper.createArrayNode(), null, 3, 30, "wt", true);
+        // Set schedule via direct SQL — repository doesn't expose it yet at this point
+        jdbc.sql("UPDATE vistierie.agents SET schedule='0 * * * * *' WHERE id IN (?, ?)")
+                .params(schedId, pausedSchedId).update();
+
+        var found = repo.findScheduled();
+        assertThat(found).extracting(Agent::name).containsExactly("scheduled");
+    }
+
+    @Test
+    void updateLastTickWritesTimestamp() {
+        var tenantId = UUID.randomUUID();
+        tenants.insert(tenantId, "tn-" + tenantId, "h");
+        var id = UUID.randomUUID();
+        repo.insert(id, tenantId, "a", "p", "summarize_cell",
+                mapper.createArrayNode(), null, 3, 30, "wt", false);
+
+        var ts = Instant.parse("2026-05-08T12:34:56Z");
+        repo.updateLastTick(id, ts);
+
+        var got = repo.findById(id).orElseThrow().lastTickAt();
+        assertThat(got).isEqualTo(ts);
     }
 }
