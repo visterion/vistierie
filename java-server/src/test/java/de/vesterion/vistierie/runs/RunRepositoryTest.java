@@ -67,7 +67,8 @@ class RunRepositoryTest extends PostgresTestBase {
         runs.markRunning("R1");
         runs.insert("R2", tenantId, agentId, snap, 1, null, "manual", "queued",
                 mapper.createObjectNode(), null, null);
-        // R2 is queued, R1 is running — both open. latest by started_at desc, NULLS LAST: R1 has started_at, R2 doesn't.
+        // R2 is queued, R1 is running — both have started_at (V2 default now()); R2's is later.
+        // CASE in latestOpenRunId prefers 'running', so R1 wins regardless of timestamp order.
         assertThat(runs.latestOpenRunId(agentId)).contains("R1");
 
         runs.markTerminal("R1", "done", null, null, null);

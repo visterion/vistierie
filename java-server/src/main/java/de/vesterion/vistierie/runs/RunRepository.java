@@ -82,6 +82,7 @@ public class RunRepository {
         return jdbc.sql("""
                 SELECT id FROM vistierie.runs
                 WHERE agent_id = ? AND status IN ('queued','running')
+                -- Prefer running over queued so cron_skipped attaches to the in-progress run.
                 ORDER BY CASE status WHEN 'running' THEN 0 ELSE 1 END,
                          started_at DESC NULLS LAST, id DESC
                 LIMIT 1
