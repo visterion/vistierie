@@ -30,16 +30,25 @@ public class BatchService {
     private final RoutingResolver routing;
     private final ProviderRegistry providers;
     private final ObjectMapper mapper;
+    private final de.vesterion.vistierie.agent.runner.OutputSchemaValidator schemaValidator;
+    private final de.vesterion.vistierie.audit.LlmCallRecorder recorder;
+    private final de.vesterion.vistierie.pricing.PriceTable prices;
     private final int maxItems;
 
     public BatchService(RunStore runs, RunRepository runRepo, RoutingResolver routing,
                         ProviderRegistry providers, ObjectMapper mapper,
+                        de.vesterion.vistierie.agent.runner.OutputSchemaValidator schemaValidator,
+                        de.vesterion.vistierie.audit.LlmCallRecorder recorder,
+                        de.vesterion.vistierie.pricing.PriceTable prices,
                         @Value("${vistierie.agents.batch.max-items:10000}") int maxItems) {
         this.runs = runs;
         this.runRepo = runRepo;
         this.routing = routing;
         this.providers = providers;
         this.mapper = mapper;
+        this.schemaValidator = schemaValidator;
+        this.recorder = recorder;
+        this.prices = prices;
         this.maxItems = maxItems;
     }
 
@@ -145,6 +154,88 @@ public class BatchService {
             return mapper.treeToValue(messages, mapper.getTypeFactory()
                     .constructCollectionType(List.class, Map.class));
         } catch (Exception e) { throw new RuntimeException(e); }
+    }
+
+    public void finalize(String parentRunId, String anthropicBatchId,
+                         java.util.stream.Stream<de.vesterion.vistierie.provider.BatchResult> resultsStream) {
+        var parent = runRepo.findById(parentRunId).orElseThrow(
+                () -> new IllegalStateException("parent run not found: " + parentRunId));
+        JsonNode outputSchema = parent.agentSnapshot().path("output_schema");
+        String purpose = parent.agentSnapshot().path("model_purpose").asText();
+
+        int done = 0, failed = 0;
+        try (var stream = resultsStream) {
+            for (var iter = stream.iterator(); iter.hasNext(); ) {
+                var r = iter.next();
+                String childId = r.customId();
+                var child = runRepo.findById(childId).orElse(null);
+                if (child == null) continue;
+                // Don't overwrite already-terminal children (e.g. killed mid-batch)
+                if (!"queued".equals(child.status()) && !"running".equals(child.status())) continue;
+
+                switch (r.type()) {
+                    case "succeeded": {
+                        if (r.usage() != null) {
+                            long cost = prices.costMicrosBatch(r.model(), r.usage());
+                            recorder.insert(new de.vesterion.vistierie.audit.LlmCallRecorder.Row(
+                                    newUlid(), parent.tenantId(), purpose, null,
+                                    "anthropic", r.model(), "batch",
+                                    r.usage().inputTokens(), r.usage().outputTokens(),
+                                    r.usage().cacheCreationInputTokens(), r.usage().cacheReadInputTokens(),
+                                    cost, 0, "ok", null,
+                                    childId, anthropicBatchId));
+                        }
+                        try {
+                            JsonNode validated = schemaValidator.parseAndValidate(
+                                    r.text(), outputSchema);
+                            runs.markTerminal(childId, "done", validated, null,
+                                    summarize(r.text()));
+                            done++;
+                        } catch (Exception e) {
+                            runs.markTerminal(childId, "failed", null,
+                                    "output_schema: " + e.getMessage(), null);
+                            failed++;
+                        }
+                        break;
+                    }
+                    case "errored":
+                        runs.markTerminal(childId, "failed", null,
+                                "anthropic_error: "
+                                        + (r.errorMessage() == null ? "" : r.errorMessage()),
+                                null);
+                        failed++;
+                        break;
+                    case "canceled":
+                        runs.markTerminal(childId, "failed", null,
+                                "anthropic_canceled", null);
+                        failed++;
+                        break;
+                    case "expired":
+                        runs.markTerminal(childId, "failed", null,
+                                "anthropic_expired_after_24h", null);
+                        failed++;
+                        break;
+                    default:
+                        runs.markTerminal(childId, "failed", null,
+                                "anthropic_unknown_type:" + r.type(), null);
+                        failed++;
+                }
+            }
+        }
+
+        // Aggregate parent
+        int totalRows = runRepo.findByParent(parentRunId).size();
+        var aggregateOutput = mapper.createObjectNode();
+        aggregateOutput.put("items_total", totalRows);
+        aggregateOutput.put("items_done", done);
+        aggregateOutput.put("items_failed", failed);
+        runs.markTerminal(parentRunId, "done", aggregateOutput, null,
+                "batch:" + anthropicBatchId + " done=" + done + " failed=" + failed);
+    }
+
+    private String summarize(String s) {
+        if (s == null) return null;
+        return s.length() > 120 ? s.substring(0, 117) + "..." : s;
     }
 
     private static String newUlid() {
