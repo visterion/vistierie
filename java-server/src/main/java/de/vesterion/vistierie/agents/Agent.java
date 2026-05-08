@@ -19,5 +19,7 @@ public record Agent(
         boolean paused,
         int version,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        String schedule,
+        Instant lastTickAt
 ) {}
