@@ -145,4 +145,20 @@ class AgentSchedulerTest extends PostgresTestBase {
                 .isAfterOrEqualTo(Instant.parse("2026-05-08T00:02:00Z"));
     }
 
+    @Test
+    void killedTenantBlocksCronFire() {
+        stub.script(StubLlmScripts.Turn.endTurn("{\"x\":\"v\"}"));
+
+        // Kill tenant for one hour.
+        tenants.setKill(tenantId,
+                Instant.parse("2026-05-08T01:00:00Z"), "drill", "operator");
+
+        // Boundary reached.
+        MutableClockConfig.NOW.set(Instant.parse("2026-05-08T00:01:00Z"));
+        scheduler.tick();
+
+        assertThat(runs.findByTenant(tenantId, 10)).isEmpty();
+        // last_tick_at still advances so we don't replay missed boundaries on unkill.
+        assertThat(agents.findById(agentId).orElseThrow().lastTickAt()).isNotNull();
+    }
 }
