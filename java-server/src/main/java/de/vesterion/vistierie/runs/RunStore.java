@@ -10,9 +10,10 @@ public class RunStore {
 
     private final RunRepository repo;
     private final RunEventRecorder events;
+    private final LongPollService longPoll;
 
-    public RunStore(RunRepository repo, RunEventRecorder events) {
-        this.repo = repo; this.events = events;
+    public RunStore(RunRepository repo, RunEventRecorder events, LongPollService longPoll) {
+        this.repo = repo; this.events = events; this.longPoll = longPoll;
     }
 
     public void create(String runId, UUID tenantId, UUID agentId,
@@ -41,6 +42,7 @@ public class RunStore {
         repo.markTerminal(runId, status, output, error, summary);
         events.record(runId, status.equals("done") ? "info" : "error",
                 status.equals("done") ? "turn_finished" : "error", null);
+        longPoll.notifyTerminal(runId);
     }
 
     public Run get(String runId) {

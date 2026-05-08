@@ -10,6 +10,7 @@ import de.vesterion.vistierie.runs.dto.RunEventDto;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.context.request.async.DeferredResult;
 
 import java.util.HashMap;
 import java.util.List;
@@ -21,13 +22,16 @@ public class RunController {
     private final AgentDispatcher dispatcher;
     private final RunRepository runs;
     private final RunEventRecorder events;
+    private final LongPollService longPoll;
 
     public RunController(AgentRepository agents, AgentDispatcher dispatcher,
-                         RunRepository runs, RunEventRecorder events) {
+                         RunRepository runs, RunEventRecorder events,
+                         LongPollService longPoll) {
         this.agents = agents;
         this.dispatcher = dispatcher;
         this.runs = runs;
         this.events = events;
+        this.longPoll = longPoll;
     }
 
     @PostMapping("/agents/{name}/run")
@@ -46,13 +50,36 @@ public class RunController {
     }
 
     @GetMapping("/runs/{id}")
-    public ResponseEntity<RunDetail> get(@PathVariable String id) {
+    public DeferredResult<ResponseEntity<RunDetail>> get(
+            @PathVariable String id,
+            @RequestParam(name = "wait_seconds", required = false) Integer waitSeconds) {
+
         var tenantId = RequestContext.requireTenantId();
-        var r = runs.findById(id).orElse(null);
-        if (r == null || !r.tenantId().equals(tenantId)) {
-            return ResponseEntity.notFound().build();
+        var r0 = runs.findById(id).orElse(null);
+        long timeoutMs = (waitSeconds == null ? 0 : Math.min(waitSeconds, 60)) * 1000L;
+        var deferred = new DeferredResult<ResponseEntity<RunDetail>>(timeoutMs == 0 ? null : timeoutMs);
+
+        if (r0 == null || !r0.tenantId().equals(tenantId)) {
+            deferred.setResult(ResponseEntity.notFound().build());
+            return deferred;
         }
-        return ResponseEntity.ok(toDetail(r));
+        if ("done".equals(r0.status()) || "failed".equals(r0.status())
+                || waitSeconds == null || waitSeconds == 0) {
+            deferred.setResult(ResponseEntity.ok(toDetail(r0)));
+            return deferred;
+        }
+
+        Runnable wakeup = () -> {
+            var refreshed = runs.findById(id).orElse(null);
+            if (refreshed != null) deferred.setResult(ResponseEntity.ok(toDetail(refreshed)));
+        };
+        longPoll.register(id, wakeup);
+        deferred.onTimeout(() -> {
+            longPoll.unregister(id, wakeup);
+            runs.findById(id).ifPresent(r -> deferred.setResult(ResponseEntity.ok(toDetail(r))));
+        });
+        deferred.onCompletion(() -> longPoll.unregister(id, wakeup));
+        return deferred;
     }
 
     @GetMapping("/runs")
