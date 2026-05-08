@@ -2,7 +2,7 @@ SET search_path TO vistierie;
 
 CREATE TABLE agents (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id       UUID NOT NULL REFERENCES tenants(id),
+    tenant_id       UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     name            TEXT NOT NULL,
     system_prompt   TEXT NOT NULL,
     model_purpose   TEXT NOT NULL,
@@ -21,11 +21,11 @@ CREATE INDEX agents_tenant_idx ON agents (tenant_id);
 
 CREATE TABLE runs (
     id                        TEXT PRIMARY KEY,
-    tenant_id                 UUID NOT NULL REFERENCES tenants(id),
-    agent_id                  UUID NOT NULL REFERENCES agents(id),
+    tenant_id                 UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    agent_id                  UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
     agent_snapshot            JSONB NOT NULL,
     agent_version             INTEGER NOT NULL,
-    parent_run_id             TEXT REFERENCES runs(id),
+    parent_run_id             TEXT REFERENCES runs(id) ON DELETE SET NULL,
     trigger                   TEXT NOT NULL,
     status                    TEXT NOT NULL,
     payload                   JSONB,
@@ -44,7 +44,7 @@ CREATE INDEX runs_status_idx          ON runs (status);
 
 CREATE TABLE run_events (
     id        BIGSERIAL PRIMARY KEY,
-    run_id    TEXT NOT NULL REFERENCES runs(id),
+    run_id    TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
     ts        TIMESTAMPTZ NOT NULL DEFAULT now(),
     level     TEXT NOT NULL,
     type      TEXT NOT NULL,
@@ -53,5 +53,5 @@ CREATE TABLE run_events (
 CREATE INDEX run_events_run_ts_idx ON run_events (run_id, ts);
 
 ALTER TABLE llm_calls
-    ADD COLUMN run_id TEXT REFERENCES runs(id);
+    ADD COLUMN run_id TEXT REFERENCES runs(id) ON DELETE SET NULL;
 CREATE INDEX llm_calls_run_id_idx ON llm_calls (run_id);
