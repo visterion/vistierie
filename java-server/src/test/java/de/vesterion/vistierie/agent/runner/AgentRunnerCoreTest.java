@@ -53,7 +53,7 @@ class AgentRunnerCoreTest extends PostgresTestBase {
         var agentId = UUID.randomUUID();
         var schema = mapper.readTree("{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\"}},\"required\":[\"x\"]}");
         agents.insert(agentId, tenantId, "a", "you are a", "summarize_cell",
-                JsonNodeFactory.instance.arrayNode(), schema, 5, 60, "wt", false);
+                JsonNodeFactory.instance.arrayNode(), schema, 5, 60, "wt", false, null);
         stub.script(StubLlmScripts.Turn.endTurn("{\"x\":\"yes\"}"));
 
         var runId = runner.startRunSync(tenantId, agentId, "manual",

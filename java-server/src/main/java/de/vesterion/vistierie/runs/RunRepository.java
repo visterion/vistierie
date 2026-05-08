@@ -69,6 +69,26 @@ public class RunRepository {
                 .param(parentRunId).query(this::map).list();
     }
 
+    public boolean hasOpenRun(UUID agentId) {
+        return jdbc.sql("""
+                SELECT EXISTS(
+                    SELECT 1 FROM vistierie.runs
+                    WHERE agent_id = ? AND status IN ('queued','running')
+                )
+                """).param(agentId).query(Boolean.class).single();
+    }
+
+    public Optional<String> latestOpenRunId(UUID agentId) {
+        return jdbc.sql("""
+                SELECT id FROM vistierie.runs
+                WHERE agent_id = ? AND status IN ('queued','running')
+                -- Prefer running over queued so cron_skipped attaches to the in-progress run.
+                ORDER BY CASE status WHEN 'running' THEN 0 ELSE 1 END,
+                         started_at DESC NULLS LAST, id DESC
+                LIMIT 1
+                """).param(agentId).query(String.class).optional();
+    }
+
     private static final String SELECT_BASE = """
             SELECT id, tenant_id, agent_id, agent_snapshot, agent_version,
                    parent_run_id, trigger, status, payload, messages_snapshot,
