@@ -61,6 +61,10 @@ public class TenantRepository {
                 """).param(id).update();
     }
 
+    public void delete(UUID id) {
+        jdbc.sql("DELETE FROM vistierie.tenants WHERE id = ?").param(id).update();
+    }
+
     private Tenant map(java.sql.ResultSet rs, int n) throws java.sql.SQLException {
         return new Tenant(
                 rs.getObject("id", UUID.class),
