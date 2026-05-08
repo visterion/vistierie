@@ -89,3 +89,32 @@ Rationale:
   reasoning.
 - `free_pick` allows the caller to override the model, e.g. to temporarily
   experiment with a different model without a config change.
+
+---
+
+## Adding purposes for new agents
+
+Agent runs route through the same `routing.yaml`: the agent's
+`model_purpose` is looked up under the tenant's `purposes` map. Before a
+new agent can run, the operator must add a routing entry for its purpose.
+
+Example for the HiveMem Bee/Queen agents:
+
+```yaml
+routing:
+  tenants:
+    hivemem:
+      purposes:
+        bee-isolation:
+          provider: anthropic
+          model: claude-haiku-4-5
+          allow-override: false
+        queen-curation:
+          provider: anthropic
+          model: claude-sonnet-4-6
+          allow-override: false
+```
+
+Adding a routing entry is currently an operator-side change (file edit and
+restart, or external file pickup). Tenant self-serve routing is out of
+scope for Slice 2.
