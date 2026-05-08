@@ -148,3 +148,47 @@ curl -H "Authorization: Bearer $TOK" \
 For parent–child trees (Queen + Bees), call the same endpoint on each
 `child_run_id` extracted from the parent's events or from the
 `children_summary` field on `GET /runs/{id}`.
+
+---
+
+## Scheduling (cron)
+
+Agents may declare a `schedule` field in their definition. When set,
+Vistierie's in-process scheduler fires the agent on the configured cadence
+via the same path as a manual trigger (`AgentDispatcher.trigger(... trigger="cron")`).
+
+### Cron format
+
+Spring 6-field cron expressions: `sec min hour day-of-month month day-of-week`.
+
+| Expression | Meaning |
+|---|---|
+| `0 0 0 * * *` | every day at 00:00:00 UTC |
+| `0 */5 * * * *` | every 5 minutes, on the minute |
+| `0 0 */6 * * *` | every 6 hours, on the hour |
+| `* * * * * *` | every second (test-only) |
+
+Invalid expressions are rejected at registration time with HTTP 400.
+
+### Concurrency: skip-if-running
+
+If a previous run for the agent is still `queued` or `running` when the
+next cron boundary fires, the new tick is skipped and a `cron_skipped`
+event is recorded on the open run. `agents.last_tick_at` advances either way.
+
+### Restart behaviour
+
+Vistierie does **not** replay missed cron boundaries after a restart.
+`last_tick_at` is preserved in the DB and the next tick is computed from
+the current clock. Don't rely on cron for exactly-once semantics —
+treat it as "fires roughly on schedule, idempotency is the consumer's job".
+
+### Pausing
+
+`paused: true` removes the agent from the scheduler scan. Unpausing does
+not retroactively fire missed boundaries; the next tick fires fresh.
+
+### Kill switch
+
+When the tenant's kill switch is active, the scheduler skips the fire
+entirely (no run row created). Logged at WARN level.

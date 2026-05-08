@@ -321,6 +321,12 @@ new run triggers without deleting the agent.
 Removes the agent. Fails with `409 Conflict` if any other agent in the
 tenant still references it as a subagent target.
 
+The `schedule` field is optional on `POST /agents`, `PUT /agents/{name}`,
+and `PATCH /agents/{name}`. Empty string clears the schedule. See
+[agents.md](agents.md#scheduling-cron) for the expression format and
+runtime semantics. The agent detail responses include `schedule` and
+`last_tick_at` (the most recent scheduler-tick decision time, may be null).
+
 ---
 
 ## Runs

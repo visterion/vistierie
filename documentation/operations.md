@@ -211,3 +211,13 @@ Or via the API: `GET /runs/{id}` returns `children_summary` (status counts);
 all open polls. Clients MUST handle a `running` response (timeout reached
 without terminal state) and re-poll instead of relying on the request to
 block indefinitely.
+
+### Cron caveats
+
+- Vistierie uses an **in-process scheduler**. Running two Vistierie
+  instances against the same database will cause double-firing — there's no
+  leader election or DB lease in v1.
+- A restart drops missed cron boundaries; `last_tick_at` is preserved but
+  the scheduler computes the next fire from the current clock.
+- The host clock matters. Deploy in **UTC** to keep cron expressions
+  predictable across DST.
