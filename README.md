@@ -198,6 +198,7 @@ schedule"; idempotency is the consumer's job.
 | **Recursive subagents** | Up to depth 5 (configurable). `RecursionGuard` is `ThreadLocal`-scoped so virtual-thread fan-out is safe. |
 | **Context shielding** | Parent run records only `tool_result` summaries; child run keeps its own full transcript. JSON output schema enforced at the boundary. |
 | **Cron without ceremony** | `schedule: "0 0 * * * *"` on an agent — Vistierie does the rest. Skip-if-running prevents pile-up. |
+| **Batched runs at 50 % cost** | `POST /agents/{name}/batch` with up to 10 000 items routes through Anthropic's Message Batches API — half-price for tasks that tolerate < 1 h latency. Per-item output schema validation; partial-success aggregation on the parent run. |
 | **In-process long-poll** | `GET /runs/{id}?wait_seconds=30` — DeferredResult-backed, no Redis. |
 | **Completion webhook** | Bounded retries (0 s → 5 s → 30 s default) with `webhook_sent` / `webhook_failed` events on the run. |
 
@@ -210,16 +211,17 @@ schedule"; idempotency is the consumer's job.
 | **1 — LLM gateway** | `POST /llm/complete`, `POST /llm/vision`, Anthropic provider, kill switch, routing, audit, mock-LLM mode, GHCR image | ✅ Released |
 | **2 — Agent framework** | `POST /agents` CRUD, `POST /agents/{name}/run` (202 + async), parallel HTTP tools, recursive subagents with context shielding, long-poll, completion webhook, run-level event timeline | ✅ Released |
 | **3 — Scheduler** | `agents.schedule` cron field, `AgentScheduler` 30 s tick, skip-if-running, kill-switch-aware, `last_tick_at` diagnostics | ✅ Released |
+| **4 — Batches** | `POST /agents/{name}/batch` (up to 10 000 items), Anthropic Message Batches API integration at 50 % cost, parent + child run topology with partial-success aggregation, `BatchPollingService` (60 s tick) with kill-switch awareness, `llm_calls.batch_id` audit link | ✅ Released |
 
-All slices are merged to `main`. The full test suite is **85 / 85 green**
+All slices are merged to `main`. The full test suite is **105 / 105 green**
 including a Postgres-backed integration suite, a real-`@Scheduled` E2E
-test, and an opt-in concurrency stress harness (`mvn -Pstress test`).
+test, a real-batch-polling E2E test, and an opt-in concurrency stress
+harness (`mvn -Pstress test`).
 
 ### On the roadmap
 
 | | |
 |---|---|
-| **Slice 4 — Batches** | Anthropic Message Batches API support: `POST /llm/batch` accepts a list of opaque `messages` arrays, Vistierie submits them to Anthropic's batch endpoint (50 % off), polls completion, and exposes `GET /llm/batch/{id}` for results. Cost rows still land in `vistierie.llm_calls` with a `batch_id` link. |
 | **Slice 5 — Vision attachments cache** | SeaweedFS-backed cache for vision inputs so the same `media_type+sha256` doesn't re-pay token costs across multiple agent runs. |
 | **Slice 6 — Per-realm provider routing** | The `realm` field is currently audit-only. Slice 6 makes it routable so e.g. anything `realm=medical` is forced onto a local Ollama provider, per spec §8. |
 
