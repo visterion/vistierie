@@ -192,3 +192,66 @@ not retroactively fire missed boundaries; the next tick fires fresh.
 
 When the tenant's kill switch is active, the scheduler skips the fire
 entirely (no run row created). Logged at WARN level.
+
+---
+
+## Batched runs
+
+`POST /agents/{name}/batch` lets a tenant submit `N` agent invocations as one
+Anthropic Message-Batch request. Each item runs asynchronously at
+**50 % of the standard token cost**. Typical latency is < 1 hour, max 24 h.
+
+### Restrictions in v1
+
+- Agent must declare an `output_schema`. Each item's output is validated
+  per-item; a schema violation fails the item but not the parent.
+- Agent must NOT have tools (HTTP or subagent). Tool-using agents are
+  technically supported by the Anthropic API but each tool round-trip in
+  batch can take up to 24 h, so v1 restricts to single-turn agents.
+- Per-batch cap: 10 000 items.
+
+### Run topology
+
+A batch submission creates one **parent** run with `trigger="batch"` and
+`anthropic_batch_id` set, plus N **child** runs with `trigger="batch_item"`
+and `parent_run_id` pointing back to the parent. The parent's `output`
+aggregates `{items_total, items_done, items_failed}` once all children
+have terminated.
+
+### Polling and observation
+
+Vistierie polls the Anthropic batch every `vistierie.agents.batch.poll-millis`
+(default 60 s). When the batch is `ended`, results stream into the
+per-child runs and the parent reaches `done`.
+
+Long-poll on the parent: `GET /runs/{id}?wait_seconds=N` (≤ 60 s) blocks
+until the parent terminates. Or set `completion_webhook` on the request
+body for a callback.
+
+### Cost audit
+
+Every per-item LLM call writes one `vistierie.llm_calls` row with
+`batch_id` set. Cost rollups can split batch vs on-demand spend — see
+[operations.md](operations.md#batch-vs-on-demand-spend).
+
+### Example
+
+```bash
+curl -X POST http://localhost:8090/agents/summarize-cell/batch \
+  -H "Authorization: Bearer $TENANT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "items": [
+      {"payload": {"cell_id": "c1"}},
+      {"payload": {"cell_id": "c2"}},
+      {"payload": {"custom_id": "my-id-3", "cell_id": "c3"}}
+    ],
+    "completion_webhook": "http://hivemem:8080/runs/done"
+  }'
+# → 202 Accepted
+# {
+#   "run_id": "01J...", "agent_name": "summarize-cell",
+#   "agent_version": 3, "status": "queued",
+#   "items_total": 3, "anthropic_batch_id": "msgbatch_..."
+# }
+```
