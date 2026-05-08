@@ -70,7 +70,7 @@ class RunTriggerControllerTest extends PostgresTestBase {
         var agentId = UUID.randomUUID();
         var schema = mapper.readTree("{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\"}},\"required\":[\"x\"]}");
         agents.insert(agentId, tenantId, "a", "you", "summarize_cell",
-                mapper.createArrayNode(), schema, 3, 30, "wt", false);
+                mapper.createArrayNode(), schema, 3, 30, "wt", false, null);
         stub.script(StubLlmScripts.Turn.endTurn("{\"x\":\"yes\"}"));
 
         var resp = mvc.perform(post("/agents/a/run")
@@ -89,7 +89,7 @@ class RunTriggerControllerTest extends PostgresTestBase {
     @Test void rejectsPausedAgent() throws Exception {
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "p", "p", "summarize_cell",
-                mapper.createArrayNode(), null, 3, 30, "wt", true);
+                mapper.createArrayNode(), null, 3, 30, "wt", true, null);
         mvc.perform(post("/agents/p/run")
                 .header("Authorization", "Bearer " + token)
                 .contentType(MediaType.APPLICATION_JSON)

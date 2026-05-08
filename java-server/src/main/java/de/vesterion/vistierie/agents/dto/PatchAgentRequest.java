@@ -12,5 +12,6 @@ public record PatchAgentRequest(
         JsonNode output_schema,
         Integer max_turns,
         Integer max_run_seconds,
-        String webhook_token
+        String webhook_token,
+        String schedule
 ) {}

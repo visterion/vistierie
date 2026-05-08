@@ -30,4 +30,14 @@ class MigrationTest extends PostgresTestBase {
                 """).query(Integer.class).single();
         assertThat(llmCallsHasRunId).isEqualTo(1);
     }
+
+    @Test void v3MigrationAddsScheduleColumns() {
+        var rows = jdbc.sql("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_schema='vistierie' AND table_name='agents'
+                  AND column_name IN ('schedule','last_tick_at')
+                ORDER BY column_name
+                """).query(String.class).list();
+        assertThat(rows).containsExactly("last_tick_at", "schedule");
+    }
 }
