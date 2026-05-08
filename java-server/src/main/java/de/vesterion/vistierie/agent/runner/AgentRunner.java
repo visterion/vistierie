@@ -130,7 +130,7 @@ public class AgentRunner {
                     providerName, decision.model(), "complete",
                     pRes.usage().inputTokens(), pRes.usage().outputTokens(),
                     pRes.usage().cacheCreationInputTokens(), pRes.usage().cacheReadInputTokens(),
-                    cost, 0, "ok", null));
+                    cost, 0, "ok", null, runId));
 
             if ("end_turn".equals(pRes.stopReason())) {
                 JsonNode output;
