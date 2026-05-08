@@ -46,4 +46,32 @@ class RunRepositoryTest extends PostgresTestBase {
         assertThat(r3.output().get("ok").asBoolean()).isTrue();
         assertThat(r3.finishedAt()).isNotNull();
     }
+
+    @Test
+    void hasOpenRunAndLatestOpenRunId() {
+        var tenantId = UUID.randomUUID();
+        tenants.insert(tenantId, "tn-" + tenantId, "h");
+        var agentId = UUID.randomUUID();
+        agents.insert(agentId, tenantId, "a", "p", "summarize_cell",
+                mapper.createArrayNode(), null, 3, 30, "wt", false);
+
+        assertThat(runs.hasOpenRun(agentId)).isFalse();
+        assertThat(runs.latestOpenRunId(agentId)).isEmpty();
+
+        var snap = mapper.createObjectNode();
+        runs.insert("R1", tenantId, agentId, snap, 1, null, "manual", "queued",
+                mapper.createObjectNode(), null, null);
+        assertThat(runs.hasOpenRun(agentId)).isTrue();
+        assertThat(runs.latestOpenRunId(agentId)).contains("R1");
+
+        runs.markRunning("R1");
+        runs.insert("R2", tenantId, agentId, snap, 1, null, "manual", "queued",
+                mapper.createObjectNode(), null, null);
+        // R2 is queued, R1 is running — both open. latest by started_at desc, NULLS LAST: R1 has started_at, R2 doesn't.
+        assertThat(runs.latestOpenRunId(agentId)).contains("R1");
+
+        runs.markTerminal("R1", "done", null, null, null);
+        runs.markTerminal("R2", "done", null, null, null);
+        assertThat(runs.hasOpenRun(agentId)).isFalse();
+    }
 }
