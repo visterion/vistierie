@@ -33,6 +33,11 @@ public class PriceTable {
         return input + output + cwrite + cread;
     }
 
+    /** Half-price for batched calls per Anthropic Batches pricing. */
+    public long costMicrosBatch(String model, Usage u) {
+        return costMicros(model, u) / 2L;
+    }
+
     private static long mul(int tokens, long perMtok) {
         return Math.round(((double) tokens / 1_000_000d) * perMtok);
     }
