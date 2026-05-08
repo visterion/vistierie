@@ -17,6 +17,8 @@
 | `vistierie.agents.tool-default-timeout-seconds` | — | `30` | Default per-tool HTTP timeout when the tool def omits `webhook_timeout_seconds` |
 | `vistierie.agents.completion-webhook.retry-base-millis` | — | `5000` | Base backoff between completion-webhook retry attempts |
 | `vistierie.agents.scheduler.tick-millis` | — | `30000` | Scheduler poll interval in ms |
+| `vistierie.agents.batch.poll-millis` | — | `60000` | Polling interval for open Anthropic batches |
+| `vistierie.agents.batch.max-items` | — | `10000` | Per-request item cap on `POST /agents/{name}/batch` |
 
 Environment variables take precedence over YAML values via Spring's
 `${ENV_VAR:default}` placeholder syntax. In Docker deployments pass secrets as
