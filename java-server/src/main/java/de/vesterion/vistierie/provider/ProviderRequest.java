@@ -9,7 +9,7 @@ public record ProviderRequest(
         Double temperature,
         String system,
         List<Map<String, Object>> messages,
-        Object tools,           // unused in slice 1
-        Object toolChoice,      // unused
-        Map<String, Object> metadata // unused
+        List<Map<String, Object>> tools,
+        Object toolChoice,
+        Map<String, Object> metadata
 ) {}

@@ -13,6 +13,9 @@
 | `spring.datasource.username` | `VISTIERIE_DB_USER` | `vistierie` | Database user |
 | `spring.datasource.password` | `VISTIERIE_DB_PASSWORD` | `vistierie` | Database password |
 | `server.port` | — | `8090` | HTTP listen port |
+| `vistierie.agents.subagent.max-depth` | — | `5` | Maximum subagent recursion depth |
+| `vistierie.agents.tool-default-timeout-seconds` | — | `30` | Default per-tool HTTP timeout when the tool def omits `webhook_timeout_seconds` |
+| `vistierie.agents.completion-webhook.retry-base-millis` | — | `5000` | Base backoff between completion-webhook retry attempts |
 
 Environment variables take precedence over YAML values via Spring's
 `${ENV_VAR:default}` placeholder syntax. In Docker deployments pass secrets as

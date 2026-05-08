@@ -17,4 +17,17 @@ class MigrationTest extends PostgresTestBase {
                 """).query(String.class).list();
         assertThat(tables).contains("tenants", "llm_calls");
     }
+
+    @Test void schemaHasAgentRunTables() {
+        var tables = jdbc.sql("""
+                SELECT table_name FROM information_schema.tables
+                WHERE table_schema = 'vistierie'
+                """).query(String.class).list();
+        assertThat(tables).contains("agents", "runs", "run_events");
+        var llmCallsHasRunId = jdbc.sql("""
+                SELECT count(*) FROM information_schema.columns
+                WHERE table_schema = 'vistierie' AND table_name = 'llm_calls' AND column_name = 'run_id'
+                """).query(Integer.class).single();
+        assertThat(llmCallsHasRunId).isEqualTo(1);
+    }
 }
