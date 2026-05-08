@@ -15,6 +15,7 @@ import java.util.Map;
 
 @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
         value = "vistierie.mock-llm", havingValue = "false", matchIfMissing = true)
+@org.springframework.context.annotation.Profile("!test-stub-llm")
 
 @Component
 public class AnthropicProvider implements LlmProvider {
@@ -97,7 +98,13 @@ public class AnthropicProvider implements LlmProvider {
                     })
                     .body(JsonNode.class);
 
-            var text = resp.path("content").get(0).path("text").asText();
+            StringBuilder sb = new StringBuilder();
+            for (JsonNode block : resp.path("content")) {
+                if ("text".equals(block.path("type").asText())) {
+                    sb.append(block.path("text").asText());
+                }
+            }
+            var text = sb.toString();
             var stopReason = resp.path("stop_reason").asText();
             var u = resp.path("usage");
             var usage = new Usage(
@@ -106,7 +113,8 @@ public class AnthropicProvider implements LlmProvider {
                     u.path("cache_creation_input_tokens").asInt(0),
                     u.path("cache_read_input_tokens").asInt(0)
             );
-            return new ProviderResponse(text, stopReason, usage, resp.path("model").asText());
+            return new ProviderResponse(text, stopReason, usage, resp.path("model").asText(),
+                    resp.path("content"));
         } catch (ProviderException e) {
             throw e;
         } catch (Exception e) {
