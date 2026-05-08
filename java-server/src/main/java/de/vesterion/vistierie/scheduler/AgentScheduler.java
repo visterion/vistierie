@@ -57,6 +57,9 @@ public class AgentScheduler {
                 log.warn("agent {} has invalid schedule '{}': {}", a.id(), a.schedule(), e.getMessage());
                 continue;
             }
+            // Anchor for cron evaluation: last tick if present, otherwise creation time.
+            // On the first tick after creation, this means at most one boundary fires
+            // even if the agent was created hours before the scheduler last ran.
             var prev = a.lastTickAt() != null ? a.lastTickAt() : a.createdAt();
             var next = expr.next(ZonedDateTime.ofInstant(prev, ZoneOffset.UTC));
             if (next == null || next.toInstant().isAfter(now)) continue;
