@@ -349,6 +349,52 @@ Returns `202 Accepted`:
 
 `409 Conflict` if the agent is paused.
 
+### `POST /agents/{name}/batch`
+
+Submit `N` agent invocations as one Anthropic Message-Batch.
+
+**Body:**
+```json
+{
+  "items": [
+    {"custom_id": "optional", "payload": { "any": "json" }},
+    {"payload": { "any": "json" }}
+  ],
+  "completion_webhook": "http://...",
+  "completion_webhook_token": "..."
+}
+```
+
+- `items` — required, ≥1, ≤10 000.
+- `custom_id` per item — optional. Must match `^[a-zA-Z0-9_-]{1,64}$` and
+  be unique within the batch. If omitted, Vistierie generates one.
+
+**Response — `202 Accepted`:**
+```json
+{
+  "run_id": "01J...",
+  "agent_name": "summarize-cell",
+  "agent_version": 3,
+  "status": "queued",
+  "items_total": 3,
+  "anthropic_batch_id": "msgbatch_..."
+}
+```
+
+**Errors:**
+- `400` — agent has tools, missing `output_schema`, empty/oversized
+  `items`, or invalid/duplicate `custom_id`.
+- `404` — agent not found in this tenant.
+- `409` — agent paused.
+- `502` — upstream Anthropic batch submission failed.
+
+The parent run row exposed via `GET /runs/{id}` includes the extra fields
+`anthropic_batch_id`, `output.items_total`, `output.items_done`,
+`output.items_failed`.
+
+See [agents.md](agents.md#batched-runs) for the full agent-level model
+and v1 restrictions.
+
 ### `GET /runs/{run_id}`
 
 Returns the run detail (status, output, error, started/finished, summary,

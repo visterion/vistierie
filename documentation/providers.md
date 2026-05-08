@@ -21,6 +21,22 @@ Both `complete` and `vision` calls go through the same `/v1/messages` endpoint.
 Vision requests encode the image as an Anthropic `image` content block with
 `type: "base64"`.
 
+### Batch endpoints (Slice 4)
+
+The Anthropic provider implements three batch endpoints that back
+`POST /agents/{name}/batch`:
+
+| Operation | HTTP |
+|---|---|
+| Submit | `POST /v1/messages/batches` |
+| Status | `GET /v1/messages/batches/{id}` |
+| Results | streamed from the batch's `results_url` (JSONL) |
+
+**v1 restriction:** batched agents must be single-turn (no tools, no
+subagents). Multi-turn batched agents are technically supported by the
+Anthropic API but each round-trip can take up to 24 h, so this is
+deferred until a concrete consumer needs it.
+
 ---
 
 ## Adding a new provider

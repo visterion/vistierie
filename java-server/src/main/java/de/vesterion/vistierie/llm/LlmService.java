@@ -65,7 +65,7 @@ public class LlmService {
                     decision.provider(), decision.model(), "complete",
                     pRes.usage().inputTokens(), pRes.usage().outputTokens(),
                     pRes.usage().cacheCreationInputTokens(), pRes.usage().cacheReadInputTokens(),
-                    cost, dur, "ok", null, null));
+                    cost, dur, "ok", null, null, null));
             return new LlmResponse(pRes.text(), pRes.stopReason(), pRes.usage(),
                     decision.provider(), decision.model(), cost, id);
         } catch (LlmProvider.ProviderException e) {
@@ -75,7 +75,7 @@ public class LlmService {
                     decision.provider(), decision.model(), "complete",
                     0, 0, 0, 0, 0, dur,
                     e.statusCode() >= 500 ? "error" : "rate_limited",
-                    e.errorCode(), null));
+                    e.errorCode(), null, null));
             throw e;
         }
     }
@@ -106,7 +106,7 @@ public class LlmService {
                     decision.provider(), decision.model(), "vision",
                     pRes.usage().inputTokens(), pRes.usage().outputTokens(),
                     pRes.usage().cacheCreationInputTokens(), pRes.usage().cacheReadInputTokens(),
-                    cost, dur, "ok", null, null));
+                    cost, dur, "ok", null, null, null));
             return new LlmResponse(pRes.text(), pRes.stopReason(), pRes.usage(),
                     decision.provider(), decision.model(), cost, id);
         } catch (LlmProvider.ProviderException e) {
@@ -116,7 +116,7 @@ public class LlmService {
                     decision.provider(), decision.model(), "vision",
                     0, 0, 0, 0, 0, dur,
                     e.statusCode() >= 500 ? "error" : "rate_limited",
-                    e.errorCode(), null));
+                    e.errorCode(), null, null));
             throw e;
         }
     }
@@ -134,7 +134,7 @@ public class LlmService {
         recorder.insert(new LlmCallRecorder.Row(
                 id, tenantId, purpose, realm,
                 "n/a", "n/a", endpoint,
-                0, 0, 0, 0, 0, 0, "killed", null, null));
+                0, 0, 0, 0, 0, 0, "killed", null, null, null));
     }
 
     private static String ulid() {
