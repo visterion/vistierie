@@ -7,14 +7,18 @@ public class RecursionGuard {
     }
 
     private final int max;
-    private int depth;
+    private final ThreadLocal<Integer> depth = ThreadLocal.withInitial(() -> 0);
 
     public RecursionGuard(int max) { this.max = max; }
 
     public void enter() {
-        if (depth >= max) throw new DepthExceeded(max);
-        depth++;
+        int d = depth.get();
+        if (d >= max) throw new DepthExceeded(max);
+        depth.set(d + 1);
     }
-    public void exit() { if (depth > 0) depth--; }
-    public int depth() { return depth; }
+    public void exit() {
+        int d = depth.get();
+        if (d > 0) depth.set(d - 1);
+    }
+    public int depth() { return depth.get(); }
 }

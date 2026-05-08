@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 
 @Component
 public class AgentRunner {
@@ -37,6 +38,8 @@ public class AgentRunner {
     private final ToolUseParser parser;
     private final OutputSchemaValidator schema;
     private final ToolDispatcher toolDispatcher;
+    private final RecursionGuard recursionGuard;
+    private final ExecutorService subagentExecutor;
     private final ObjectMapper mapper;
 
     public AgentRunner(AgentRepository agents, RunStore runs,
@@ -45,6 +48,8 @@ public class AgentRunner {
                        KillSwitchService kill, TenantRepository tenants,
                        ToolUseParser parser, OutputSchemaValidator schema,
                        ToolDispatcher toolDispatcher,
+                       RecursionGuard recursionGuard,
+                       ExecutorService subagentExecutor,
                        ObjectMapper mapper) {
         this.agents = agents;
         this.runs = runs;
@@ -57,6 +62,8 @@ public class AgentRunner {
         this.parser = parser;
         this.schema = schema;
         this.toolDispatcher = toolDispatcher;
+        this.recursionGuard = recursionGuard;
+        this.subagentExecutor = subagentExecutor;
         this.mapper = mapper;
     }
 
@@ -161,8 +168,46 @@ public class AgentRunner {
                     continue;
                 }
                 if ("subagent".equals(def.path("type").asText())) {
-                    runs.markTerminal(runId, "failed", null, "subagent dispatch not yet wired", null);
-                    return;
+                    var targetName = def.path("target_agent").asText();
+                    var target = agents.findByName(run.tenantId(), targetName).orElse(null);
+                    if (target == null) {
+                        var err = new ToolResult(b.id(), true,
+                                mapper.createObjectNode().put("error", "unknown target_agent: " + targetName));
+                        var f = new CompletableFuture<ToolResult>();
+                        f.complete(err);
+                        futures.add(f);
+                        continue;
+                    }
+                    final var targetId = target.id();
+                    final var parentTenantId = run.tenantId();
+                    final var parentRunId = runId;
+                    final var blockRef = b;
+                    futures.add(CompletableFuture.supplyAsync(() -> {
+                        try {
+                            recursionGuard.enter();
+                            var childRunId = startRunSync(parentTenantId, targetId, "subagent",
+                                    blockRef.input(), parentRunId, null, null);
+                            runs.recordEvent(parentRunId, "info", "subagent_spawned",
+                                    mapper.valueToTree(Map.of("child_run_id", childRunId, "agent", targetName)));
+                            var child = runs.get(childRunId);
+                            if ("done".equals(child.status())) {
+                                runs.recordEvent(parentRunId, "info", "subagent_finished",
+                                        mapper.valueToTree(Map.of("child_run_id", childRunId, "status", "done")));
+                                return new ToolResult(blockRef.id(), false, child.output());
+                            }
+                            runs.recordEvent(parentRunId, "error", "subagent_finished",
+                                    mapper.valueToTree(Map.of("child_run_id", childRunId, "status", child.status())));
+                            return new ToolResult(blockRef.id(), true,
+                                    mapper.createObjectNode().put("error",
+                                            "subagent_failed: " + (child.error() == null ? "unknown" : child.error())));
+                        } catch (RecursionGuard.DepthExceeded de) {
+                            return new ToolResult(blockRef.id(), true,
+                                    mapper.createObjectNode().put("error", de.getMessage()));
+                        } finally {
+                            try { recursionGuard.exit(); } catch (Exception ignored) {}
+                        }
+                    }, subagentExecutor));
+                    continue;
                 }
                 ToolDef td;
                 try {
