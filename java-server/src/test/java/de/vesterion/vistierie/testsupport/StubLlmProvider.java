@@ -18,6 +18,28 @@ public class StubLlmProvider implements LlmProvider {
     private final Map<String, ConcurrentLinkedQueue<StubLlmScripts.ScriptedTurn>> agentScripts = new ConcurrentHashMap<>();
     private final ObjectMapper mapper = new ObjectMapper();
 
+    private final java.util.concurrent.atomic.AtomicInteger batchCounter =
+            new java.util.concurrent.atomic.AtomicInteger(0);
+    private final java.util.Map<String, java.util.List<de.vesterion.vistierie.provider.BatchItem>> submittedBatches =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.Map<String, String> batchStatus =
+            new java.util.concurrent.ConcurrentHashMap<>();   // batchId -> "in_progress" | "ended"
+    private final java.util.Map<String, java.util.List<de.vesterion.vistierie.provider.BatchResult>> batchResults =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Test helper — flips a previously submitted batch to "ended" and stages results. */
+    public void completeBatch(String batchId, java.util.List<de.vesterion.vistierie.provider.BatchResult> results) {
+        batchStatus.put(batchId, "ended");
+        batchResults.put(batchId, results);
+    }
+
+    /** Test helper — returns the items most recently passed to submitBatch. */
+    public java.util.List<de.vesterion.vistierie.provider.BatchItem> lastSubmittedBatch() {
+        return submittedBatches.values().stream()
+                .reduce((a, b) -> b)
+                .orElse(java.util.List.of());
+    }
+
     public StubLlmProvider script(StubLlmScripts.ScriptedTurn... turns) {
         defaultScript.clear();
         for (var t : turns) defaultScript.add(t);
@@ -31,7 +53,13 @@ public class StubLlmProvider implements LlmProvider {
         return this;
     }
 
-    public void resetAll() { defaultScript.clear(); agentScripts.clear(); }
+    public void resetAll() {
+        defaultScript.clear();
+        agentScripts.clear();
+        submittedBatches.clear();
+        batchStatus.clear();
+        batchResults.clear();
+    }
 
     @Override public String name() { return "anthropic"; }
 
@@ -65,5 +93,30 @@ public class StubLlmProvider implements LlmProvider {
 
     @Override public ProviderResponse vision(String model, int maxTokens, String mediaType, String base64, String prompt) {
         return new ProviderResponse("[stub vision]", "end_turn", new Usage(50, 4, 0, 0), model);
+    }
+
+    @Override
+    public de.vesterion.vistierie.provider.BatchSubmission submitBatch(
+            java.util.List<de.vesterion.vistierie.provider.BatchItem> items) {
+        String id = "stubbatch_" + batchCounter.incrementAndGet();
+        submittedBatches.put(id, items);
+        batchStatus.put(id, "in_progress");
+        return new de.vesterion.vistierie.provider.BatchSubmission(id, items.size());
+    }
+
+    @Override
+    public de.vesterion.vistierie.provider.BatchStatus getBatch(String anthropicBatchId) {
+        String status = batchStatus.getOrDefault(anthropicBatchId, "in_progress");
+        int total = submittedBatches.getOrDefault(anthropicBatchId, java.util.List.of()).size();
+        int succeeded = "ended".equals(status) ? total : 0;
+        String resultsUrl = "ended".equals(status) ? "stub://" + anthropicBatchId : null;
+        return new de.vesterion.vistierie.provider.BatchStatus(
+                anthropicBatchId, status, 0, succeeded, 0, 0, 0, resultsUrl);
+    }
+
+    @Override
+    public java.util.stream.Stream<de.vesterion.vistierie.provider.BatchResult> streamResults(String resultsUrl) {
+        String batchId = resultsUrl.substring("stub://".length());
+        return batchResults.getOrDefault(batchId, java.util.List.of()).stream();
     }
 }
