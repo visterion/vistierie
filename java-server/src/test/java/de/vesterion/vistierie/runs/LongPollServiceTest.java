@@ -7,7 +7,6 @@ import de.vesterion.vistierie.routing.RoutingConfig;
 import de.vesterion.vistierie.tenants.TenantRepository;
 import de.vesterion.vistierie.testsupport.StubLlmProvider;
 import de.vesterion.vistierie.testsupport.StubLlmScripts;
-import org.awaitility.Awaitility;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,21 +18,20 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 import tools.jackson.databind.ObjectMapper;
 
-import java.time.Duration;
 import java.util.HashMap;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @ActiveProfiles("test-stub-llm")
-class RunQueryControllerTest extends PostgresTestBase {
+class LongPollServiceTest extends PostgresTestBase {
 
     @Autowired WebApplicationContext wac;
     @Autowired AuthFilter authFilter;
     @Autowired TenantRepository tenants;
     @Autowired AgentRepository agents;
-    @Autowired RunRepository runs;
     @Autowired BCryptPasswordEncoder enc;
     @Autowired StubLlmProvider stub;
     @Autowired ObjectMapper mapper;
@@ -41,8 +39,8 @@ class RunQueryControllerTest extends PostgresTestBase {
 
     MockMvc mvc;
     String token;
-    String tenantName;
     UUID tenantId;
+    String tenantName;
 
     @BeforeEach void up() {
         mvc = MockMvcBuilders.webAppContextSetup(wac).addFilter(authFilter).build();
@@ -50,11 +48,6 @@ class RunQueryControllerTest extends PostgresTestBase {
         tenantId = UUID.randomUUID();
         tenantName = "tn-" + tenantId;
         tenants.insert(tenantId, tenantName, enc.encode(token));
-        registerRouting(tenantName);
-        stub.resetAll();
-    }
-
-    private void registerRouting(String name) {
         var t = new RoutingConfig.TenantRouting();
         t.setPurposes(new HashMap<>());
         var rule = new RoutingConfig.Rule();
@@ -63,63 +56,31 @@ class RunQueryControllerTest extends PostgresTestBase {
         rule.setAllowOverride(false);
         t.getPurposes().put("summarize_cell", rule);
         t.setDefault(rule);
-        routingConfig.getTenants().put(name, t);
+        routingConfig.getTenants().put(tenantName, t);
+        stub.resetAll();
     }
 
-    @Test void getRunReturnsTerminalState() throws Exception {
+    @Test void longPollReturnsBeforeTimeoutWhenRunCompletes() throws Exception {
         var agentId = UUID.randomUUID();
         var schema = mapper.readTree("{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\"}},\"required\":[\"x\"]}");
         agents.insert(agentId, tenantId, "a", "p", "summarize_cell",
                 mapper.createArrayNode(), schema, 3, 30, "wt", false);
-        stub.script(StubLlmScripts.Turn.endTurn("{\"x\":\"yes\"}"));
-
+        stub.script(StubLlmScripts.Turn.endTurn("{\"x\":\"v\"}"));
         var startResp = mvc.perform(post("/agents/a/run")
                 .header("Authorization", "Bearer " + token)
                 .contentType(MediaType.APPLICATION_JSON).content("{\"payload\":{}}"))
                 .andExpect(status().isAccepted()).andReturn().getResponse().getContentAsString();
         var runId = mapper.readTree(startResp).path("run_id").asText();
 
-        Awaitility.await().atMost(Duration.ofSeconds(10)).until(() ->
-                runs.findById(runId).map(r -> "done".equals(r.status())).orElse(false));
-
-        var detailRaw = mvc.perform(get("/runs/" + runId).header("Authorization", "Bearer " + token))
-                .andReturn();
-        mvc.perform(asyncDispatch(detailRaw))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.run_id").value(runId))
-                .andExpect(jsonPath("$.status").value("done"))
-                .andExpect(jsonPath("$.output.x").value("yes"));
-
-        mvc.perform(get("/runs/" + runId + "/events").header("Authorization", "Bearer " + token))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$").isArray());
-
-        mvc.perform(get("/runs").header("Authorization", "Bearer " + token))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].run_id").value(runId));
-    }
-
-    @Test void otherTenantCannotSeeRun() throws Exception {
-        var agentId = UUID.randomUUID();
-        agents.insert(agentId, tenantId, "secret", "p", "summarize_cell",
-                mapper.createArrayNode(),
-                mapper.readTree("{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\"}},\"required\":[\"x\"]}"),
-                3, 30, "wt", false);
-        stub.script(StubLlmScripts.Turn.endTurn("{\"x\":\"v\"}"));
-        var startResp = mvc.perform(post("/agents/secret/run")
+        long t0 = System.currentTimeMillis();
+        var pollResp = mvc.perform(get("/runs/" + runId + "?wait_seconds=20")
                 .header("Authorization", "Bearer " + token)
-                .contentType(MediaType.APPLICATION_JSON).content("{\"payload\":{}}"))
-                .andExpect(status().isAccepted()).andReturn().getResponse().getContentAsString();
-        var runId = mapper.readTree(startResp).path("run_id").asText();
-        Awaitility.await().atMost(Duration.ofSeconds(10)).until(() ->
-                runs.findById(runId).map(r -> "done".equals(r.status())).orElse(false));
-
-        var otherToken = "tok-" + UUID.randomUUID();
-        var otherId = UUID.randomUUID();
-        tenants.insert(otherId, "tn-" + otherId, enc.encode(otherToken));
-        var resp = mvc.perform(get("/runs/" + runId).header("Authorization", "Bearer " + otherToken))
+                .contentType(MediaType.APPLICATION_JSON))
                 .andReturn();
-        mvc.perform(asyncDispatch(resp))
-                .andExpect(status().isNotFound());
+        mvc.perform(asyncDispatch(pollResp))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("done"));
+        long elapsed = System.currentTimeMillis() - t0;
+        assertThat(elapsed).isLessThan(15_000);
     }
 }
