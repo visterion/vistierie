@@ -93,9 +93,14 @@ public class RunRepository {
             SELECT id, tenant_id, agent_id, agent_snapshot, agent_version,
                    parent_run_id, trigger, status, payload, messages_snapshot,
                    output, summary, error, completion_webhook, completion_webhook_token,
-                   started_at, finished_at
+                   started_at, finished_at, anthropic_batch_id
             FROM vistierie.runs
             """;
+
+    public void setAnthropicBatchId(String runId, String anthropicBatchId) {
+        jdbc.sql("UPDATE vistierie.runs SET anthropic_batch_id = ? WHERE id = ?")
+                .params(anthropicBatchId, runId).update();
+    }
 
     private Run map(java.sql.ResultSet rs, int n) throws SQLException {
         return new Run(
@@ -114,8 +119,9 @@ public class RunRepository {
                 rs.getString("error"),
                 rs.getString("completion_webhook"),
                 rs.getString("completion_webhook_token"),
-                rs.getTimestamp("started_at").toInstant(),
-                rs.getTimestamp("finished_at") == null ? null : rs.getTimestamp("finished_at").toInstant()
+                rs.getTimestamp("started_at") == null ? null : rs.getTimestamp("started_at").toInstant(),
+                rs.getTimestamp("finished_at") == null ? null : rs.getTimestamp("finished_at").toInstant(),
+                rs.getString("anthropic_batch_id")
         );
     }
 
