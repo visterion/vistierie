@@ -22,5 +22,6 @@ public record Run(
         String completionWebhook,
         String completionWebhookToken,
         Instant startedAt,
-        Instant finishedAt
+        Instant finishedAt,
+        String anthropicBatchId
 ) {}

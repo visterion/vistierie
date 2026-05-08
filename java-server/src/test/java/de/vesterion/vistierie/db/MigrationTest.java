@@ -40,4 +40,21 @@ class MigrationTest extends PostgresTestBase {
                 """).query(String.class).list();
         assertThat(rows).containsExactly("last_tick_at", "schedule");
     }
+
+    @Test
+    void v4MigrationAddsBatchColumns() {
+        var llmCols = jdbc.sql("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_schema='vistierie' AND table_name='llm_calls'
+                  AND column_name = 'batch_id'
+                """).query(String.class).list();
+        assertThat(llmCols).containsExactly("batch_id");
+
+        var runCols = jdbc.sql("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_schema='vistierie' AND table_name='runs'
+                  AND column_name = 'anthropic_batch_id'
+                """).query(String.class).list();
+        assertThat(runCols).containsExactly("anthropic_batch_id");
+    }
 }

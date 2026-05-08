@@ -182,6 +182,22 @@ ORDER BY eur DESC
 LIMIT 20;
 ```
 
+### Batch vs on-demand spend
+
+```sql
+SELECT CASE WHEN batch_id IS NULL THEN 'on_demand' ELSE 'batched' END AS mode,
+       SUM(cost_micros) / 1000000.0 AS eur,
+       count(*)                       AS calls
+FROM vistierie.llm_calls
+WHERE tenant_id = ?
+GROUP BY mode
+ORDER BY eur DESC;
+```
+
+Batched calls are charged at 50 % of the on-demand rate (Anthropic Message
+Batches API pricing). Use this query to monitor the cost mix and confirm
+that batchable workloads are actually going through the batch endpoint.
+
 ### Failed runs for a tenant
 
 ```sql
