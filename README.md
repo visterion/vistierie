@@ -14,7 +14,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Java](https://img.shields.io/badge/java-25-blue)](https://openjdk.org)
 [![Spring Boot](https://img.shields.io/badge/spring%20boot-4.0-6DB33F)](https://spring.io/projects/spring-boot)
-[![PostgreSQL](https://img.shields.io/badge/postgresql-16-336791)](https://postgresql.org)
+[![PostgreSQL](https://img.shields.io/badge/postgresql-17-336791)](https://postgresql.org)
 [![Tests](https://img.shields.io/badge/tests-85%20passing-brightgreen)](https://github.com/visterion/vistierie/actions/workflows/docker.yml)
 
 **Docker image:** [`ghcr.io/visterion/vistierie:main`](https://github.com/visterion/vistierie/pkgs/container/vistierie) for the rolling `main` branch.
