@@ -2,11 +2,15 @@
 
 ## Overview
 
-Vistierie is a tenant-scoped, audited, kill-switchable LLM gateway. Every call
-is authenticated with a bearer token, resolved against a routing policy, forwarded
-to the configured provider (Anthropic in Slice 1), and recorded in the `llm_calls`
-audit table. Slice 1 ships two synchronous endpoints: `POST /llm/complete` and
-`POST /llm/vision`. Agent orchestration and run management are planned for Slice 2.
+Vistierie is a tenant-scoped, audited, kill-switchable LLM gateway and agent
+framework. Every call is authenticated with a bearer token, resolved against
+a routing policy, forwarded to the configured provider (Anthropic), and
+recorded in the `llm_calls` audit table.
+
+Two surfaces:
+- **Synchronous LLM gateway** — `POST /llm/complete`, `POST /llm/vision`.
+- **Agent framework** — `POST /agents`, `POST /agents/{name}/run`, `GET /runs/...`.
+  See [agents.md](agents.md) for the agent and tool model.
 
 ---
 
@@ -271,6 +275,89 @@ Read the current kill-switch state for a tenant.
 ```
 
 `until` is omitted (null) when the tenant is not currently killed.
+
+---
+
+## Agents
+
+Tenant-scoped CRUD on agent definitions. Tool definition shape and webhook
+contract are documented in [agents.md](agents.md).
+
+### `POST /agents`
+
+Body:
+```json
+{
+  "name": "bee",
+  "system_prompt": "you are a bee",
+  "model_purpose": "summarize_cell",
+  "tools": [ /* see agents.md */ ],
+  "output_schema": { "type": "object", "properties": {"finding":{"type":"string"}}, "required": ["finding"] },
+  "max_turns": 10,
+  "max_run_seconds": 60,
+  "webhook_token": "secret-from-tenant"
+}
+```
+
+Returns `201 Created` with the persisted agent (including `id`, `version`,
+timestamps). Validation errors return `400` with the failing field.
+
+### `GET /agents`, `GET /agents/{name}`
+
+List or retrieve agents in the calling tenant.
+
+### `PUT /agents/{name}`
+
+Replace the agent definition. Increments `version`. Same body shape as
+`POST /agents` (without `name`).
+
+### `PATCH /agents/{name}`
+
+Partial update — currently supports `paused: true|false` to halt or resume
+new run triggers without deleting the agent.
+
+### `DELETE /agents/{name}`
+
+Removes the agent. Fails with `409 Conflict` if any other agent in the
+tenant still references it as a subagent target.
+
+---
+
+## Runs
+
+### `POST /agents/{name}/run`
+
+Body:
+```json
+{
+  "payload": { "any": "json" },
+  "completion_webhook": "http://hivemem:8080/runs/done",
+  "completion_webhook_token": "another-secret"
+}
+```
+
+Returns `202 Accepted`:
+```json
+{ "run_id": "01J...", "agent_name": "bee", "agent_version": 3, "status": "queued" }
+```
+
+`409 Conflict` if the agent is paused.
+
+### `GET /runs/{run_id}`
+
+Returns the run detail (status, output, error, started/finished, summary,
+parent run id, child status counts). Optional `?wait_seconds=N` (max 60)
+turns this into a long-poll that returns as soon as the run reaches
+`done`/`failed` or the timeout expires. See [agents.md](agents.md#long-poll).
+
+### `GET /runs`
+
+Lists the calling tenant's runs (newest first, capped).
+
+### `GET /runs/{run_id}/events`
+
+Returns the event timeline for the run. Useful for observability and for
+walking parent → child run trees.
 
 ---
 

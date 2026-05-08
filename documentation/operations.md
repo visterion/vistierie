@@ -166,3 +166,48 @@ After upgrade, verify liveness and readiness:
 curl -sf http://localhost:8090/healthz
 curl -sf http://localhost:8090/readyz
 ```
+
+---
+
+## Agent runs
+
+### Cost rollup by run
+
+```sql
+SELECT run_id, SUM(cost_micros) / 1000000.0 AS eur
+FROM vistierie.llm_calls
+WHERE run_id IS NOT NULL
+GROUP BY run_id
+ORDER BY eur DESC
+LIMIT 20;
+```
+
+### Failed runs for a tenant
+
+```sql
+SELECT id, agent_id, error, finished_at
+FROM vistierie.runs
+WHERE status = 'failed' AND tenant_id = ?
+ORDER BY finished_at DESC
+LIMIT 50;
+```
+
+### Walking a parent → child tree
+
+```sql
+SELECT id, agent_id, status, started_at, finished_at
+FROM vistierie.runs
+WHERE parent_run_id = ?
+ORDER BY started_at;
+```
+
+Or via the API: `GET /runs/{id}` returns `children_summary` (status counts);
+`GET /runs/{id}/events` lists `subagent_spawned` events with the
+`child_run_id` to drill into.
+
+### Long-poll caveat
+
+`GET /runs/{id}?wait_seconds=N` is in-process. A Vistierie restart drops
+all open polls. Clients MUST handle a `running` response (timeout reached
+without terminal state) and re-poll instead of relying on the request to
+block indefinitely.

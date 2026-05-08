@@ -1,20 +1,16 @@
 # Architecture
 
-## Slice 1 scope
+## Scope (Slices 1 + 2)
 
-Slice 1 is the **LLM gateway** only. It covers:
+- **Slice 1 — gateway:** tenants, auth, kill-switch, routing, synchronous
+  `POST /llm/complete` and `POST /llm/vision`, Anthropic provider, audit log.
+- **Slice 2 — agent framework:** tenant-scoped agent registration,
+  asynchronous run execution with parallel HTTP tools and recursive
+  subagents (with context shielding), long-poll, completion webhook,
+  per-run event timeline, opt-in stress harness.
 
-- Tenant management and bearer-token auth
-- Kill-switch (per-tenant, with optional expiry)
-- Routing (purpose-keyed model selection per tenant)
-- Two synchronous endpoints: `POST /llm/complete` and `POST /llm/vision`
-- Anthropic provider (RestClient, no SDK)
-- Full audit log in `vistierie.llm_calls`
-- Liveness / readiness probes
-
-**Out of scope in Slice 1:** agent registration, run management, webhook
-dispatch, scheduler. These are planned for Slice 2, which will add the
-`agents`, `runs`, and `run_events` tables.
+**Out of scope:** scheduler/cron triggers, multi-tenant analytics dashboard,
+self-serve routing config (still operator-edited).
 
 ---
 
@@ -92,11 +88,35 @@ Listen port: `8090`
 
 ---
 
-## Slice 2 preview
+## Agent framework (Slice 2)
 
-Slice 2 will add:
+Tables added in `V2__agents_runs_run_events.sql`: `agents`, `runs`,
+`run_events`. The `llm_calls` table gained a nullable `run_id` column so
+LLM call audits can be aggregated per agent run.
 
-- `agents` table — registered webhook endpoints with health-check URLs
-- `runs` / `run_events` tables — parent/child run hierarchy
-- Webhook dispatcher — delivers agent activation payloads with retry
-- Scheduler — cron-based wake-ups firing webhooks on schedule
+```
+consumer ── POST /agents/{name}/run ──▶ RunController
+                                         │
+                                         ▼
+                                  AgentDispatcher  (writes runs row, queues async)
+                                         │
+                                         ▼
+                                    AgentRunner  (virtual-thread executor)
+                                  ┌──────┴───────┐
+                                  ▼              ▼
+                          ToolDispatcher    AgentRunner (recursive child run)
+                          (parallel HTTP)   (context shielded — only output
+                                             is returned to parent)
+                                  │              │
+                                  ▼              ▼
+                            consumer       AnthropicProvider
+                          tool webhooks    (LlmCallRecorder ─▶ llm_calls)
+```
+
+Context shielding: a parent run never sees a child's system prompt, turns,
+or intermediate tool calls — only the validated structured `output`. See
+[agents.md](agents.md) for the agent definition and tool format.
+
+Long-polls and completion webhooks are in-process (no Redis, no DB queue);
+a Vistierie restart drops open polls and re-fires pending webhooks based on
+the persisted run state.
