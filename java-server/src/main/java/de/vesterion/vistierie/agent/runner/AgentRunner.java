@@ -1,6 +1,7 @@
 package de.vesterion.vistierie.agent.runner;
 
 import de.vesterion.vistierie.agents.AgentRepository;
+import de.vesterion.vistierie.agents.dto.ToolDef;
 import de.vesterion.vistierie.audit.LlmCallRecorder;
 import de.vesterion.vistierie.kill.KillSwitchService;
 import de.vesterion.vistierie.pricing.PriceTable;
@@ -15,9 +16,12 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 @Component
 public class AgentRunner {
@@ -32,6 +36,7 @@ public class AgentRunner {
     private final TenantRepository tenants;
     private final ToolUseParser parser;
     private final OutputSchemaValidator schema;
+    private final ToolDispatcher toolDispatcher;
     private final ObjectMapper mapper;
 
     public AgentRunner(AgentRepository agents, RunStore runs,
@@ -39,6 +44,7 @@ public class AgentRunner {
                        PriceTable prices, LlmCallRecorder recorder,
                        KillSwitchService kill, TenantRepository tenants,
                        ToolUseParser parser, OutputSchemaValidator schema,
+                       ToolDispatcher toolDispatcher,
                        ObjectMapper mapper) {
         this.agents = agents;
         this.runs = runs;
@@ -50,6 +56,7 @@ public class AgentRunner {
         this.tenants = tenants;
         this.parser = parser;
         this.schema = schema;
+        this.toolDispatcher = toolDispatcher;
         this.mapper = mapper;
     }
 
@@ -59,16 +66,16 @@ public class AgentRunner {
                                String completionWebhook, String completionWebhookToken) {
         var runId = newUlid();
         var agent = agents.findById(agentId).orElseThrow();
-        var snapshot = mapper.valueToTree(Map.of(
-                "name", agent.name(),
-                "system_prompt", agent.systemPrompt(),
-                "model_purpose", agent.modelPurpose(),
-                "tools", agent.tools(),
-                "output_schema", agent.outputSchema(),
-                "max_turns", agent.maxTurns(),
-                "max_run_seconds", agent.maxRunSeconds(),
-                "webhook_token", agent.webhookToken()
-        ));
+        var snap = mapper.createObjectNode();
+        snap.put("name", agent.name());
+        snap.put("system_prompt", agent.systemPrompt());
+        snap.put("model_purpose", agent.modelPurpose());
+        snap.set("tools", agent.tools());
+        snap.set("output_schema", agent.outputSchema());
+        snap.put("max_turns", agent.maxTurns());
+        snap.put("max_run_seconds", agent.maxRunSeconds());
+        snap.put("webhook_token", agent.webhookToken());
+        JsonNode snapshot = snap;
         runs.create(runId, tenantId, agentId, snapshot, agent.version(),
                 parentRunId, trigger, payload, completionWebhook, completionWebhookToken);
         execute(runId);
@@ -134,8 +141,72 @@ public class AgentRunner {
                 return;
             }
 
-            runs.markTerminal(runId, "failed", null, "tool_use not yet implemented", null);
-            return;
+            // tool_use turn
+            List<ToolUseParser.Block> blocks = parser.parse(pRes.contentBlocks());
+            runs.recordEvent(runId, "info", "tool_dispatched",
+                    mapper.valueToTree(Map.of("count", blocks.size())));
+
+            Map<String, JsonNode> toolDefByName = new HashMap<>();
+            for (JsonNode t : snap.path("tools")) toolDefByName.put(t.path("name").asText(), t);
+
+            var futures = new ArrayList<CompletableFuture<ToolResult>>();
+            for (var b : blocks) {
+                var def = toolDefByName.get(b.name());
+                if (def == null) {
+                    var err = new ToolResult(b.id(), true,
+                            mapper.createObjectNode().put("error", "unknown tool: " + b.name()));
+                    var f = new CompletableFuture<ToolResult>();
+                    f.complete(err);
+                    futures.add(f);
+                    continue;
+                }
+                if ("subagent".equals(def.path("type").asText())) {
+                    runs.markTerminal(runId, "failed", null, "subagent dispatch not yet wired", null);
+                    return;
+                }
+                ToolDef td;
+                try {
+                    td = mapper.treeToValue(def, ToolDef.class);
+                } catch (Exception e) {
+                    runs.markTerminal(runId, "failed", null, "bad_tool_def: " + e.getMessage(), null);
+                    return;
+                }
+                futures.add(toolDispatcher.dispatchHttp(td, b, runId, snap.path("webhook_token").asText()));
+            }
+
+            var assistantMsg = mapper.createObjectNode();
+            assistantMsg.put("role", "assistant");
+            assistantMsg.set("content", pRes.contentBlocks());
+            messages.add(assistantMsg);
+
+            boolean anyError = false;
+            String firstError = null;
+            var resultsArr = mapper.createArrayNode();
+            for (var f : futures) {
+                var res = f.join();
+                var resBlock = mapper.createObjectNode();
+                resBlock.put("type", "tool_result");
+                resBlock.put("tool_use_id", res.toolUseId());
+                resBlock.set("content", res.content());
+                if (res.isError()) {
+                    resBlock.put("is_error", true);
+                    if (!anyError) { anyError = true; firstError = res.content().path("error").asText(); }
+                }
+                resultsArr.add(resBlock);
+                runs.recordEvent(runId, res.isError() ? "error" : "info",
+                        res.isError() ? "tool_failed" : "tool_returned",
+                        mapper.valueToTree(Map.of("tool_use_id", res.toolUseId())));
+            }
+
+            if (anyError) {
+                runs.markTerminal(runId, "failed", null, "tool_error: " + firstError, null);
+                return;
+            }
+
+            var userMsg = mapper.createObjectNode();
+            userMsg.put("role", "user");
+            userMsg.set("content", resultsArr);
+            messages.add(userMsg);
         }
 
         runs.markTerminal(runId, "failed", null, "max_turns_exceeded", null);
