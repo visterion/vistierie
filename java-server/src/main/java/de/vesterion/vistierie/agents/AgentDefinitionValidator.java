@@ -63,6 +63,16 @@ public class AgentDefinitionValidator {
         }
     }
 
+    public void validateSchedule(String cron) {
+        if (cron == null || cron.isBlank()) return;
+        try {
+            org.springframework.scheduling.support.CronExpression.parse(cron.trim());
+        } catch (IllegalArgumentException e) {
+            throw new InvalidDefinitionException(
+                    "schedule is not a valid Spring 6-field cron expression: " + e.getMessage());
+        }
+    }
+
     public static class InvalidDefinitionException extends RuntimeException {
         public InvalidDefinitionException(String m) { super(m); }
     }

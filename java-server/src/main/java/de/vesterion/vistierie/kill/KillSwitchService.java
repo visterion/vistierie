@@ -3,6 +3,7 @@ package de.vesterion.vistierie.kill;
 import de.vesterion.vistierie.tenants.TenantRepository;
 import org.springframework.stereotype.Component;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -21,12 +22,16 @@ public class KillSwitchService {
     }
 
     private final TenantRepository repo;
+    private final Clock clock;
 
-    public KillSwitchService(TenantRepository repo) { this.repo = repo; }
+    public KillSwitchService(TenantRepository repo, Clock clock) {
+        this.repo = repo;
+        this.clock = clock;
+    }
 
     public void check(UUID tenantId) {
         var t = repo.findById(tenantId).orElseThrow();
-        if (t.killUntil() != null && t.killUntil().isAfter(Instant.now())) {
+        if (t.killUntil() != null && t.killUntil().isAfter(clock.instant())) {
             throw new KilledException(t.killReason(), t.killUntil());
         }
     }

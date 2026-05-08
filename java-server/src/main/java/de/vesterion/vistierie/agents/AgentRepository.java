@@ -6,6 +6,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.sql.SQLException;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -25,36 +26,39 @@ public class AgentRepository {
                        String systemPrompt, String modelPurpose,
                        JsonNode tools, JsonNode outputSchema,
                        int maxTurns, int maxRunSeconds,
-                       String webhookToken, boolean paused) {
+                       String webhookToken, boolean paused,
+                       String schedule) {
         jdbc.sql("""
                 INSERT INTO vistierie.agents
                   (id, tenant_id, name, system_prompt, model_purpose,
                    tools, output_schema, max_turns, max_run_seconds,
-                   webhook_token, paused)
-                VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?)
+                   webhook_token, paused, schedule)
+                VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?)
                 """)
                 .params(id, tenantId, name, systemPrompt, modelPurpose,
                         toJsonString(tools), toJsonString(outputSchema),
-                        maxTurns, maxRunSeconds, webhookToken, paused)
+                        maxTurns, maxRunSeconds, webhookToken, paused, schedule)
                 .update();
     }
 
     public void replace(UUID id, String systemPrompt, String modelPurpose,
                         JsonNode tools, JsonNode outputSchema,
                         int maxTurns, int maxRunSeconds,
-                        String webhookToken, boolean paused) {
+                        String webhookToken, boolean paused,
+                        String schedule) {
         jdbc.sql("""
                 UPDATE vistierie.agents
                 SET system_prompt = ?, model_purpose = ?,
                     tools = ?::jsonb, output_schema = ?::jsonb,
                     max_turns = ?, max_run_seconds = ?,
                     webhook_token = ?, paused = ?,
+                    schedule = ?,
                     version = version + 1, updated_at = now()
                 WHERE id = ?
                 """)
                 .params(systemPrompt, modelPurpose,
                         toJsonString(tools), toJsonString(outputSchema),
-                        maxTurns, maxRunSeconds, webhookToken, paused, id)
+                        maxTurns, maxRunSeconds, webhookToken, paused, schedule, id)
                 .update();
     }
 
@@ -86,6 +90,17 @@ public class AgentRepository {
                 .param(tenantId).query(this::map).list();
     }
 
+    public List<Agent> findScheduled() {
+        return jdbc.sql(SELECT_BASE
+                + " WHERE schedule IS NOT NULL AND NOT paused ORDER BY id")
+                .query(this::map).list();
+    }
+
+    public void updateLastTick(UUID id, Instant ts) {
+        jdbc.sql("UPDATE vistierie.agents SET last_tick_at = ? WHERE id = ?")
+                .params(java.sql.Timestamp.from(ts), id).update();
+    }
+
     public boolean anyReferencesSubagent(UUID tenantId, String targetName, UUID excludeAgentId) {
         return jdbc.sql("""
                 SELECT count(*) FROM vistierie.agents
@@ -103,11 +118,13 @@ public class AgentRepository {
     private static final String SELECT_BASE = """
             SELECT id, tenant_id, name, system_prompt, model_purpose,
                    tools, output_schema, max_turns, max_run_seconds,
-                   webhook_token, paused, version, created_at, updated_at
+                   webhook_token, paused, version, created_at, updated_at,
+                   schedule, last_tick_at
             FROM vistierie.agents
             """;
 
     private Agent map(java.sql.ResultSet rs, int n) throws SQLException {
+        var lastTick = rs.getTimestamp("last_tick_at");
         return new Agent(
                 rs.getObject("id", UUID.class),
                 rs.getObject("tenant_id", UUID.class),
@@ -122,7 +139,9 @@ public class AgentRepository {
                 rs.getBoolean("paused"),
                 rs.getInt("version"),
                 rs.getTimestamp("created_at").toInstant(),
-                rs.getTimestamp("updated_at").toInstant()
+                rs.getTimestamp("updated_at").toInstant(),
+                rs.getString("schedule"),
+                lastTick == null ? null : lastTick.toInstant()
         );
     }
 

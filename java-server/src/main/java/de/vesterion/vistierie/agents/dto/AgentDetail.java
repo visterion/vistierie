@@ -11,5 +11,7 @@ public record AgentDetail(
         List<ToolDef> tools, JsonNode output_schema,
         int max_turns, int max_run_seconds,
         boolean paused, int version,
-        Instant created_at, Instant updated_at
+        Instant created_at, Instant updated_at,
+        String schedule,
+        Instant last_tick_at
 ) {}

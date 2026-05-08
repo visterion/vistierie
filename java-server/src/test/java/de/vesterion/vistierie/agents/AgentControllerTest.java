@@ -93,6 +93,53 @@ class AgentControllerTest extends PostgresTestBase {
                 .andExpect(status().isBadRequest());
     }
 
+    @Test
+    void createWithScheduleEchoesIt() throws Exception {
+        var body = """
+                { "name":"sched-1","system_prompt":"p","model_purpose":"summarize_cell",
+                  "tools":[],"webhook_token":"wt","schedule":"0 */5 * * * *" }
+                """;
+        mvc.perform(post("/agents").header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.schedule").value("0 */5 * * * *"));
+    }
+
+    @Test
+    void createWithInvalidScheduleRejected() throws Exception {
+        var body = """
+                { "name":"bad-sched","system_prompt":"p","model_purpose":"summarize_cell",
+                  "tools":[],"webhook_token":"wt","schedule":"not-a-cron" }
+                """;
+        mvc.perform(post("/agents").header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void patchSchedule() throws Exception {
+        var create = """
+                { "name":"sched-2","system_prompt":"p","model_purpose":"summarize_cell",
+                  "tools":[],"webhook_token":"wt" }
+                """;
+        mvc.perform(post("/agents").header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content(create))
+                .andExpect(status().isCreated());
+
+        mvc.perform(patch("/agents/sched-2").header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"schedule\":\"0 0 0 * * *\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.schedule").value("0 0 0 * * *"));
+
+        // Clear via empty string
+        mvc.perform(patch("/agents/sched-2").header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"schedule\":\"\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.schedule").doesNotExist());
+    }
+
     @Test void deleteBlockedWhenReferenced() throws Exception {
         var beeBody = """
                 { "name": "bee", "system_prompt": "...", "model_purpose": "bee",

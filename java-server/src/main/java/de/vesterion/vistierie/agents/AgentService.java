@@ -25,13 +25,14 @@ public class AgentService {
         var existingNames = repo.findByTenant(tenantId).stream().map(Agent::name).toList();
         for (var t : req.tools()) validator.validateTool(t, existingNames);
 
+        validator.validateSchedule(req.schedule());
         var id = UUID.randomUUID();
         var toolsJson = mapper.valueToTree(req.tools());
         repo.insert(id, tenantId, req.name(), req.system_prompt(), req.model_purpose(),
                 toolsJson, req.output_schema(),
                 req.max_turns() == null ? 25 : req.max_turns(),
                 req.max_run_seconds() == null ? 1800 : req.max_run_seconds(),
-                req.webhook_token(), false);
+                req.webhook_token(), false, req.schedule());
         return toDetail(repo.findById(id).orElseThrow());
     }
 
@@ -41,12 +42,13 @@ public class AgentService {
         var existing = repo.findByTenant(tenantId).stream()
                 .map(Agent::name).filter(n -> !n.equals(name)).toList();
         for (var t : req.tools()) validator.validateTool(t, existing);
+        validator.validateSchedule(req.schedule());
         var toolsJson = mapper.valueToTree(req.tools());
         repo.replace(a.id(), req.system_prompt(), req.model_purpose(),
                 toolsJson, req.output_schema(),
                 req.max_turns() == null ? 25 : req.max_turns(),
                 req.max_run_seconds() == null ? 1800 : req.max_run_seconds(),
-                req.webhook_token(), a.paused());
+                req.webhook_token(), a.paused(), req.schedule());
         return toDetail(repo.findById(a.id()).orElseThrow());
     }
 
@@ -60,6 +62,14 @@ public class AgentService {
         int newMaxSeconds = req.max_run_seconds() != null ? req.max_run_seconds() : a.maxRunSeconds();
         var newToken = req.webhook_token() != null ? req.webhook_token() : a.webhookToken();
         boolean newPaused = req.paused() != null ? req.paused() : a.paused();
+        String newSchedule;
+        if (req.schedule() != null) {
+            // Treat empty string as "clear schedule"
+            newSchedule = req.schedule().isBlank() ? null : req.schedule();
+            validator.validateSchedule(newSchedule);
+        } else {
+            newSchedule = a.schedule();
+        }
 
         if (req.tools() != null) {
             var existing = repo.findByTenant(tenantId).stream()
@@ -70,7 +80,7 @@ public class AgentService {
             validator.validateOutputSchemaIfPresent(req.output_schema());
         }
         repo.replace(a.id(), newSysPrompt, newPurpose, newTools, newOutSchema,
-                newMaxTurns, newMaxSeconds, newToken, newPaused);
+                newMaxTurns, newMaxSeconds, newToken, newPaused, newSchedule);
         return toDetail(repo.findById(a.id()).orElseThrow());
     }
 
@@ -99,7 +109,8 @@ public class AgentService {
             return new AgentDetail(a.id().toString(), a.name(),
                     a.systemPrompt(), a.modelPurpose(), tools, a.outputSchema(),
                     a.maxTurns(), a.maxRunSeconds(), a.paused(), a.version(),
-                    a.createdAt(), a.updatedAt());
+                    a.createdAt(), a.updatedAt(),
+                    a.schedule(), a.lastTickAt());
         } catch (Exception e) { throw new RuntimeException(e); }
     }
 

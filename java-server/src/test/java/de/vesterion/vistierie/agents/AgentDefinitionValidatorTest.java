@@ -63,4 +63,23 @@ class AgentDefinitionValidatorTest {
                 .isInstanceOf(AgentDefinitionValidator.InvalidDefinitionException.class)
                 .hasMessageContaining("webhook_url");
     }
+
+    @Test void validateScheduleAcceptsNullAndBlank() {
+        v.validateSchedule(null);
+        v.validateSchedule("");
+        v.validateSchedule("   ");
+    }
+
+    @Test void validateScheduleAcceptsValidSpringCron() {
+        v.validateSchedule("0 0 0 * * *");      // daily at midnight
+        v.validateSchedule("*/30 * * * * *");   // every 30 seconds
+    }
+
+    @Test void validateScheduleRejectsInvalid() {
+        assertThatThrownBy(() -> v.validateSchedule("not-a-cron"))
+                .isInstanceOf(AgentDefinitionValidator.InvalidDefinitionException.class)
+                .hasMessageContaining("schedule");
+        assertThatThrownBy(() -> v.validateSchedule("* * * *"))   // 4 fields, Spring wants 6
+                .isInstanceOf(AgentDefinitionValidator.InvalidDefinitionException.class);
+    }
 }

@@ -1,5 +1,6 @@
 docs/
 CLAUDE.md
+AGENTS.md
 target/
 node_modules/
 dist/
