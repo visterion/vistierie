@@ -97,6 +97,12 @@ public class RunRepository {
             FROM vistierie.runs
             """;
 
+    public java.util.List<Run> findOpenBatchParents() {
+        return jdbc.sql(SELECT_BASE
+                + " WHERE anthropic_batch_id IS NOT NULL AND status IN ('queued','running') ORDER BY started_at NULLS LAST")
+                .query(this::map).list();
+    }
+
     public void setAnthropicBatchId(String runId, String anthropicBatchId) {
         jdbc.sql("UPDATE vistierie.runs SET anthropic_batch_id = ? WHERE id = ?")
                 .params(anthropicBatchId, runId).update();
