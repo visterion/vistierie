@@ -74,7 +74,7 @@ flowchart LR
 
     LLM[Anthropic API<br/>complete · vision]
 
-    App -->|POST /llm/complete<br/>POST /agents/{name}/run<br/>GET /runs/{id}?wait_seconds| Auth
+    App -->|"POST /llm/complete<br/>POST /agents/{name}/run<br/>GET /runs/{id}?wait_seconds"| Auth
     Auth --> Kill --> Routing --> Runner
     Runner -->|HTTPS| LLM
     Runner -.->|HTTP tool calls<br/>Bearer agent.webhook_token| Tools
