@@ -49,6 +49,9 @@ public class AnthropicProvider implements LlmProvider {
         if (req.temperature() != null) body.put("temperature", req.temperature());
         if (req.system() != null) body.put("system", req.system());
         body.put("messages", req.messages());
+        if (req.tools() != null && !req.tools().isEmpty()) {
+            body.put("tools", req.tools());
+        }
         return call(body);
     }
 

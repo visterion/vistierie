@@ -94,4 +94,32 @@ class AnthropicProviderTest {
             assertThat(e.errorCode()).isEqualTo("overloaded_error");
         }
     }
+
+    @Test void toolUseRoundTrip() {
+        stubFor(post(urlEqualTo("/v1/messages")).willReturn(okJson("""
+                {"id":"m","type":"message","role":"assistant","model":"claude-haiku-4-5",
+                 "content":[
+                   {"type":"text","text":"thinking"},
+                   {"type":"tool_use","id":"toolu_1","name":"cell.read","input":{"id":"c1"}}
+                 ],
+                 "stop_reason":"tool_use",
+                 "usage":{"input_tokens":10,"output_tokens":4,
+                          "cache_creation_input_tokens":0,"cache_read_input_tokens":0}}
+                """)));
+        var tools = java.util.List.of(java.util.Map.<String, Object>of(
+                "name", "cell.read",
+                "description", "read",
+                "input_schema", java.util.Map.of("type", "object",
+                        "properties", java.util.Map.of("id", java.util.Map.of("type", "string")),
+                        "required", java.util.List.of("id"))
+        ));
+        var req = new ProviderRequest("claude-haiku-4-5", 256, null, "system",
+                java.util.List.of(java.util.Map.of("role", "user", "content", "find c1")),
+                tools, null, null);
+        var res = provider.complete(req);
+        assertThat(res.stopReason()).isEqualTo("tool_use");
+        verify(postRequestedFor(urlEqualTo("/v1/messages"))
+                .withRequestBody(containing("\"name\":\"cell.read\""))
+                .withRequestBody(containing("\"tools\":")));
+    }
 }
