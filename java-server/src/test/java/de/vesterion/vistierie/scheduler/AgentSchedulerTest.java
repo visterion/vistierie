@@ -111,4 +111,38 @@ class AgentSchedulerTest extends PostgresTestBase {
         scheduler.tick();
         assertThat(runs.findByTenant(tenantId, 10)).hasSize(1);
     }
+
+    @Test
+    void skipIfRunningRecordsCronSkippedAndDoesNotFireSecondRun() {
+        stub.script(StubLlmScripts.Turn.endTurn("{\"x\":\"v\"}"));
+
+        // First fire at 00:01:00
+        MutableClockConfig.NOW.set(Instant.parse("2026-05-08T00:01:00Z"));
+        scheduler.tick();
+        Awaitility.await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
+                assertThat(runs.findByTenant(tenantId, 10)).hasSize(1));
+
+        // Force the run back to 'running' so the second tick sees it as open.
+        var firstRunId = runs.findByTenant(tenantId, 10).get(0).id();
+        jdbc.sql("UPDATE vistierie.runs SET status='running', finished_at=NULL WHERE id=?")
+                .param(firstRunId).update();
+
+        // Advance to next cron boundary 00:02:00, tick.
+        MutableClockConfig.NOW.set(Instant.parse("2026-05-08T00:02:00Z"));
+        scheduler.tick();
+
+        // No second run.
+        assertThat(runs.findByTenant(tenantId, 10)).hasSize(1);
+
+        // cron_skipped event recorded on the open run.
+        var events = jdbc.sql(
+                "SELECT type FROM vistierie.run_events WHERE run_id=? AND type='cron_skipped'")
+                .param(firstRunId).query(String.class).list();
+        assertThat(events).containsExactly("cron_skipped");
+
+        // last_tick_at advanced regardless.
+        assertThat(agents.findById(agentId).orElseThrow().lastTickAt())
+                .isAfterOrEqualTo(Instant.parse("2026-05-08T00:02:00Z"));
+    }
+
 }
