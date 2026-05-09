@@ -1,9 +1,12 @@
 package de.vesterion.vistierie.audit.admin;
 
+import de.vesterion.vistierie.audit.admin.dto.AdminLlmCallDetail;
 import de.vesterion.vistierie.audit.admin.dto.AdminLlmCallRow;
 import de.vesterion.vistierie.audit.admin.dto.AdminRunSummary;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
 import java.util.List;
@@ -54,5 +57,11 @@ public class AdminAuditController {
         List<AdminLlmCallRow> items = repo.findLlmCalls(tenant, realm, purpose, provider, model, endpoint,
                 status, runId, from, to, limit, offset);
         return Map.of("items", items, "limit", limit, "offset", offset);
+    }
+
+    @GetMapping("/llm-calls/{id}")
+    public AdminLlmCallDetail llmCallDetail(@PathVariable String id) {
+        return repo.findCallDetail(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "call not found"));
     }
 }
