@@ -3,7 +3,9 @@ package de.vesterion.vistierie.agent.runner;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import de.vesterion.vistierie.PostgresTestBase;
 import de.vesterion.vistierie.agents.AgentRepository;
-import de.vesterion.vistierie.routing.RoutingConfig;
+import de.vesterion.vistierie.routing.RoutingRule;
+import de.vesterion.vistierie.routing.RoutingRuleRepository;
+import de.vesterion.vistierie.routing.RoutingResolver;
 import de.vesterion.vistierie.runs.Run;
 import de.vesterion.vistierie.runs.RunStore;
 import de.vesterion.vistierie.tenants.TenantRepository;
@@ -16,7 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.ActiveProfiles;
 import tools.jackson.databind.ObjectMapper;
 
-import java.util.HashMap;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -35,7 +37,8 @@ class AgentRunnerToolsTest extends PostgresTestBase {
     @Autowired RunStore runStore;
     @Autowired StubLlmProvider stub;
     @Autowired ObjectMapper mapper;
-    @Autowired RoutingConfig routingConfig;
+    @Autowired RoutingRuleRepository routingRules;
+    @Autowired RoutingResolver routingResolver;
 
     @BeforeEach void up() {
         if (wm == null) { wm = new WireMockServer(0); wm.start(); }
@@ -45,23 +48,20 @@ class AgentRunnerToolsTest extends PostgresTestBase {
     }
     @AfterEach void resetWm() { wm.resetAll(); }
 
-    private void registerRouting(String tenantName) {
-        var t = new RoutingConfig.TenantRouting();
-        t.setPurposes(new HashMap<>());
-        var rule = new RoutingConfig.Rule();
-        rule.setProvider("anthropic");
-        rule.setModel("claude-haiku-4-5");
-        rule.setAllowOverride(false);
-        t.getPurposes().put("summarize_cell", rule);
-        t.setDefault(rule);
-        routingConfig.getTenants().put(tenantName, t);
+    private void registerRouting(UUID tenantId) {
+        var now = Instant.now();
+        routingRules.insert(new RoutingRule(UUID.randomUUID(), tenantId, null, null,
+                "anthropic", "claude-haiku-4-5", 1000, false, false, now, now));
+        routingRules.insert(new RoutingRule(UUID.randomUUID(), tenantId, null, "summarize_cell",
+                "anthropic", "claude-haiku-4-5", 500, false, false, now, now));
+        routingResolver.bumpVersion();
     }
 
     @Test void toolUseRoundTripWithThreeParallelTools() throws Exception {
         var tenantId = UUID.randomUUID();
         var tenantName = "tn-" + tenantId;
         tenants.insert(tenantId, tenantName, "h");
-        registerRouting(tenantName);
+        registerRouting(tenantId);
 
         stubFor(post(urlEqualTo("/tools/cell.search")).willReturn(okJson("{\"output\":{\"hits\":3}}")));
         stubFor(post(urlEqualTo("/tools/cell.read")).willReturn(okJson("{\"output\":{\"text\":\"abc\"}}")));
@@ -104,7 +104,7 @@ class AgentRunnerToolsTest extends PostgresTestBase {
         var tenantId = UUID.randomUUID();
         var tenantName = "tn-" + tenantId;
         tenants.insert(tenantId, tenantName, "h");
-        registerRouting(tenantName);
+        registerRouting(tenantId);
         stubFor(post(urlEqualTo("/tools/x")).willReturn(serverError()));
         var tools = mapper.createArrayNode();
         tools.add(mapper.valueToTree(Map.of(

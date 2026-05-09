@@ -199,6 +199,7 @@ schedule"; idempotency is the consumer's job.
 | **Context shielding** | Parent run records only `tool_result` summaries; child run keeps its own full transcript. JSON output schema enforced at the boundary. |
 | **Cron without ceremony** | `schedule: "0 0 * * * *"` on an agent — Vistierie does the rest. Skip-if-running prevents pile-up. |
 | **Batched runs at 50 % cost** | `POST /agents/{name}/batch` with up to 10 000 items routes through Anthropic's Message Batches API — half-price for tasks that tolerate < 1 h latency. Per-item output schema validation; partial-success aggregation on the parent run. |
+| **Realm-based privacy locks** | Rules with `locked=true` force sensitive realms (e.g. `medical`) to a specific provider regardless of any model override in the request body. |
 | **In-process long-poll** | `GET /runs/{id}?wait_seconds=30` — DeferredResult-backed, no Redis. |
 | **Completion webhook** | Bounded retries (0 s → 5 s → 30 s default) with `webhook_sent` / `webhook_failed` events on the run. |
 
@@ -212,18 +213,13 @@ schedule"; idempotency is the consumer's job.
 | **2 — Agent framework** | `POST /agents` CRUD, `POST /agents/{name}/run` (202 + async), parallel HTTP tools, recursive subagents with context shielding, long-poll, completion webhook, run-level event timeline | ✅ Released |
 | **3 — Scheduler** | `agents.schedule` cron field, `AgentScheduler` 30 s tick, skip-if-running, kill-switch-aware, `last_tick_at` diagnostics | ✅ Released |
 | **4 — Batches** | `POST /agents/{name}/batch` (up to 10 000 items), Anthropic Message Batches API integration at 50 % cost, parent + child run topology with partial-success aggregation, `BatchPollingService` (60 s tick) with kill-switch awareness, `llm_calls.batch_id` audit link | ✅ Released |
+| **5 — Vision attachments cache** | (open — TBD) | |
+| **6 — Per-realm provider routing + admin REST API** | DB-backed `routing_rules` table, `RoutingResolver` with realm+purpose matching and privacy-lock (`locked=true`) support, full CRUD via `/admin/routing-rules`, cross-tenant audit views (`/admin/runs`, `/admin/llm-calls`), auto-seeded wildcard default on tenant creation | ✅ Done |
 
-All slices are merged to `main`. The full test suite is **105 / 105 green**
-including a Postgres-backed integration suite, a real-`@Scheduled` E2E
-test, a real-batch-polling E2E test, and an opt-in concurrency stress
-harness (`mvn -Pstress test`).
-
-### On the roadmap
-
-| | |
-|---|---|
-| **Slice 5 — Vision attachments cache** | SeaweedFS-backed cache for vision inputs so the same `media_type+sha256` doesn't re-pay token costs across multiple agent runs. |
-| **Slice 6 — Per-realm provider routing** | The `realm` field is currently audit-only. Slice 6 makes it routable so e.g. anything `realm=medical` is forced onto a local Ollama provider, per spec §8. |
+All slices are merged to `main`. The full test suite is green including a
+Postgres-backed integration suite, a real-`@Scheduled` E2E test, a
+real-batch-polling E2E test, a realm-lock E2E test, and an opt-in
+concurrency stress harness (`mvn -Pstress test`).
 
 ---
 
