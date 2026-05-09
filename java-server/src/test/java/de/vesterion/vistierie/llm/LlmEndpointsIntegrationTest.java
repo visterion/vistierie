@@ -60,7 +60,7 @@ class LlmEndpointsIntegrationTest extends PostgresTestBase {
     @BeforeEach void setUp() {
         mvc = MockMvcBuilders.webAppContextSetup(wac).addFilter(authFilter).build();
         // wipe llm_calls between tests for clean assertions
-        jdbc.sql("TRUNCATE vistierie.llm_calls").update();
+        jdbc.sql("TRUNCATE vistierie.llm_call_bodies, vistierie.llm_calls").update();
     }
 
     @AfterEach void resetWm() { wm.resetAll(); }
