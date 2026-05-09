@@ -136,14 +136,13 @@ public class OpenAiCompatibleProvider implements LlmProvider {
         ArrayNode contentBlocks = synthesizeContentBlocks(text, msg.path("tool_calls"));
 
         JsonNode u = resp.path("usage");
-        int input = u.path("prompt_tokens").asInt(0);
-        int output = u.path("completion_tokens").asInt(0);
-        int cacheRead = u.path("prompt_tokens_details").path("cached_tokens").asInt(0);
+        int input = Math.max(0, u.path("prompt_tokens").asInt(0));
+        int output = Math.max(0, u.path("completion_tokens").asInt(0));
+        int cacheRead = Math.max(0, u.path("prompt_tokens_details").path("cached_tokens").asInt(0));
         // OpenAI/xAI bill cached input as discount on input — we record it separately so
         // PriceTable can apply the cache_read rate. Subtract from input to avoid double-count.
-        if (cacheRead > 0 && cacheRead <= input) {
-            input -= cacheRead;
-        }
+        if (cacheRead > input) cacheRead = input;
+        input -= cacheRead;
         var usage = new Usage(input, output, 0, cacheRead);
 
         return new ProviderResponse(text, stopReason, usage,
