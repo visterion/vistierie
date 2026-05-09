@@ -205,7 +205,7 @@ tenant.
 ### Request
 
 ```json
-{ "name": "draczl" }
+{ "name": "dracul" }
 ```
 
 ### Response `201 Created`
@@ -213,7 +213,7 @@ tenant.
 ```json
 {
   "id":    "550e8400-e29b-41d4-a716-446655440001",
-  "name":  "draczl",
+  "name":  "dracul",
   "token": "a3f9c2d1e8b7..."
 }
 ```

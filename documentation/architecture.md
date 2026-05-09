@@ -79,7 +79,7 @@ Step by step:
 
 ## Deployment topology (v1)
 
-Vistierie is co-located with its consumers (HiveMem, Draczl) on one host,
+Vistierie is co-located with its consumers (HiveMem, Dracul) on one host,
 communicating over a private Docker network. No TLS or HMAC between services
 in v1 — the private network is the trust boundary (see spec §8.1).
 
