@@ -22,4 +22,6 @@ vistierie:
     base-url: https://api.anthropic.com
     timeout-seconds: 60
   mock-llm: ${VISTIERIE_MOCK_LLM:false}
+  audit:
+    body-retention-days: 7
 

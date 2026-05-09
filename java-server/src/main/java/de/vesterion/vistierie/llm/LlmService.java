@@ -60,22 +60,22 @@ public class LlmService {
             var pRes = provider.complete(pReq);
             var dur = (int) ((System.nanoTime() - start) / 1_000_000);
             var cost = prices.costMicros(decision.model(), pRes.usage());
-            recorder.insert(new LlmCallRecorder.Row(
+            recorder.insertWithBody(new LlmCallRecorder.Row(
                     id, tenantId, req.purpose(), req.realm(),
                     decision.provider(), decision.model(), "complete",
                     pRes.usage().inputTokens(), pRes.usage().outputTokens(),
                     pRes.usage().cacheCreationInputTokens(), pRes.usage().cacheReadInputTokens(),
-                    cost, dur, "ok", null, null, null));
+                    cost, dur, "ok", null, null, null), pReq, pRes);
             return new LlmResponse(pRes.text(), pRes.stopReason(), pRes.usage(),
                     decision.provider(), decision.model(), cost, id);
         } catch (LlmProvider.ProviderException e) {
             var dur = (int) ((System.nanoTime() - start) / 1_000_000);
-            recorder.insert(new LlmCallRecorder.Row(
+            recorder.insertWithBody(new LlmCallRecorder.Row(
                     id, tenantId, req.purpose(), req.realm(),
                     decision.provider(), decision.model(), "complete",
                     0, 0, 0, 0, 0, dur,
                     e.statusCode() >= 500 ? "error" : "rate_limited",
-                    e.errorCode(), null, null));
+                    e.errorCode(), null, null), pReq, null);
             throw e;
         }
     }
@@ -94,6 +94,19 @@ public class LlmService {
         var decision = routing.resolve(tenant, req.realm(), req.purpose(), req.model());
         var provider = providers.get(decision.provider());
 
+        var pReq = new ProviderRequest(
+                decision.model(),
+                req.max_tokens() == null ? 1024 : req.max_tokens(),
+                null, null,
+                java.util.List.of(java.util.Map.of("role", "user", "content",
+                    java.util.List.of(
+                        java.util.Map.of("type", "image",
+                               "source", java.util.Map.of("type", "base64",
+                                                "media_type", req.image().media_type(),
+                                                "data", req.image().data())),
+                        java.util.Map.of("type", "text", "text", req.prompt())))),
+                null, null, null);
+
         var start = System.nanoTime();
         try {
             var pRes = provider.vision(decision.model(),
@@ -101,22 +114,22 @@ public class LlmService {
                     req.image().media_type(), req.image().data(), req.prompt());
             var dur = (int) ((System.nanoTime() - start) / 1_000_000);
             var cost = prices.costMicros(decision.model(), pRes.usage());
-            recorder.insert(new LlmCallRecorder.Row(
+            recorder.insertWithBody(new LlmCallRecorder.Row(
                     id, tenantId, req.purpose(), req.realm(),
                     decision.provider(), decision.model(), "vision",
                     pRes.usage().inputTokens(), pRes.usage().outputTokens(),
                     pRes.usage().cacheCreationInputTokens(), pRes.usage().cacheReadInputTokens(),
-                    cost, dur, "ok", null, null, null));
+                    cost, dur, "ok", null, null, null), pReq, pRes);
             return new LlmResponse(pRes.text(), pRes.stopReason(), pRes.usage(),
                     decision.provider(), decision.model(), cost, id);
         } catch (LlmProvider.ProviderException e) {
             var dur = (int) ((System.nanoTime() - start) / 1_000_000);
-            recorder.insert(new LlmCallRecorder.Row(
+            recorder.insertWithBody(new LlmCallRecorder.Row(
                     id, tenantId, req.purpose(), req.realm(),
                     decision.provider(), decision.model(), "vision",
                     0, 0, 0, 0, 0, dur,
                     e.statusCode() >= 500 ? "error" : "rate_limited",
-                    e.errorCode(), null, null));
+                    e.errorCode(), null, null), pReq, null);
             throw e;
         }
     }

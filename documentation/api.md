@@ -509,6 +509,51 @@ Response:
 
 ---
 
+## `/admin/cost`
+
+`GET /admin/cost?from=&to=&granularity=&group_by=&tenant=&realm=&purpose=&provider=&model=&endpoint=&status=`
+
+Cross-tenant cost rollup against `llm_calls`.
+
+| Param | Default | Description |
+|---|---|---|
+| `from`, `to` | last 7 days | ISO-8601, filter on `created_at` |
+| `granularity` | `hour` | `hour` \| `day` \| `none` |
+| `group_by` | `` | comma list: any of `tenant`, `realm`, `purpose`, `provider`, `model`, `endpoint`, `status` |
+| `tenant`, `realm`, `purpose`, `provider`, `model`, `endpoint` | – | exact filter |
+| `status` | – | repeatable filter (`?status=ok&status=error`) |
+
+Response:
+
+```json
+{
+  "from": "...", "to": "...",
+  "granularity": "hour",
+  "group_by": ["tenant","model"],
+  "buckets": [
+    { "ts":"2026-05-09T14:00:00Z",
+      "groups":[
+        {"dimensions":{"tenant":"hivemem","model":"claude-sonnet-4-6"},
+         "calls":42,"input_tokens":18450,"output_tokens":3120,
+         "cache_creation_input_tokens":0,"cache_read_input_tokens":6200,
+         "cost_micros":12450,"cost_eur":0.012450}
+      ]}
+  ]
+}
+```
+
+Status codes: 200, 400 (bad granularity / group_by), 401, 422 (response_too_large — narrow query, max 10 000 result rows).
+
+---
+
+## `/admin/llm-calls/{id}` (detail)
+
+`GET /admin/llm-calls/{id}` — extends the row shape from `GET /admin/llm-calls` (Slice 6) with the full request body and response text from `llm_call_bodies`.
+
+If the body has been deleted by retention, `request_json` and `response_text` are `null` and `body_evicted: true`.
+
+---
+
 ## `GET /healthz`
 
 Liveness probe. Returns `200 OK` with body `OK` as long as the JVM is running.

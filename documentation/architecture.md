@@ -125,6 +125,7 @@ Schema overview (all tables under `vistierie`):
 - `run_events`         — append-only event timeline per run
 - `routing_rules`      — operator-managed routing policy (per tenant, realm, purpose)
 - `routing_rules_audit` — append-only history of admin writes to routing_rules
+- `llm_call_bodies`    — full request JSON (vision blobs redacted to sha256 stub) and response text per LLM call; cleaned by BodyRetentionJob
 
 ---
 

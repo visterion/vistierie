@@ -177,13 +177,24 @@ public class BatchService {
                     case "succeeded": {
                         if (r.usage() != null) {
                             long cost = prices.costMicrosBatch(r.model(), r.usage());
-                            recorder.insert(new de.vesterion.vistierie.audit.LlmCallRecorder.Row(
+                            var pReq = new ProviderRequest(
+                                    r.model(), 1024, null,
+                                    child.agentSnapshot().path("system_prompt").asText(null),
+                                    java.util.List.of(java.util.Map.of(
+                                            "role", "user",
+                                            "content", child.payload() != null ? child.payload().toString() : "")),
+                                    java.util.List.of(), null,
+                                    java.util.Map.of("agent_name",
+                                            child.agentSnapshot().path("name").asText("")));
+                            var pRes = new de.vesterion.vistierie.provider.ProviderResponse(
+                                    r.text(), r.stopReason(), r.usage(), r.model());
+                            recorder.insertWithBody(new de.vesterion.vistierie.audit.LlmCallRecorder.Row(
                                     newUlid(), parent.tenantId(), purpose, null,
                                     "anthropic", r.model(), "batch",
                                     r.usage().inputTokens(), r.usage().outputTokens(),
                                     r.usage().cacheCreationInputTokens(), r.usage().cacheReadInputTokens(),
                                     cost, 0, "ok", null,
-                                    childId, anthropicBatchId));
+                                    childId, anthropicBatchId), pReq, pRes);
                         }
                         try {
                             JsonNode validated = schemaValidator.parseAndValidate(

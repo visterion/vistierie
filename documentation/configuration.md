@@ -26,6 +26,18 @@ env vars; do not bake plaintext secrets into images.
 
 ---
 
+## Audit body retention
+
+```yaml
+vistierie:
+  audit:
+    body-retention-days: 7   # 0 = keep forever
+```
+
+Controls how long full request/response bodies remain in `llm_call_bodies`. Aggregation data in `llm_calls` is kept indefinitely. Override via env var `VISTIERIE_AUDIT_BODY_RETENTION_DAYS`.
+
+---
+
 ## Routing
 
 Routing rules are managed via the admin REST API at
