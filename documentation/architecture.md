@@ -88,6 +88,46 @@ Listen port: `8090`
 
 ---
 
+## Routing rules (Slice 6)
+
+Tables added in `V5__routing_rules.sql`:
+
+```
+routing_rules
+  id              BIGSERIAL PK
+  tenant_id       UUID FK → tenants.id
+  realm           TEXT      -- NULL = match any realm
+  purpose         TEXT      -- NULL = match any purpose
+  provider        TEXT
+  model           TEXT
+  priority        INTEGER   -- lower wins; 1000 = tenant default
+  allow_override  BOOLEAN
+  locked          BOOLEAN   -- when true, ignores allow_override
+  created_at      TIMESTAMPTZ
+  updated_at      TIMESTAMPTZ
+
+routing_rules_audit
+  id              BIGSERIAL PK
+  rule_id         BIGINT FK → routing_rules.id (nullable — survives deletes)
+  tenant_id       UUID
+  action          TEXT      -- "create" | "update" | "delete"
+  changed_by      TEXT
+  payload         JSONB     -- full snapshot of the rule at write time
+  created_at      TIMESTAMPTZ
+```
+
+Schema overview (all tables under `vistierie`):
+
+- `tenants`            — registered tenants, bcrypt token hash, kill-switch state
+- `llm_calls`          — per-call audit (tokens, cost, provider, model, run link)
+- `agents`             — tenant-scoped agent definitions
+- `runs`               — agent run lifecycle
+- `run_events`         — append-only event timeline per run
+- `routing_rules`      — operator-managed routing policy (per tenant, realm, purpose)
+- `routing_rules_audit` — append-only history of admin writes to routing_rules
+
+---
+
 ## Agent framework (Slice 2)
 
 Tables added in `V2__agents_runs_run_events.sql`: `agents`, `runs`,

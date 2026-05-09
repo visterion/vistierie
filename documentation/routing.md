@@ -1,120 +1,69 @@
 # Routing
 
-## Config layout
+Routing rules live in Postgres (`vistierie.routing_rules`) and are managed
+exclusively by operators via the admin REST API. Tenants have read-only
+visibility through their own audit trail (`llm_calls.provider`,
+`llm_calls.model`).
 
-Routing rules live in `routing.yaml` (or inline in `application.yaml`). The
-top-level key is `routing`, with one entry per tenant under `tenants`:
+## Resolution algorithm
 
-```yaml
-routing:
-  tenants:
-    <tenant-name>:
-      default:
-        provider: <provider-name>
-        model:    <model-id>
-        allow-override: true|false
-      purposes:
-        <purpose-string>:
-          provider: <provider-name>
-          model:    <model-id>
-          allow-override: true|false
+For each `/llm/complete` and `/llm/vision` call, the resolver:
+
+1. Loads all rules for the call's tenant, sorted by `priority` ASC.
+   (In-memory cache, invalidated on every admin write via a version counter.)
+2. Filters to rules whose `realm` and `purpose` match the call. `NULL` in
+   a rule field means "match any value".
+3. Picks the lowest-priority rule. Ties are broken by specificity:
+   `(realm + purpose)` > `(realm only)` > `(purpose only)` > `(both NULL)`.
+4. If `requestedModel` is set AND the matched rule has `allow_override=true`
+   AND `locked=false`, the request's `model` field replaces the rule's
+   model. Otherwise the rule's `model` is used.
+5. If no rule matches, returns 400 `no route`. This cannot happen under
+   normal operation: tenant creation auto-seeds a wildcard default rule.
+
+## Privacy lock pattern
+
+A rule with `locked=true` ignores `allow_override` at resolution time —
+the tenant cannot escape the rule by sending a `model` override. Use it
+for realms whose data must not leave a specific provider.
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+     -H "Content-Type: application/json" \
+     -X POST https://vistierie/admin/routing-rules \
+     -d '{
+       "tenant": "hivemem",
+       "realm": "medical",
+       "purpose": null,
+       "provider": "ollama",
+       "model": "llama-3.1-70b",
+       "priority": 10,
+       "allow_override": false,
+       "locked": true
+     }'
 ```
 
-Each rule has three fields:
+After this rule exists, every `/llm/complete` call from `hivemem` with
+`realm: "medical"` resolves to `(provider=ollama, model=llama-3.1-70b)`,
+regardless of any `model` override in the request body. The `llm_calls`
+audit row records the actual provider+model used.
 
-| Field | Description |
+## Priority conventions
+
+| Range | Use |
 |---|---|
-| `provider` | Which provider plugin handles the call (e.g. `anthropic`) |
-| `model` | Model ID passed to the provider (e.g. `claude-haiku-4-5`) |
-| `allow-override` | Whether the caller may override the model via the request's `model` field |
+| 0–50 | Operator privacy locks |
+| 50–200 | Realm-scoped rules |
+| 200–800 | Purpose-scoped rules |
+| 1000 | Tenant default (auto-seeded on tenant creation) |
 
----
+`priority` is an integer in `[0, 10000]`. Lowest value wins.
 
-## Resolution order
+## Migration from the previous YAML config
 
-1. Look up `routing.tenants.<tenant-name>.purposes.<purpose>`. If a match
-   exists, use that rule.
-2. Otherwise fall back to `routing.tenants.<tenant-name>.default`.
-3. If neither exists the request fails with `400`.
+The previous YAML-based routing has been removed. The single source of
+truth is now the `routing_rules` table. New tenants auto-receive a
+wildcard default rule pointing at `anthropic` / `claude-sonnet-4-6`;
+operators add additional rules via `/admin/routing-rules`.
 
-**No realm matching in Slice 1.** The `realm` field is stored in the audit log
-but does not affect routing. Per-realm overrides are a Slice 2 candidate.
-
----
-
-## `allow-override` semantics
-
-When the request body includes a `model` field:
-
-- `allow-override: true` — the requested model replaces the resolved model.
-  Use this for "free pick" purposes where the caller knows better.
-- `allow-override: false` — the `model` field in the request is silently ignored.
-  The configured model is always used, ensuring cost predictability.
-
----
-
-## Current `hivemem` routing
-
-```yaml
-routing:
-  tenants:
-    hivemem:
-      default:
-        provider: anthropic
-        model: claude-sonnet-4-6
-        allow-override: false
-      purposes:
-        summarize_cell:
-          provider: anthropic
-          model: claude-haiku-4-5
-          allow-override: false
-        vision_attachment:
-          provider: anthropic
-          model: claude-haiku-4-5
-          allow-override: false
-        vision_diagram:
-          provider: anthropic
-          model: claude-sonnet-4-6
-          allow-override: false
-        free_pick:
-          provider: anthropic
-          model: claude-sonnet-4-6
-          allow-override: true
-```
-
-Rationale:
-- `summarize_cell` and `vision_attachment` use Haiku for cost efficiency —
-  these are high-frequency, low-complexity calls.
-- `vision_diagram` and the default use Sonnet — diagrams need stronger
-  reasoning.
-- `free_pick` allows the caller to override the model, e.g. to temporarily
-  experiment with a different model without a config change.
-
----
-
-## Adding purposes for new agents
-
-Agent runs route through the same `routing.yaml`: the agent's
-`model_purpose` is looked up under the tenant's `purposes` map. Before a
-new agent can run, the operator must add a routing entry for its purpose.
-
-Example for the HiveMem Bee/Queen agents:
-
-```yaml
-routing:
-  tenants:
-    hivemem:
-      purposes:
-        bee-isolation:
-          provider: anthropic
-          model: claude-haiku-4-5
-          allow-override: false
-        queen-curation:
-          provider: anthropic
-          model: claude-sonnet-4-6
-          allow-override: false
-```
-
-Adding a routing entry is currently an operator-side change (file edit and
-restart, or external file pickup). Tenant self-serve routing is out of
-scope for Slice 2.
+See `documentation/api.md` for endpoint details.

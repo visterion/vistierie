@@ -195,7 +195,10 @@ Returns all registered tenants.
 
 ## `POST /admin/tenants`
 
-Create a new tenant and receive its one-time bearer token.
+Create a new tenant and receive its one-time bearer token. Side-effect: a
+default routing rule (`provider=anthropic`, `model=claude-sonnet-4-6`,
+`priority=1000`, `realm=NULL`, `purpose=NULL`) is auto-seeded for the new
+tenant.
 
 **Auth:** admin token required.
 
@@ -410,6 +413,99 @@ Lists the calling tenant's runs (newest first, capped).
 
 Returns the event timeline for the run. Useful for observability and for
 walking parent → child run trees.
+
+---
+
+## `/admin/routing-rules`
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/admin/routing-rules` | admin | Create a rule |
+| GET  | `/admin/routing-rules?tenant=&realm=&purpose=` | admin | List with optional filters |
+| GET  | `/admin/routing-rules/{id}` | admin | Read one |
+| PATCH | `/admin/routing-rules/{id}` | admin | Update `provider`, `model`, `priority`, `allow_override`, `locked` |
+| DELETE | `/admin/routing-rules/{id}` | admin | Delete (refuses to delete the tenant's last wildcard rule) |
+
+### Create body
+
+```json
+{
+  "tenant": "hivemem", "realm": "medical", "purpose": null,
+  "provider": "ollama", "model": "llama-3.1-70b",
+  "priority": 10, "allow_override": false, "locked": true
+}
+```
+
+### Status codes
+
+| Code | When |
+|---|---|
+| 201 | Rule created |
+| 200 | List or read success |
+| 204 | Delete success |
+| 400 | Unknown tenant, unknown provider, priority out of range, or invalid body |
+| 401 | Missing or invalid admin token |
+| 404 | Rule not found |
+| 409 | Duplicate `(tenant, realm, purpose)` |
+| 422 | Attempt to delete a tenant's last wildcard default rule |
+
+### PATCH semantics
+
+Only `provider`, `model`, `priority`, `allow_override`, `locked` are
+mutable. `tenant`, `realm`, `purpose` are immutable — change them by
+DELETE + POST.
+
+---
+
+## `/admin/runs`
+
+`GET /admin/runs?tenant=&agent=&status=&from=&to=&limit=&offset=`
+
+Cross-tenant view of agent runs. `status` may repeat
+(`?status=failed&status=timeout`). `from` and `to` filter on `started_at`
+in ISO-8601. `limit` defaults to 50, capped at 200.
+
+Response:
+
+```json
+{
+  "items": [{
+    "id": "01HK...", "tenant": "hivemem", "agent": "bee-isolation",
+    "trigger": "scheduled", "status": "done",
+    "started_at": "2026-05-09T10:12:00Z",
+    "finished_at": "2026-05-09T10:12:14Z", "duration_ms": 14012,
+    "llm_calls_count": 3, "total_cost_micros": 12450
+  }],
+  "total": 412, "limit": 50, "offset": 0
+}
+```
+
+---
+
+## `/admin/llm-calls`
+
+`GET /admin/llm-calls?tenant=&realm=&purpose=&provider=&model=&endpoint=&status=&run_id=&from=&to=&limit=&offset=`
+
+Cross-tenant view of LLM call audit rows. Filter combinations match the
+column names. `status` may repeat. `from` / `to` filter on `created_at`.
+
+Response:
+
+```json
+{
+  "items": [{
+    "id": "...", "tenant": "hivemem", "run_id": null,
+    "purpose": "summarize_cell", "realm": "medical",
+    "provider": "ollama", "model": "llama-3.1-70b",
+    "endpoint": "complete",
+    "input_tokens": 250, "output_tokens": 32,
+    "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+    "cost_micros": 0, "duration_ms": 412, "status": "ok",
+    "error_code": null, "created_at": "2026-05-09T10:12:14Z"
+  }],
+  "limit": 50, "offset": 0
+}
+```
 
 ---
 
