@@ -144,7 +144,7 @@ will fail to initialise. Restore order:
 1. Postgres (shared host DB, if applicable)
 2. Vistierie service
 3. HiveMem service
-4. Draczl service (and any other tenants)
+4. Dracul service (and any other tenants)
 
 Verify Vistierie is ready before starting consumers:
 
