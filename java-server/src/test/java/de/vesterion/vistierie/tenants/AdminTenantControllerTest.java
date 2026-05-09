@@ -55,7 +55,7 @@ class AdminTenantControllerTest extends PostgresTestBase {
     }
 
     @Test void killAndClearKill() throws Exception {
-        var name = "draczl-kill-" + java.util.UUID.randomUUID();
+        var name = "dracul-kill-" + java.util.UUID.randomUUID();
         mvc.perform(post("/admin/tenants")
                 .header("Authorization", ADMIN_HEADER)
                 .contentType(MediaType.APPLICATION_JSON)
