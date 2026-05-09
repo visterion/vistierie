@@ -213,8 +213,8 @@ schedule"; idempotency is the consumer's job.
 | **2 — Agent framework** | `POST /agents` CRUD, `POST /agents/{name}/run` (202 + async), parallel HTTP tools, recursive subagents with context shielding, long-poll, completion webhook, run-level event timeline | ✅ Released |
 | **3 — Scheduler** | `agents.schedule` cron field, `AgentScheduler` 30 s tick, skip-if-running, kill-switch-aware, `last_tick_at` diagnostics | ✅ Released |
 | **4 — Batches** | `POST /agents/{name}/batch` (up to 10 000 items), Anthropic Message Batches API integration at 50 % cost, parent + child run topology with partial-success aggregation, `BatchPollingService` (60 s tick) with kill-switch awareness, `llm_calls.batch_id` audit link | ✅ Released |
-| **5 — Vision attachments cache** | (open — TBD) | |
-| **6 — Per-realm provider routing + admin REST API** | DB-backed `routing_rules` table, `RoutingResolver` with realm+purpose matching and privacy-lock (`locked=true`) support, full CRUD via `/admin/routing-rules`, cross-tenant audit views (`/admin/runs`, `/admin/llm-calls`), auto-seeded wildcard default on tenant creation | ✅ Done |
+| **5 — Vision attachments cache** | Originally scoped as a SeaweedFS-backed dedupe layer; dropped as YAGNI — re-hit rate for both v1 tenants is near zero. Slot reserved for a future feature. | ⏭ Skipped |
+| **6 — Per-realm provider routing + admin REST API** | DB-backed `routing_rules` table, `RoutingResolver` with realm+purpose matching and privacy-lock (`locked=true`) support, full CRUD via `/admin/routing-rules`, cross-tenant audit views (`/admin/runs`, `/admin/llm-calls`), auto-seeded wildcard default on tenant creation | ✅ Released |
 
 All slices are merged to `main`. The full test suite is green including a
 Postgres-backed integration suite, a real-`@Scheduled` E2E test, a
