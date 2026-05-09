@@ -3,7 +3,9 @@ package de.vesterion.vistierie.stress;
 import de.vesterion.vistierie.PostgresTestBase;
 import de.vesterion.vistierie.agent.runner.AgentDispatcher;
 import de.vesterion.vistierie.agents.AgentRepository;
-import de.vesterion.vistierie.routing.RoutingConfig;
+import de.vesterion.vistierie.routing.RoutingRule;
+import de.vesterion.vistierie.routing.RoutingRuleRepository;
+import de.vesterion.vistierie.routing.RoutingResolver;
 import de.vesterion.vistierie.runs.RunRepository;
 import de.vesterion.vistierie.tenants.TenantRepository;
 import de.vesterion.vistierie.testsupport.StubLlmProvider;
@@ -16,8 +18,8 @@ import org.springframework.test.context.ActiveProfiles;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -32,21 +34,19 @@ class ConcurrencyStressTest extends PostgresTestBase {
     @Autowired TenantRepository tenants;
     @Autowired StubLlmProvider stub;
     @Autowired ObjectMapper mapper;
-    @Autowired RoutingConfig routingConfig;
+    @Autowired RoutingRuleRepository routingRules;
+    @Autowired RoutingResolver routingResolver;
 
     @Test void hundredParallelTopLevelRuns() throws Exception {
         var tenantId = UUID.randomUUID();
         var tenantName = "tn-" + tenantId;
         tenants.insert(tenantId, tenantName, "h");
-        var t = new RoutingConfig.TenantRouting();
-        t.setPurposes(new HashMap<>());
-        var rule = new RoutingConfig.Rule();
-        rule.setProvider("anthropic");
-        rule.setModel("claude-haiku-4-5");
-        rule.setAllowOverride(false);
-        t.getPurposes().put("summarize_cell", rule);
-        t.setDefault(rule);
-        routingConfig.getTenants().put(tenantName, t);
+        var now = Instant.now();
+        routingRules.insert(new RoutingRule(UUID.randomUUID(), tenantId, null, null,
+                "anthropic", "claude-haiku-4-5", 1000, false, false, now, now));
+        routingRules.insert(new RoutingRule(UUID.randomUUID(), tenantId, null, "summarize_cell",
+                "anthropic", "claude-haiku-4-5", 500, false, false, now, now));
+        routingResolver.bumpVersion();
 
         var schema = mapper.readTree("{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\"}},\"required\":[\"x\"]}");
         var agentId = UUID.randomUUID();
