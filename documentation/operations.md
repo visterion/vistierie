@@ -257,6 +257,33 @@ block indefinitely.
 
 ---
 
+## Inspecting an LLM call
+
+When you need to see the exact prompt and response for a specific call:
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+     https://vistierie/admin/llm-calls/<call-id> | jq .
+```
+
+The response includes `request_json` (full system + messages) and `response_text`. Vision images are stored as `image_redacted` placeholders with sha256 + byte count — actual base64 bytes are not persisted.
+
+If `body_evicted: true`, the body has been deleted by retention. Default retention is 7 days. Increase via `vistierie.audit.body-retention-days` or set to `0` to keep forever.
+
+## Reviewing cost over time
+
+```bash
+# Hourly rollup for the last day, grouped by model:
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+     "https://vistierie/admin/cost?granularity=hour&group_by=model&from=$(date -u -d '24 hours ago' +%FT%TZ)" | jq .
+
+# Total spend per tenant over the last week:
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+     "https://vistierie/admin/cost?granularity=none&group_by=tenant" | jq .
+```
+
+---
+
 ## Privacy lock pattern
 
 Use `locked=true` to prevent any tenant override of a routing rule. The
