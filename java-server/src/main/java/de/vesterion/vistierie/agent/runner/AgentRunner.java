@@ -113,7 +113,7 @@ public class AgentRunner {
 
             runs.persistTurn(runId, messages);
 
-            var decision = routing.resolve(tenantName, modelPurpose, null);
+            var decision = routing.resolve(tenantName, null, modelPurpose, null);
             var providerName = decision.provider();
             var provider = providers.get(providerName);
 

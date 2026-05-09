@@ -3,6 +3,9 @@ package de.vesterion.vistierie.llm;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import de.vesterion.vistierie.PostgresTestBase;
 import de.vesterion.vistierie.auth.AuthFilter;
+import de.vesterion.vistierie.routing.RoutingRule;
+import de.vesterion.vistierie.routing.RoutingRuleRepository;
+import de.vesterion.vistierie.routing.RoutingResolver;
 import de.vesterion.vistierie.tenants.TenantRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,6 +20,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
+import java.time.Instant;
 import java.util.UUID;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.configureFor;
@@ -39,6 +43,8 @@ class LlmEndpointsIntegrationTest extends PostgresTestBase {
     @Autowired TenantRepository tenants;
     @Autowired BCryptPasswordEncoder enc;
     @Autowired JdbcClient jdbc;
+    @Autowired RoutingRuleRepository routingRules;
+    @Autowired RoutingResolver routingResolver;
 
     MockMvc mvc;
 
@@ -59,21 +65,40 @@ class LlmEndpointsIntegrationTest extends PostgresTestBase {
 
     @AfterEach void resetWm() { wm.resetAll(); }
 
+    private void seedRouting(UUID tenantId) {
+        var now = Instant.now();
+        routingRules.insert(new RoutingRule(UUID.randomUUID(), tenantId, null, null,
+                "anthropic", "claude-sonnet-4-6", 1000, false, false, now, now));
+        routingRules.insert(new RoutingRule(UUID.randomUUID(), tenantId, null, "summarize_cell",
+                "anthropic", "claude-haiku-4-5", 500, false, false, now, now));
+        routingRules.insert(new RoutingRule(UUID.randomUUID(), tenantId, null, "vision_attachment",
+                "anthropic", "claude-haiku-4-5", 500, false, false, now, now));
+        routingRules.insert(new RoutingRule(UUID.randomUUID(), tenantId, null, "vision_diagram",
+                "anthropic", "claude-sonnet-4-6", 500, false, false, now, now));
+        routingRules.insert(new RoutingRule(UUID.randomUUID(), tenantId, null, "free_pick",
+                "anthropic", "claude-sonnet-4-6", 500, true, false, now, now));
+        routingResolver.bumpVersion();
+    }
+
     @Test void completeRecordsLlmCall() throws Exception {
         var token = "tok-" + UUID.randomUUID();
-        var name = "hivemem-c-" + UUID.randomUUID();
         // routing config matches by tenant *name*. Insert as 'hivemem' so existing routing rules apply.
         var hivemem = tenants.findByName("hivemem").orElse(null);
+        UUID hivememId;
         if (hivemem == null) {
-            tenants.insert(UUID.randomUUID(), "hivemem", enc.encode(token));
+            hivememId = UUID.randomUUID();
+            tenants.insert(hivememId, "hivemem", enc.encode(token));
         } else {
             // tenant exists from another test - we need a fresh token to authenticate.
             // Update the token_hash on the existing 'hivemem' row by re-inserting (will hit unique violation).
             // Workaround: delete and re-insert.
+            jdbc.sql("DELETE FROM vistierie.routing_rules WHERE tenant_id = ?").param(hivemem.id()).update();
             jdbc.sql("DELETE FROM vistierie.llm_calls WHERE tenant_id = ?").param(hivemem.id()).update();
             jdbc.sql("DELETE FROM vistierie.tenants WHERE id = ?").param(hivemem.id()).update();
-            tenants.insert(UUID.randomUUID(), "hivemem", enc.encode(token));
+            hivememId = UUID.randomUUID();
+            tenants.insert(hivememId, "hivemem", enc.encode(token));
         }
+        seedRouting(hivememId);
 
         stubFor(com.github.tomakehurst.wiremock.client.WireMock.post(urlEqualTo("/v1/messages")).willReturn(okJson("""
                 {"id":"m","type":"message","role":"assistant","model":"claude-haiku-4-5",
@@ -111,11 +136,13 @@ class LlmEndpointsIntegrationTest extends PostgresTestBase {
         // ensure 'hivemem' tenant exists with a known token
         var existing = tenants.findByName("hivemem").orElse(null);
         if (existing != null) {
+            jdbc.sql("DELETE FROM vistierie.routing_rules WHERE tenant_id = ?").param(existing.id()).update();
             jdbc.sql("DELETE FROM vistierie.llm_calls WHERE tenant_id = ?").param(existing.id()).update();
             jdbc.sql("DELETE FROM vistierie.tenants WHERE id = ?").param(existing.id()).update();
         }
         var id = UUID.randomUUID();
         tenants.insert(id, "hivemem", enc.encode(token));
+        seedRouting(id);
         tenants.setKill(id, java.time.Instant.parse("2099-01-01T00:00:00Z"), "freeze", "test");
 
         mvc.perform(post("/llm/complete")
@@ -138,10 +165,13 @@ class LlmEndpointsIntegrationTest extends PostgresTestBase {
         var token = "tok-v-" + UUID.randomUUID();
         var existing = tenants.findByName("hivemem").orElse(null);
         if (existing != null) {
+            jdbc.sql("DELETE FROM vistierie.routing_rules WHERE tenant_id = ?").param(existing.id()).update();
             jdbc.sql("DELETE FROM vistierie.llm_calls WHERE tenant_id = ?").param(existing.id()).update();
             jdbc.sql("DELETE FROM vistierie.tenants WHERE id = ?").param(existing.id()).update();
         }
-        tenants.insert(UUID.randomUUID(), "hivemem", enc.encode(token));
+        var visionId = UUID.randomUUID();
+        tenants.insert(visionId, "hivemem", enc.encode(token));
+        seedRouting(visionId);
 
         stubFor(com.github.tomakehurst.wiremock.client.WireMock.post(urlEqualTo("/v1/messages")).willReturn(okJson("""
                 {"id":"m","type":"message","role":"assistant","model":"claude-haiku-4-5",

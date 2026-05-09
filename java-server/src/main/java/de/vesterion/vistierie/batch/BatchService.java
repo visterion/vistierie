@@ -95,7 +95,7 @@ public class BatchService {
         var seen = new HashSet<String>();
         var batchItems = new ArrayList<BatchItem>(items.size());
 
-        var decision = routing.resolve(tenantName, agent.modelPurpose(), null);
+        var decision = routing.resolve(tenantName, null, agent.modelPurpose(), null);
 
         for (var item : items) {
             String customId = item.custom_id();

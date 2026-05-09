@@ -2,7 +2,9 @@ package de.vesterion.vistierie.scheduler;
 
 import de.vesterion.vistierie.PostgresTestBase;
 import de.vesterion.vistierie.agents.AgentRepository;
-import de.vesterion.vistierie.routing.RoutingConfig;
+import de.vesterion.vistierie.routing.RoutingRule;
+import de.vesterion.vistierie.routing.RoutingRuleRepository;
+import de.vesterion.vistierie.routing.RoutingResolver;
 import de.vesterion.vistierie.runs.RunRepository;
 import de.vesterion.vistierie.tenants.TenantRepository;
 import de.vesterion.vistierie.testsupport.StubLlmProvider;
@@ -23,7 +25,6 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.HashMap;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -52,7 +53,8 @@ class AgentSchedulerTest extends PostgresTestBase {
     @Autowired TenantRepository tenants;
     @Autowired StubLlmProvider stub;
     @Autowired ObjectMapper mapper;
-    @Autowired RoutingConfig routingConfig;
+    @Autowired RoutingRuleRepository routingRules;
+    @Autowired RoutingResolver routingResolver;
     @Autowired JdbcClient jdbc;
 
     UUID tenantId;
@@ -64,15 +66,12 @@ class AgentSchedulerTest extends PostgresTestBase {
         tenantId = UUID.randomUUID();
         var tenantName = "tn-" + tenantId;
         tenants.insert(tenantId, tenantName, "h");
-        var t = new RoutingConfig.TenantRouting();
-        t.setPurposes(new HashMap<>());
-        var rule = new RoutingConfig.Rule();
-        rule.setProvider("anthropic");
-        rule.setModel("claude-haiku-4-5");
-        rule.setAllowOverride(false);
-        t.getPurposes().put("summarize_cell", rule);
-        t.setDefault(rule);
-        routingConfig.getTenants().put(tenantName, t);
+        var now = Instant.now();
+        routingRules.insert(new RoutingRule(UUID.randomUUID(), tenantId, null, null,
+                "anthropic", "claude-haiku-4-5", 1000, false, false, now, now));
+        routingRules.insert(new RoutingRule(UUID.randomUUID(), tenantId, null, "summarize_cell",
+                "anthropic", "claude-haiku-4-5", 500, false, false, now, now));
+        routingResolver.bumpVersion();
 
         agentId = UUID.randomUUID();
         var schema = readObjectSchema();
