@@ -56,35 +56,81 @@ Vistierie sees only opaque `tenant`, `realm`, `purpose`, `messages`,
 
 ### From HiveMem's perspective
 
-HiveMem is a knowledge base that needs to curate itself. It registers
-a **Queen** agent that runs hourly via Vistierie's scheduler. The
-Queen scans recent cells, decides which ones deserve deeper
-investigation, and dispatches **Bee** subagents — one per realm.
+HiveMem is a knowledge base. Its data hygiene drifts: cells get added
+but the **knowledge graph** doesn't always learn the new facts, and
+related cells often sit orphaned without **tunnels** linking them.
+HiveMem registers a **Queen** that runs hourly and two specialized
+**Bees** — one extracts missing KG facts, one builds missing tunnels.
+The Queen scans a realm, picks the worst-organized one, and
+dispatches both Bees in parallel for that realm.
 
 ```bash
-# HiveMem registers the Queen — note the subagent tool referencing a Bee
+# 1 — Bee that extracts knowledge-graph facts from a cell batch
 curl -X POST http://vistierie:8090/agents \
   -H "Authorization: Bearer $HIVEMEM_TOKEN" -d '{
-    "name": "queen-curation",
-    "system_prompt": "You curate the knowledge base hourly.",
-    "model_purpose": "reasoning",
-    "schedule": "0 0 * * * *",
+    "name": "bee-kg-extractor",
+    "system_prompt": "Extract subject-predicate-object facts from the given cells. Reuse existing KG entities where possible.",
+    "model_purpose": "routine",
+    "tools": [
+      {"name":"cell.read","webhook_url":"http://hivemem:8080/tools/cell.read",
+       "input_schema":{"type":"object"}},
+      {"name":"kg.add","webhook_url":"http://hivemem:8080/tools/kg.add",
+       "input_schema":{"type":"object"}}
+    ],
+    "output_schema": {"type":"object","required":["facts_added","cells_scanned"],
+      "properties":{"facts_added":{"type":"integer"},"cells_scanned":{"type":"integer"}}},
+    "webhook_token": "<hivemem-side-secret>"
+  }'
+
+# 2 — Bee that builds tunnels between related cells in a realm
+curl -X POST http://vistierie:8090/agents \
+  -H "Authorization: Bearer $HIVEMEM_TOKEN" -d '{
+    "name": "bee-tunnel-builder",
+    "system_prompt": "Find cells that should be linked by tunnels. Score similarity, link top matches.",
+    "model_purpose": "routine",
     "tools": [
       {"name":"cell.search","webhook_url":"http://hivemem:8080/tools/cell.search",
        "input_schema":{"type":"object"}},
-      {"name":"dispatch_bee","type":"subagent","target_agent":"bee-isolation",
+      {"name":"tunnel.add","webhook_url":"http://hivemem:8080/tools/tunnel.add",
        "input_schema":{"type":"object"}}
     ],
+    "output_schema": {"type":"object","required":["tunnels_added"],
+      "properties":{"tunnels_added":{"type":"integer"}}},
+    "webhook_token": "<hivemem-side-secret>"
+  }'
+
+# 3 — Queen on hourly schedule; both Bees wired in as subagent tools
+curl -X POST http://vistierie:8090/agents \
+  -H "Authorization: Bearer $HIVEMEM_TOKEN" -d '{
+    "name": "queen-curation",
+    "system_prompt": "Each hour, audit one realm. If KG facts are sparse, dispatch bee-kg-extractor. If tunnels are missing, dispatch bee-tunnel-builder. You may run both in parallel.",
+    "model_purpose": "reasoning",
+    "schedule": "0 0 * * * *",
+    "tools": [
+      {"name":"realm.health","webhook_url":"http://hivemem:8080/tools/realm.health",
+       "input_schema":{"type":"object"}},
+      {"name":"extract_kg_facts","type":"subagent","target_agent":"bee-kg-extractor",
+       "input_schema":{"type":"object","required":["realm","cell_ids"]}},
+      {"name":"build_tunnels","type":"subagent","target_agent":"bee-tunnel-builder",
+       "input_schema":{"type":"object","required":["realm"]}}
+    ],
+    "output_schema": {"type":"object","required":["realm","actions"],
+      "properties":{"realm":{"type":"string"},"actions":{"type":"array"}}},
     "webhook_token": "<hivemem-side-secret>"
   }'
 ```
 
-Every hour, Vistierie fires the Queen. The Queen calls back into
-HiveMem via tool webhooks (`cell.search`), spawns Bees as subagents,
-and HiveMem receives the curation verdict via a completion webhook.
-The Queen's transcript never sees the Bee's intermediate reasoning —
-only the validated JSON output crosses the boundary (see [Context
-shielding](#context-shielding) below).
+Every hour Vistierie fires the Queen. The Queen calls
+`realm.health` to find the realm in worst shape, then emits both
+subagent tool-uses in the same turn — Vistierie dispatches the two
+Bees on virtual threads in parallel. Each Bee runs its own loop with
+its own tools (`cell.read`/`kg.add` vs `cell.search`/`tunnel.add`)
+and returns a validated JSON object: `{facts_added: 47,
+cells_scanned: 120}` and `{tunnels_added: 9}`. Those two
+`tool_result` blocks — and nothing else from the Bee transcripts —
+land in the Queen's context (see [Context shielding](#context-shielding)
+below). The Queen aggregates them into its `actions` array, hits
+`end_turn`, and HiveMem receives the verdict via completion webhook.
 
 ### From Dracul's perspective
 
