@@ -44,7 +44,7 @@ public class LlmService {
             throw killBlocked;
         }
 
-        var decision = routing.resolve(tenant, req.purpose(), req.model());
+        var decision = routing.resolve(tenant, req.realm(), req.purpose(), req.model());
         var provider = providers.get(decision.provider());
 
         var pReq = new ProviderRequest(
@@ -91,7 +91,7 @@ public class LlmService {
             throw killBlocked;
         }
 
-        var decision = routing.resolve(tenant, req.purpose(), req.model());
+        var decision = routing.resolve(tenant, req.realm(), req.purpose(), req.model());
         var provider = providers.get(decision.provider());
 
         var start = System.nanoTime();
