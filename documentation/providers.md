@@ -103,6 +103,35 @@ startup — no bean is registered, and the routing layer fails-fast with
 `unknown provider <name>` if anything tries to use it. This is intentional so
 that local dev environments without all keys configured can still boot.
 
+### Wire correctness — testing without API keys
+
+We don't ship live smoke tests against the real OpenAI/xAI endpoints — they
+require keys, cost money, and are flaky for CI. Instead, the contract is
+verified offline against the official OpenAI OpenAPI spec via
+[Prism](https://github.com/stoplightio/prism), wrapped in Testcontainers:
+
+- The spec lives at `src/test/resources/openapi/openai.yaml` (snapshot from
+  `github.com/openai/openai-openapi`).
+- `OpenAiCompatibleProviderContractIT` boots `stoplight/prism:5` in dynamic
+  mode (`-d`) and points the provider at it.
+- Prism **validates incoming requests** against the spec — if our request
+  body has the wrong field name, wrong type, or violates a required-field
+  constraint, Prism returns `422` and the test fails.
+- Prism **generates dynamic responses** from the spec's response schema —
+  if our parser expects a field that isn't there, the test fails.
+
+This catches schema-level wire mistakes that hand-crafted WireMock fixtures
+wouldn't, without ever needing an API key.
+
+To bump the spec version when OpenAI publishes wire changes worth verifying:
+
+```bash
+curl -L -o java-server/src/test/resources/openapi/openai.yaml \
+  https://raw.githubusercontent.com/openai/openai-openapi/<branch>/openapi.yaml
+```
+
+Run `./mvnw -Dtest=OpenAiCompatibleProviderContractIT test` to re-validate.
+
 ### Pricing source
 
 OpenAI and xAI rates are transcribed from the
