@@ -24,7 +24,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class RealmLockE2ETest extends PostgresTestBase {
 
     static final String ADMIN = "admin-e2e";
-    static final String TENANT_TOKEN = "hivemem-e2e-token";
 
     @DynamicPropertySource
     static void p(DynamicPropertyRegistry r) {
@@ -42,14 +41,16 @@ class RealmLockE2ETest extends PostgresTestBase {
     MockMvc mvc;
     UUID tenantId;
     String tenantName;
+    String tenantToken;
 
     @BeforeEach
     void setUp() {
         mvc = MockMvcBuilders.webAppContextSetup(wac).addFilter(authFilter).build();
         tenantId = UUID.randomUUID();
         tenantName = "hivemem-e2e-" + tenantId.toString().substring(0, 8);
+        tenantToken = "tok-" + tenantId;
         tenants.insert(tenantId, tenantName,
-                new BCryptPasswordEncoder().encode(TENANT_TOKEN));
+                new BCryptPasswordEncoder().encode(tenantToken));
     }
 
     @Test
@@ -87,7 +88,7 @@ class RealmLockE2ETest extends PostgresTestBase {
                   "max_tokens": 16 }
                 """;
         mvc.perform(post("/llm/complete")
-                        .header("Authorization", "Bearer " + TENANT_TOKEN)
+                        .header("Authorization", "Bearer " + tenantToken)
                         .contentType(MediaType.APPLICATION_JSON).content(callBody))
                 .andExpect(status().isOk());
 
@@ -130,7 +131,7 @@ class RealmLockE2ETest extends PostgresTestBase {
                   "max_tokens": 16 }
                 """;
         mvc.perform(post("/llm/complete")
-                        .header("Authorization", "Bearer " + TENANT_TOKEN)
+                        .header("Authorization", "Bearer " + tenantToken)
                         .contentType(MediaType.APPLICATION_JSON).content(callBody))
                 .andExpect(status().isOk());
 
