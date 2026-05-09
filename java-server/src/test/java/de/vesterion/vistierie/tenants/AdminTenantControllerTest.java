@@ -2,6 +2,7 @@ package de.vesterion.vistierie.tenants;
 
 import de.vesterion.vistierie.PostgresTestBase;
 import de.vesterion.vistierie.auth.AuthFilter;
+import de.vesterion.vistierie.routing.RoutingRuleRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,6 +31,7 @@ class AdminTenantControllerTest extends PostgresTestBase {
     @Autowired WebApplicationContext wac;
     @Autowired AuthFilter authFilter;
     @Autowired TenantRepository repo;
+    @Autowired RoutingRuleRepository routingRules;
     @Autowired tools.jackson.databind.ObjectMapper json;
 
     MockMvc mvc;
@@ -79,5 +81,27 @@ class AdminTenantControllerTest extends PostgresTestBase {
                 .header("Authorization", ADMIN_HEADER))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.until").doesNotExist());
+    }
+
+    @Test void creatingTenantSeedsDefaultRoutingRule() throws Exception {
+        var name = "seed-rule-" + java.util.UUID.randomUUID();
+        mvc.perform(post("/admin/tenants")
+                        .header("Authorization", ADMIN_HEADER)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"" + name + "\"}"))
+                .andExpect(status().isCreated());
+
+        var tenant = repo.findByName(name).orElseThrow();
+        var rules = routingRules.findByTenant(tenant.id());
+
+        assertThat(rules).hasSize(1);
+        var rule = rules.get(0);
+        assertThat(rule.realm()).isNull();
+        assertThat(rule.purpose()).isNull();
+        assertThat(rule.priority()).isEqualTo(1000);
+        assertThat(rule.provider()).isEqualTo("anthropic");
+        assertThat(rule.model()).isEqualTo("claude-sonnet-4-6");
+        assertThat(rule.allowOverride()).isFalse();
+        assertThat(rule.locked()).isFalse();
     }
 }
