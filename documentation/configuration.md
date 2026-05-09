@@ -26,19 +26,14 @@ env vars; do not bake plaintext secrets into images.
 
 ---
 
-## Routing config path
+## Routing
 
-```yaml
-vistierie:
-  routing:
-    config-path: classpath:routing.yaml
-```
+Routing rules are managed via the admin REST API at
+`/admin/routing-rules`, not via configuration files. See
+`documentation/routing.md` for details.
 
-By default routing rules are loaded from `routing.yaml` on the classpath. Point
-this at an external file (`file:/etc/vistierie/routing.yaml`) to update routing
-without rebuilding the image.
-
-See [routing.md](routing.md) for the rule schema.
+The admin token (`vistierie.admin.token-hash`) is unchanged from earlier
+slices.
 
 ---
 
