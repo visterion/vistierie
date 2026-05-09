@@ -17,4 +17,8 @@ public class ProviderRegistry {
         if (p == null) throw new IllegalArgumentException("unknown provider " + name);
         return p;
     }
+
+    public boolean has(String name) {
+        return byName.containsKey(name);
+    }
 }

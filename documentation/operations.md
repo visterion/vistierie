@@ -237,3 +237,40 @@ block indefinitely.
   the scheduler computes the next fire from the current clock.
 - The host clock matters. Deploy in **UTC** to keep cron expressions
   predictable across DST.
+
+---
+
+## Setting up a new tenant
+
+1. Operator calls `POST /admin/tenants` with the tenant name. A default
+   wildcard routing rule is auto-seeded
+   (`provider=anthropic`, `model=claude-sonnet-4-6`, `priority=1000`).
+2. Optionally add purpose-specific rules:
+   ```bash
+   curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+        -X POST https://vistierie/admin/routing-rules \
+        -d '{"tenant":"hivemem","realm":null,"purpose":"summarize_cell",
+             "provider":"anthropic","model":"claude-haiku-4-5",
+             "priority":500,"allow_override":false,"locked":false}'
+   ```
+3. Optionally add realm-locks for sensitive realms (see below).
+
+---
+
+## Privacy lock pattern
+
+Use `locked=true` to prevent any tenant override of a routing rule. The
+canonical example: route everything in `realm=medical` to a local Ollama
+provider, regardless of the request's `model` field.
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+     -X POST https://vistierie/admin/routing-rules \
+     -d '{"tenant":"hivemem","realm":"medical","purpose":null,
+          "provider":"ollama","model":"llama-3.1-70b",
+          "priority":10,"allow_override":false,"locked":true}'
+```
+
+After this rule is created, every `llm_calls` row for `realm=medical`
+will show the locked provider+model — never the consumer's requested
+model. Use `/admin/llm-calls?tenant=hivemem&realm=medical` to verify.
