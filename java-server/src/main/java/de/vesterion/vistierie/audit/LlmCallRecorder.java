@@ -1,14 +1,29 @@
 package de.vesterion.vistierie.audit;
 
+import de.vesterion.vistierie.provider.ProviderRequest;
+import de.vesterion.vistierie.provider.ProviderResponse;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.ObjectMapper;
 
+import java.time.Instant;
 import java.util.UUID;
 
 @Component
 public class LlmCallRecorder {
     private final JdbcClient jdbc;
-    public LlmCallRecorder(JdbcClient jdbc) { this.jdbc = jdbc; }
+    private final LlmCallBodyRepository bodyRepo;
+    private final ImageRedactor redactor;
+    private final ObjectMapper json;
+
+    public LlmCallRecorder(JdbcClient jdbc, LlmCallBodyRepository bodyRepo,
+                           ImageRedactor redactor, ObjectMapper json) {
+        this.jdbc = jdbc;
+        this.bodyRepo = bodyRepo;
+        this.redactor = redactor;
+        this.json = json;
+    }
 
     public record Row(
             String id, UUID tenantId, String purpose, String realm,
@@ -17,6 +32,15 @@ public class LlmCallRecorder {
             long costMicros, int durationMs, String status, String errorCode,
             String runId,
             String batchId) {}
+
+    @Transactional
+    public void insertWithBody(Row row, ProviderRequest req, ProviderResponse res) {
+        insert(row);
+        var redacted = redactor.redact(req);
+        var node = json.valueToTree(redacted);
+        String responseText = res == null ? null : res.text();
+        bodyRepo.insert(row.id(), node, responseText, Instant.now());
+    }
 
     public void insert(Row r) {
         jdbc.sql("""
