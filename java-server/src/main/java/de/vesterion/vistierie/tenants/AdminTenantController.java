@@ -1,5 +1,8 @@
 package de.vesterion.vistierie.tenants;
 
+import de.vesterion.vistierie.routing.RoutingRule;
+import de.vesterion.vistierie.routing.RoutingRuleRepository;
+import de.vesterion.vistierie.routing.RoutingResolver;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import org.springframework.http.ResponseEntity;
@@ -19,10 +22,15 @@ public class AdminTenantController {
     private final TenantRepository repo;
     private final BCryptPasswordEncoder enc;
     private final SecureRandom rng = new SecureRandom();
+    private final RoutingRuleRepository routingRules;
+    private final RoutingResolver routingResolver;
 
-    public AdminTenantController(TenantRepository repo, BCryptPasswordEncoder enc) {
+    public AdminTenantController(TenantRepository repo, BCryptPasswordEncoder enc,
+                                 RoutingRuleRepository routingRules, RoutingResolver routingResolver) {
         this.repo = repo;
         this.enc = enc;
+        this.routingRules = routingRules;
+        this.routingResolver = routingResolver;
     }
 
     @GetMapping
@@ -40,6 +48,14 @@ public class AdminTenantController {
         rng.nextBytes(bytes);
         var token = HexFormat.of().formatHex(bytes);
         repo.insert(id, req.name(), enc.encode(token));
+        var now = Instant.now();
+        routingRules.insert(new RoutingRule(
+                UUID.randomUUID(),
+                id,
+                null, null,
+                "anthropic", "claude-sonnet-4-6", 1000,
+                false, false, now, now));
+        routingResolver.bumpVersion();
         return ResponseEntity.status(201).body(new CreatedTenant(id.toString(), req.name(), token));
     }
 
