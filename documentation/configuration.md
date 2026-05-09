@@ -8,7 +8,14 @@
 | `vistierie.anthropic.api-key` | `ANTHROPIC_API_KEY` | `""` | Anthropic API key |
 | `vistierie.anthropic.base-url` | — | `https://api.anthropic.com` | Provider HTTP base URL (override for integration tests) |
 | `vistierie.anthropic.timeout-seconds` | — | `60` | Request timeout in seconds |
-| `vistierie.mock-llm` | `VISTIERIE_MOCK_LLM` | `false` | Swap the real Anthropic provider for `MockProvider` |
+| `vistierie.providers.openai.api-key` | `OPENAI_API_KEY` | `""` | OpenAI API key — empty disables the provider |
+| `vistierie.providers.openai.base-url` | — | `https://api.openai.com/v1` | OpenAI API base URL |
+| `vistierie.providers.openai.timeout-seconds` | — | `60` | OpenAI request timeout |
+| `vistierie.providers.xai.api-key` | `XAI_API_KEY` | `""` | xAI API key — empty disables the provider |
+| `vistierie.providers.xai.base-url` | — | `https://api.x.ai/v1` | xAI API base URL |
+| `vistierie.providers.xai.timeout-seconds` | — | `60` | xAI request timeout |
+| `vistierie.providers.<name>.*` | — | — | Add any OpenAI-wire-compatible provider by adding a new entry; one Spring bean is registered per non-empty `api-key` |
+| `vistierie.mock-llm` | `VISTIERIE_MOCK_LLM` | `false` | Swap real providers for `MockProvider`; OpenAI-compatible beans are not registered in this mode |
 | `spring.datasource.url` | `VISTIERIE_DB_URL` | `jdbc:postgresql://localhost:5432/vistierie` | Postgres JDBC URL |
 | `spring.datasource.username` | `VISTIERIE_DB_USER` | `vistierie` | Database user |
 | `spring.datasource.password` | `VISTIERIE_DB_PASSWORD` | `vistierie` | Database password |

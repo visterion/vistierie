@@ -21,6 +21,15 @@ vistierie:
     api-key: ${ANTHROPIC_API_KEY:}
     base-url: https://api.anthropic.com
     timeout-seconds: 60
+  providers:
+    openai:
+      base-url: https://api.openai.com/v1
+      api-key: ${OPENAI_API_KEY:}
+      timeout-seconds: 60
+    xai:
+      base-url: https://api.x.ai/v1
+      api-key: ${XAI_API_KEY:}
+      timeout-seconds: 60
   mock-llm: ${VISTIERIE_MOCK_LLM:false}
   audit:
     body-retention-days: 7

@@ -33,4 +33,25 @@ class PriceTableTest {
         assertThat(t.costMicrosBatch("claude-haiku-4-5", u))
                 .isEqualTo(standard / 2L);
     }
+
+    @Test void openAiModelsKnown() {
+        var u = new Usage(1_000_000, 1_000_000, 0, 0);
+        assertThat(table.costMicros("gpt-4o-mini", u)).isEqualTo(690_000L);
+        assertThat(table.costMicros("gpt-4o", u)).isEqualTo(11_500_000L);
+        assertThat(table.costMicros("gpt-5", u)).isEqualTo(10_350_000L);
+        assertThat(table.costMicros("o4-mini", u)).isEqualTo(5_060_000L);
+    }
+
+    @Test void xaiModelsKnown() {
+        var u = new Usage(1_000_000, 1_000_000, 0, 0);
+        assertThat(table.costMicros("grok-4", u)).isEqualTo(16_560_000L);
+        assertThat(table.costMicros("grok-4-fast", u)).isEqualTo(644_000L);
+        assertThat(table.costMicros("grok-code-fast-1", u)).isEqualTo(1_564_000L);
+    }
+
+    @Test void openAiCacheReadHalvesInputCost() {
+        var fresh = table.costMicros("gpt-4o", new Usage(1_000_000, 0, 0, 0));
+        var cached = table.costMicros("gpt-4o", new Usage(0, 0, 0, 1_000_000));
+        assertThat(cached * 2L).isEqualTo(fresh);
+    }
 }

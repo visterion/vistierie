@@ -184,6 +184,8 @@ docker run --rm -p 8090:8090 \
   -e VISTIERIE_DB_PASSWORD=vistierie \
   -e VISTIERIE_ADMIN_TOKEN_HASH='<bcrypt-hash>' \
   -e ANTHROPIC_API_KEY='sk-ant-...' \
+  -e OPENAI_API_KEY='sk-...' \
+  -e XAI_API_KEY='xai-...' \
   ghcr.io/visterion/vistierie:main
 ```
 
