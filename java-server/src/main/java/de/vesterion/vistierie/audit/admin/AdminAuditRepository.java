@@ -1,22 +1,29 @@
 package de.vesterion.vistierie.audit.admin;
 
+import de.vesterion.vistierie.audit.admin.dto.AdminLlmCallDetail;
 import de.vesterion.vistierie.audit.admin.dto.AdminLlmCallRow;
 import de.vesterion.vistierie.audit.admin.dto.AdminRunSummary;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
+import tools.jackson.databind.ObjectMapper;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public class AdminAuditRepository {
 
     private final JdbcClient jdbc;
+    private final ObjectMapper json;
 
-    public AdminAuditRepository(JdbcClient jdbc) { this.jdbc = jdbc; }
+    public AdminAuditRepository(JdbcClient jdbc, ObjectMapper json) {
+        this.jdbc = jdbc;
+        this.json = json;
+    }
 
     public List<AdminRunSummary> findRuns(String tenant, String agent, List<String> statuses,
                                           Instant from, Instant to, int limit, int offset) {
@@ -109,6 +116,50 @@ public class AdminAuditRepository {
         var spec = jdbc.sql(sql.toString());
         for (Object p : params) spec = spec.param(p);
         return spec.query(this::mapLlmCall).list();
+    }
+
+    public Optional<AdminLlmCallDetail> findCallDetail(String id) {
+        return jdbc.sql("""
+                SELECT c.id, t.name AS tenant, c.run_id, c.purpose, c.realm,
+                       c.provider, c.model, c.endpoint,
+                       c.input_tokens, c.output_tokens,
+                       c.cache_creation_input_tokens, c.cache_read_input_tokens,
+                       c.cost_micros, c.duration_ms, c.status, c.error_code, c.created_at,
+                       b.request_json, b.response_text,
+                       (b.call_id IS NULL) AS body_missing
+                  FROM vistierie.llm_calls c
+                  JOIN vistierie.tenants t ON t.id = c.tenant_id
+                  LEFT JOIN vistierie.llm_call_bodies b ON b.call_id = c.id
+                 WHERE c.id = ?
+                """).param(id).query((rs, rn) -> {
+                    tools.jackson.databind.JsonNode reqJson = null;
+                    String reqStr = rs.getString("request_json");
+                    if (reqStr != null) {
+                        try { reqJson = json.readTree(reqStr); }
+                        catch (Exception e) { throw new RuntimeException(e); }
+                    }
+                    return new AdminLlmCallDetail(
+                            rs.getString("id"),
+                            rs.getString("tenant"),
+                            rs.getString("run_id"),
+                            rs.getString("purpose"),
+                            rs.getString("realm"),
+                            rs.getString("provider"),
+                            rs.getString("model"),
+                            rs.getString("endpoint"),
+                            rs.getInt("input_tokens"),
+                            rs.getInt("output_tokens"),
+                            rs.getInt("cache_creation_input_tokens"),
+                            rs.getInt("cache_read_input_tokens"),
+                            rs.getLong("cost_micros"),
+                            rs.getInt("duration_ms"),
+                            rs.getString("status"),
+                            rs.getString("error_code"),
+                            rs.getTimestamp("created_at").toInstant(),
+                            reqJson,
+                            rs.getString("response_text"),
+                            rs.getBoolean("body_missing"));
+                }).optional();
     }
 
     private AdminRunSummary mapRunSummary(ResultSet rs, int rn) throws SQLException {

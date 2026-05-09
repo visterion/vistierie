@@ -200,6 +200,7 @@ schedule"; idempotency is the consumer's job.
 | **Cron without ceremony** | `schedule: "0 0 * * * *"` on an agent — Vistierie does the rest. Skip-if-running prevents pile-up. |
 | **Batched runs at 50 % cost** | `POST /agents/{name}/batch` with up to 10 000 items routes through Anthropic's Message Batches API — half-price for tasks that tolerate < 1 h latency. Per-item output schema validation; partial-success aggregation on the parent run. |
 | **Realm-based privacy locks** | Rules with `locked=true` force sensitive realms (e.g. `medical`) to a specific provider regardless of any model override in the request body. |
+| **Full LLM call audit** | Every prompt and response stored in DB; aggregate cost queries by tenant / model / time. |
 | **In-process long-poll** | `GET /runs/{id}?wait_seconds=30` — DeferredResult-backed, no Redis. |
 | **Completion webhook** | Bounded retries (0 s → 5 s → 30 s default) with `webhook_sent` / `webhook_failed` events on the run. |
 
@@ -215,6 +216,7 @@ schedule"; idempotency is the consumer's job.
 | **4 — Batches** | `POST /agents/{name}/batch` (up to 10 000 items), Anthropic Message Batches API integration at 50 % cost, parent + child run topology with partial-success aggregation, `BatchPollingService` (60 s tick) with kill-switch awareness, `llm_calls.batch_id` audit link | ✅ Released |
 | **5 — Vision attachments cache** | Originally scoped as a SeaweedFS-backed dedupe layer; dropped as YAGNI — re-hit rate for both v1 tenants is near zero. Slot reserved for a future feature. | ⏭ Skipped |
 | **6 — Per-realm provider routing + admin REST API** | DB-backed `routing_rules` table, `RoutingResolver` with realm+purpose matching and privacy-lock (`locked=true`) support, full CRUD via `/admin/routing-rules`, cross-tenant audit views (`/admin/runs`, `/admin/llm-calls`), auto-seeded wildcard default on tenant creation | ✅ Released |
+| **7 — Cost transparency** | DB-backed full request/response audit (`llm_call_bodies` sidecar with 7-day retention default), hourly/daily cost rollups via `GET /admin/cost`, per-call deep dive via `GET /admin/llm-calls/{id}` with body JOIN, vision blobs redacted to sha256 stub | ✅ Released |
 
 All slices are merged to `main`. The full test suite is green including a
 Postgres-backed integration suite, a real-`@Scheduled` E2E test, a

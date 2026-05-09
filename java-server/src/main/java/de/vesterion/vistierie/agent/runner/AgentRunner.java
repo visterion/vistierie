@@ -125,12 +125,12 @@ public class AgentRunner {
 
             var pRes = provider.complete(providerReq);
             var cost = prices.costMicros(decision.model(), pRes.usage());
-            recorder.insert(new LlmCallRecorder.Row(
+            recorder.insertWithBody(new LlmCallRecorder.Row(
                     newUlid(), run.tenantId(), modelPurpose, null,
                     providerName, decision.model(), "complete",
                     pRes.usage().inputTokens(), pRes.usage().outputTokens(),
                     pRes.usage().cacheCreationInputTokens(), pRes.usage().cacheReadInputTokens(),
-                    cost, 0, "ok", null, runId, null));
+                    cost, 0, "ok", null, runId, null), providerReq, pRes);
 
             if ("end_turn".equals(pRes.stopReason())) {
                 JsonNode output;
