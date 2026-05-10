@@ -1,6 +1,6 @@
 # Vistierie
 
-> **A Java agent framework that lets any application become agentic — with cost-discipline and operational controls baked into the core, not bolted on.**
+> **A Java agent framework that lets any application become agentic, with cost-discipline and operational controls baked into the core, not bolted on.**
 
 Vistierie runs LLM-driven worker agents on behalf of consumer applications.
 You hand it a tool schema, a system prompt, and (optionally) a cron
@@ -34,16 +34,16 @@ keeps its prompts, tools, and domain logic; Vistierie keeps the runtime.
 **What sets it apart from LangChain4j and Spring AI:** cost-discipline
 and operational controls are first-class concepts, not add-ons.
 
-- **Tier-based routing** — declare an agent's purpose (`reasoning`,
+- **Tier-based routing**: declare an agent's purpose (`reasoning`,
   `routine`, `bulk`); the resolver picks the concrete model. Switching
   Opus → Haiku is a config change, not a code change.
-- **Tenant kill switch** — one PATCH freezes all autonomous activity
+- **Tenant kill switch**: one PATCH freezes all autonomous activity
   for a tenant. Checked before every dispatch and every cron tick.
-- **Per-call audit** — every LLM call writes a row to
+- **Per-call audit**: every LLM call writes a row to
   `vistierie.llm_calls` with input/output/cache tokens and EUR-micros
-  cost. Failed calls land there too — they're the most important to
+  cost. Failed calls land there too, they're the most important to
   observe.
-- **Privacy-locked routing** — rules can pin a sensitive realm (e.g.
+- **Privacy-locked routing**: rules can pin a sensitive realm (e.g.
   `medical`) to a specific provider regardless of any model override
   in the request body.
 
@@ -60,12 +60,12 @@ HiveMem is a knowledge base. Its data hygiene drifts: cells get added
 but the **knowledge graph** doesn't always learn the new facts, and
 related cells often sit orphaned without **tunnels** linking them.
 HiveMem registers a **Queen** that runs hourly and two specialized
-**Bees** — one extracts missing KG facts, one builds missing tunnels.
+**Bees**: one extracts missing KG facts, one builds missing tunnels.
 The Queen scans a realm, picks the worst-organized one, and
 dispatches both Bees in parallel for that realm.
 
 ```bash
-# 1 — Bee that extracts knowledge-graph facts from a cell batch
+# 1: Bee that extracts knowledge-graph facts from a cell batch
 curl -X POST http://vistierie:8090/agents \
   -H "Authorization: Bearer $HIVEMEM_TOKEN" -d '{
     "name": "bee-kg-extractor",
@@ -82,7 +82,7 @@ curl -X POST http://vistierie:8090/agents \
     "webhook_token": "<hivemem-side-secret>"
   }'
 
-# 2 — Bee that builds tunnels between related cells in a realm
+# 2: Bee that builds tunnels between related cells in a realm
 curl -X POST http://vistierie:8090/agents \
   -H "Authorization: Bearer $HIVEMEM_TOKEN" -d '{
     "name": "bee-tunnel-builder",
@@ -99,7 +99,7 @@ curl -X POST http://vistierie:8090/agents \
     "webhook_token": "<hivemem-side-secret>"
   }'
 
-# 3 — Queen on hourly schedule; both Bees wired in as subagent tools
+# 3: Queen on hourly schedule; both Bees wired in as subagent tools
 curl -X POST http://vistierie:8090/agents \
   -H "Authorization: Bearer $HIVEMEM_TOKEN" -d '{
     "name": "queen-curation",
@@ -122,12 +122,12 @@ curl -X POST http://vistierie:8090/agents \
 
 Every hour Vistierie fires the Queen. The Queen calls
 `realm.health` to find the realm in worst shape, then emits both
-subagent tool-uses in the same turn — Vistierie dispatches the two
+subagent tool-uses in the same turn, Vistierie dispatches the two
 Bees on virtual threads in parallel. Each Bee runs its own loop with
 its own tools (`cell.read`/`kg.add` vs `cell.search`/`tunnel.add`)
 and returns a validated JSON object: `{facts_added: 47,
 cells_scanned: 120}` and `{tunnels_added: 9}`. Those two
-`tool_result` blocks — and nothing else from the Bee transcripts —
+`tool_result` blocks, and nothing else from the Bee transcripts,
 land in the Queen's context (see [Context shielding](#context-shielding)
 below). The Queen aggregates them into its `actions` array, hits
 `end_turn`, and HiveMem receives the verdict via completion webhook.
@@ -136,11 +136,11 @@ below). The Queen aggregates them into its `actions` array, hits
 
 Dracul runs nightly and needs to dispatch **Strigoi** agents that
 hunt for findings across its data. Different Strigoi types want
-different model tiers — `Strigoi-Spin` reasons hard and gets Sonnet,
+different model tiers, `Strigoi-Spin` reasons hard and gets Sonnet,
 `Strigoi-Echo` is a cheap classifier and gets Haiku.
 
 ```bash
-# Dracul registers a Strigoi — purpose drives tier-based routing
+# Dracul registers a Strigoi, purpose drives tier-based routing
 curl -X POST http://vistierie:8090/agents \
   -H "Authorization: Bearer $DRACUL_TOKEN" -d '{
     "name": "strigoi-spin",
@@ -207,11 +207,11 @@ the parent always receives well-typed JSON.
 
 Every run shares one execution path; only the trigger differs.
 
-- **Manual** — `POST /agents/{name}/run` returns 202 with a `run_id`.
+- **Manual**: `POST /agents/{name}/run` returns 202 with a `run_id`.
   Long-poll with `GET /runs/{id}?wait_seconds=30` for the result.
-- **Subagent** — a parent agent emits `tool_use` with `type=subagent`.
+- **Subagent**: a parent agent emits `tool_use` with `type=subagent`.
   Recursion is bounded (default depth 5).
-- **Cron** — agents with a `schedule` field fire on the next boundary.
+- **Cron**: agents with a `schedule` field fire on the next boundary.
   A 30-second tick is kill-switch-aware and skips if the previous run
   is still open. Idempotency is the consumer's job.
 
@@ -282,9 +282,9 @@ java -jar target/vistierie-0.1.0-SNAPSHOT.jar
   stay in the consumer.
 - **Slim consumers.** Prompts, tool implementations, and domain logic
   live in HiveMem / Dracul. Vistierie sees opaque `tenant`, `realm`,
-  `purpose`, `messages`, `payload` — nothing else.
+  `purpose`, `messages`, `payload`, nothing else.
 - **Audit before features.** Every LLM call writes a row regardless
-  of whether the call succeeded — failed calls are the most
+  of whether the call succeeded, failed calls are the most
   important to observe.
 - **Not an MCP server, not a workflow engine, not a multi-agent bus,
   not a prompt library, not a vector store.** Reasoning lives with
@@ -294,4 +294,4 @@ java -jar target/vistierie-0.1.0-SNAPSHOT.jar
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Apache License 2.0, see [LICENSE](LICENSE) and [NOTICE](NOTICE).

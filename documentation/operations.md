@@ -49,7 +49,7 @@ curl -s -X POST "$BASE_URL/admin/tenants/hivemem/kill" \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "reason": "runaway cost spike — pausing for investigation",
+    "reason": "runaway cost spike, pausing for investigation",
     "setBy":  "ops@example.com"
   }'
 # → 204 No Content
@@ -231,7 +231,7 @@ block indefinitely.
 ### Cron caveats
 
 - Vistierie uses an **in-process scheduler**. Running two Vistierie
-  instances against the same database will cause double-firing — there's no
+  instances against the same database will cause double-firing, there's no
   leader election or DB lease in v1.
 - A restart drops missed cron boundaries; `last_tick_at` is preserved but
   the scheduler computes the next fire from the current clock.
@@ -266,7 +266,7 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" \
      https://vistierie/admin/llm-calls/<call-id> | jq .
 ```
 
-The response includes `request_json` (full system + messages) and `response_text`. Vision images are stored as `image_redacted` placeholders with sha256 + byte count — actual base64 bytes are not persisted.
+The response includes `request_json` (full system + messages) and `response_text`. Vision images are stored as `image_redacted` placeholders with sha256 + byte count, actual base64 bytes are not persisted.
 
 If `body_evicted: true`, the body has been deleted by retention. Default retention is 7 days. Increase via `vistierie.audit.body-retention-days` or set to `0` to keep forever.
 
@@ -299,5 +299,5 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" \
 ```
 
 After this rule is created, every `llm_calls` row for `realm=medical`
-will show the locked provider+model — never the consumer's requested
+will show the locked provider+model, never the consumer's requested
 model. Use `/admin/llm-calls?tenant=hivemem&realm=medical` to verify.

@@ -8,8 +8,8 @@ a routing policy, forwarded to the configured provider (Anthropic), and
 recorded in the `llm_calls` audit table.
 
 Two surfaces:
-- **Synchronous LLM gateway** — `POST /llm/complete`, `POST /llm/vision`.
-- **Agent framework** — `POST /agents`, `POST /agents/{name}/run`, `GET /runs/...`.
+- **Synchronous LLM gateway**: `POST /llm/complete`, `POST /llm/vision`.
+- **Agent framework**: `POST /agents`, `POST /agents/{name}/run`, `GET /runs/...`.
   See [agents.md](agents.md) for the agent and tool model.
 
 ---
@@ -22,8 +22,8 @@ All endpoints except `/healthz` and `/readyz` require:
 Authorization: Bearer <token>
 ```
 
-- **`/llm/**`** — tenant bearer token issued via `POST /admin/tenants`.
-- **`/admin/**`** — separate admin token configured via `VISTIERIE_ADMIN_TOKEN_HASH`.
+- **`/llm/**`**: tenant bearer token issued via `POST /admin/tenants`.
+- **`/admin/**`**: separate admin token configured via `VISTIERIE_ADMIN_TOKEN_HASH`.
 
 Tokens are stored as bcrypt hashes. The plaintext is never persisted. The admin
 token hash is set at deploy time (see [configuration.md](configuration.md)).
@@ -50,13 +50,13 @@ Run a chat completion against the tenant's routed model.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `purpose` | string | yes | Routing key — matched against tenant routing config |
+| `purpose` | string | yes | Routing key, matched against tenant routing config |
 | `realm` | string | no | Informational label; stored in audit log (no routing effect in Slice 1) |
 | `system` | string | no | System prompt prepended before `messages` |
 | `messages` | array | yes | List of `{role, content}` objects (OpenAI-compatible shape) |
 | `max_tokens` | integer | no | Cap on output tokens; routing config may set a lower cap |
 | `temperature` | number | no | Sampling temperature (0–1) |
-| `model` | string | no | Override the resolved model — only honoured when `allow-override: true` in routing config |
+| `model` | string | no | Override the resolved model, only honoured when `allow-override: true` in routing config |
 
 ### Response `200 OK`
 
@@ -88,13 +88,13 @@ Run a chat completion against the tenant's routed model.
 | `provider` | string | Provider that handled the call |
 | `model` | string | Model that handled the call (may differ from request when override is off) |
 | `cost_micros` | integer | Estimated cost in micro-EUR (divide by 1 000 000 for EUR) |
-| `llm_call_id` | string | Audit row ID — safe to log and reference in support requests |
+| `llm_call_id` | string | Audit row ID, safe to log and reference in support requests |
 
 ### Error codes
 
 | HTTP | Meaning |
 |---|---|
-| 400 | Validation error — malformed body or missing required field |
+| 400 | Validation error, malformed body or missing required field |
 | 401 | Missing or invalid bearer token |
 | 403 | Tenant kill-switch is active |
 | 502 | Provider returned an HTTP ≥ 500 error |
@@ -148,7 +148,7 @@ Run a vision (image-understanding) completion against the tenant's routed model.
 
 ### Response `200 OK`
 
-Identical shape to `/llm/complete` — same `text`, `stop_reason`, `usage`,
+Identical shape to `/llm/complete`, same `text`, `stop_reason`, `usage`,
 `provider`, `model`, `cost_micros`, `llm_call_id` fields.
 
 ### curl example
@@ -235,7 +235,7 @@ tenant return `403` until the switch is cleared or `until` elapses.
 
 ```json
 {
-  "reason": "runaway cost spike — pausing for investigation",
+  "reason": "runaway cost spike, pausing for investigation",
   "until":  "2026-05-06T00:00:00Z",
   "setBy":  "ops@example.com"
 }
@@ -272,7 +272,7 @@ Read the current kill-switch state for a tenant.
 ```json
 {
   "until":  "2026-05-06T00:00:00Z",
-  "reason": "runaway cost spike — pausing for investigation",
+  "reason": "runaway cost spike, pausing for investigation",
   "setBy":  "ops@example.com"
 }
 ```
@@ -316,7 +316,7 @@ Replace the agent definition. Increments `version`. Same body shape as
 
 ### `PATCH /agents/{name}`
 
-Partial update — currently supports `paused: true|false` to halt or resume
+Partial update, currently supports `paused: true|false` to halt or resume
 new run triggers without deleting the agent.
 
 ### `DELETE /agents/{name}`
@@ -368,11 +368,11 @@ Submit `N` agent invocations as one Anthropic Message-Batch.
 }
 ```
 
-- `items` — required, ≥1, ≤10 000.
-- `custom_id` per item — optional. Must match `^[a-zA-Z0-9_-]{1,64}$` and
+- `items`: required, ≥1, ≤10 000.
+- `custom_id` per item, optional. Must match `^[a-zA-Z0-9_-]{1,64}$` and
   be unique within the batch. If omitted, Vistierie generates one.
 
-**Response — `202 Accepted`:**
+**Response, `202 Accepted`:**
 ```json
 {
   "run_id": "01J...",
@@ -385,11 +385,11 @@ Submit `N` agent invocations as one Anthropic Message-Batch.
 ```
 
 **Errors:**
-- `400` — agent has tools, missing `output_schema`, empty/oversized
+- `400`: agent has tools, missing `output_schema`, empty/oversized
   `items`, or invalid/duplicate `custom_id`.
-- `404` — agent not found in this tenant.
-- `409` — agent paused.
-- `502` — upstream Anthropic batch submission failed.
+- `404`: agent not found in this tenant.
+- `409`: agent paused.
+- `502`: upstream Anthropic batch submission failed.
 
 The parent run row exposed via `GET /runs/{id}` includes the extra fields
 `anthropic_batch_id`, `output.items_total`, `output.items_done`,
@@ -452,7 +452,7 @@ walking parent → child run trees.
 ### PATCH semantics
 
 Only `provider`, `model`, `priority`, `allow_override`, `locked` are
-mutable. `tenant`, `realm`, `purpose` are immutable — change them by
+mutable. `tenant`, `realm`, `purpose` are immutable, change them by
 DELETE + POST.
 
 ---
@@ -542,13 +542,13 @@ Response:
 }
 ```
 
-Status codes: 200, 400 (bad granularity / group_by), 401, 422 (response_too_large — narrow query, max 10 000 result rows).
+Status codes: 200, 400 (bad granularity / group_by), 401, 422 (response_too_large, narrow query, max 10 000 result rows).
 
 ---
 
 ## `/admin/llm-calls/{id}` (detail)
 
-`GET /admin/llm-calls/{id}` — extends the row shape from `GET /admin/llm-calls` (Slice 6) with the full request body and response text from `llm_call_bodies`.
+`GET /admin/llm-calls/{id}`, extends the row shape from `GET /admin/llm-calls` (Slice 6) with the full request body and response text from `llm_call_bodies`.
 
 If the body has been deleted by retention, `request_json` and `response_text` are `null` and `body_evicted: true`.
 

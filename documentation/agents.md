@@ -9,18 +9,18 @@ the consumer owns the prompts and tool implementations.
 
 ## Lifecycle
 
-1. **Register** — `POST /agents` with the agent definition (system prompt,
+1. **Register**: `POST /agents` with the agent definition (system prompt,
    tools, output schema, limits, webhook token). Vistierie validates the JSON
    schemas and, if any tool is `type: subagent`, that the named target agent
    exists in the same tenant.
-2. **Trigger** — `POST /agents/{name}/run` with a `payload`. Returns
+2. **Trigger**: `POST /agents/{name}/run` with a `payload`. Returns
    `202 Accepted` with a `run_id`. Run executes asynchronously on a virtual
    thread.
-3. **Observe** — either:
+3. **Observe**: either:
    - long-poll `GET /runs/{run_id}?wait_seconds=N` (≤ 60s), or
-   - register a `completion_webhook` URL when triggering — Vistierie POSTs
+   - register a `completion_webhook` URL when triggering, Vistierie POSTs
      the terminal state to it with bounded retries.
-4. **Done or failed** — terminal status is `done` or `failed`. The full
+4. **Done or failed**: terminal status is `done` or `failed`. The full
    `agent_snapshot` and `messages_snapshot` are preserved for replay/audit.
 
 ---
@@ -48,7 +48,7 @@ Tools are declared inside the agent definition as a JSON array. Two types:
 Vistierie POSTs `{ "run_id", "tool_name", "input" }` to `webhook_url` with
 `Authorization: Bearer <agent.webhook_token>` and headers
 `X-Vistierie-Run-Id`, `X-Vistierie-Tool`. The consumer responds with
-`{ "output": <any-json> }` (or any JSON — Vistierie passes it through as the
+`{ "output": <any-json> }` (or any JSON, Vistierie passes it through as the
 `tool_result` content). 5xx responses are retried once with a 1s gap; any
 remaining error fails the run.
 
@@ -69,7 +69,7 @@ recursively starts a new run of `target_agent` with the `input` as payload.
 The child run gets its own `messages_snapshot`; only its terminal `output`
 is returned to the parent as the `tool_result` content. This is **context
 shielding**: the parent never sees the child's system prompt, turns, or
-intermediate tool calls — only the validated structured output.
+intermediate tool calls, only the validated structured output.
 
 Subagent-eligible agents must declare an `output_schema` so the parent
 receives well-typed JSON.
@@ -86,7 +86,7 @@ the token, configure it on their tool service for inbound auth, and supply
 it once at registration. Vistierie stores it on the agent row and includes
 it in every dispatched tool request.
 
-The same token is **not** used for completion webhooks — those use the
+The same token is **not** used for completion webhooks, those use the
 per-run `completion_webhook_token` supplied at trigger time.
 
 ---
@@ -111,7 +111,7 @@ When a run reaches `done` or `failed`, Vistierie POSTs to the configured
 
 Headers: `Authorization: Bearer <completion_webhook_token>`,
 `X-Vistierie-Run-Id: <run_id>`. Vistierie retries on any error with backoff
-(default 0s, 5s, 30s) and gives up after the third attempt — the run row
+(default 0s, 5s, 30s) and gives up after the third attempt, the run row
 remains the source of truth.
 
 ---
@@ -125,7 +125,7 @@ curl -H "Authorization: Bearer $TOK" \
 
 Vistierie holds the request until the run reaches a terminal state or the
 timeout elapses, whichever comes first. Maximum `wait_seconds` is 60.
-A response always reflects the **current** state — if it's still `running`
+A response always reflects the **current** state, if it's still `running`
 when the timeout fires, the client should re-poll.
 
 > **Operational note:** long-polls are in-process. A Vistierie restart
@@ -180,7 +180,7 @@ event is recorded on the open run. `agents.last_tick_at` advances either way.
 
 Vistierie does **not** replay missed cron boundaries after a restart.
 `last_tick_at` is preserved in the DB and the next tick is computed from
-the current clock. Don't rely on cron for exactly-once semantics —
+the current clock. Don't rely on cron for exactly-once semantics,
 treat it as "fires roughly on schedule, idempotency is the consumer's job".
 
 ### Pausing
@@ -231,7 +231,7 @@ body for a callback.
 ### Cost audit
 
 Every per-item LLM call writes one `vistierie.llm_calls` row with
-`batch_id` set. Cost rollups can split batch vs on-demand spend — see
+`batch_id` set. Cost rollups can split batch vs on-demand spend, see
 [operations.md](operations.md#batch-vs-on-demand-spend).
 
 ### Example
