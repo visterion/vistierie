@@ -107,6 +107,7 @@ class BedrockProviderTest {
         assertThat(sent.toolConfig()).isNotNull();
         assertThat(sent.toolConfig().tools()).hasSize(1);
         assertThat(sent.toolConfig().tools().get(0).toolSpec().name()).isEqualTo("cell.read");
+        assertThat(sent.toolConfig().tools().get(0).toolSpec().inputSchema()).isNotNull();
 
         JsonNode blocks = res.contentBlocks();
         assertThat(blocks).hasSize(2);
