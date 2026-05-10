@@ -62,7 +62,7 @@ class RoutingRuleRepositoryTest extends PostgresTestBase {
     void cascadeDeletesRulesWhenTenantDeleted() {
         repo.insert(rule(null, null, 1000));
         assertThat(repo.countByTenant(tenantId)).isEqualTo(1);
-        tenants.deleteById(tenantId);
+        tenants.delete(tenantId);
         assertThat(repo.countByTenant(tenantId)).isEqualTo(0);
     }
 

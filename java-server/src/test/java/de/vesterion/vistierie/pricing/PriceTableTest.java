@@ -6,7 +6,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class PriceTableTest {
-    PriceTable table = new PriceTable();
+    PriceTable table = new PriceTable(1.0);
 
     @Test void haikuPrice() {
         var u = new Usage(1_000_000, 1_000_000, 0, 0);
@@ -27,7 +27,7 @@ class PriceTableTest {
 
     @Test
     void batchPricingIsHalf() {
-        var t = new PriceTable();
+        var t = new PriceTable(1.0);
         var u = new de.vesterion.vistierie.pricing.Usage(1000, 200, 0, 0);
         var standard = t.costMicros("claude-haiku-4-5", u);
         assertThat(t.costMicrosBatch("claude-haiku-4-5", u))
