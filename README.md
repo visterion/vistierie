@@ -1,4 +1,5 @@
 # Vistierie
+<img width="1584" height="672" alt="image" src="https://github.com/user-attachments/assets/c737bb3f-4298-451c-8cf3-813b62184642" />
 
 > **A Java agent framework that lets any application become agentic, with cost-discipline and operational controls baked into the core, not bolted on.**
 
