@@ -2,9 +2,9 @@
 
 ## Scope (Slices 1 + 2)
 
-- **Slice 1 — gateway:** tenants, auth, kill-switch, routing, synchronous
+- **Slice 1, gateway:** tenants, auth, kill-switch, routing, synchronous
   `POST /llm/complete` and `POST /llm/vision`, Anthropic provider, audit log.
-- **Slice 2 — agent framework:** tenant-scoped agent registration,
+- **Slice 2, agent framework:** tenant-scoped agent registration,
   asynchronous run execution with parallel HTTP tools and recursive
   subagents (with context shielding), long-poll, completion webhook,
   per-run event timeline, opt-in stress harness.
@@ -81,7 +81,7 @@ Step by step:
 
 Vistierie is co-located with its consumers (HiveMem, Dracul) on one host,
 communicating over a private Docker network. No TLS or HMAC between services
-in v1 — the private network is the trust boundary (see spec §8.1).
+in v1, the private network is the trust boundary (see spec §8.1).
 
 Production image: `ghcr.io/vesterion/vistierie:main`  
 Listen port: `8090`
@@ -108,7 +108,7 @@ routing_rules
 
 routing_rules_audit
   id              BIGSERIAL PK
-  rule_id         BIGINT FK → routing_rules.id (nullable — survives deletes)
+  rule_id         BIGINT FK → routing_rules.id (nullable, survives deletes)
   tenant_id       UUID
   action          TEXT      -- "create" | "update" | "delete"
   changed_by      TEXT
@@ -118,14 +118,14 @@ routing_rules_audit
 
 Schema overview (all tables under `vistierie`):
 
-- `tenants`            — registered tenants, bcrypt token hash, kill-switch state
-- `llm_calls`          — per-call audit (tokens, cost, provider, model, run link)
-- `agents`             — tenant-scoped agent definitions
-- `runs`               — agent run lifecycle
-- `run_events`         — append-only event timeline per run
-- `routing_rules`      — operator-managed routing policy (per tenant, realm, purpose)
-- `routing_rules_audit` — append-only history of admin writes to routing_rules
-- `llm_call_bodies`    — full request JSON (vision blobs redacted to sha256 stub) and response text per LLM call; cleaned by BodyRetentionJob
+- `tenants`          : registered tenants, bcrypt token hash, kill-switch state
+- `llm_calls`        : per-call audit (tokens, cost, provider, model, run link)
+- `agents`           : tenant-scoped agent definitions
+- `runs`             : agent run lifecycle
+- `run_events`       : append-only event timeline per run
+- `routing_rules`    : operator-managed routing policy (per tenant, realm, purpose)
+- `routing_rules_audit`: append-only history of admin writes to routing_rules
+- `llm_call_bodies`  : full request JSON (vision blobs redacted to sha256 stub) and response text per LLM call; cleaned by BodyRetentionJob
 
 ---
 
@@ -146,7 +146,7 @@ consumer ── POST /agents/{name}/run ──▶ RunController
                                   ┌──────┴───────┐
                                   ▼              ▼
                           ToolDispatcher    AgentRunner (recursive child run)
-                          (parallel HTTP)   (context shielded — only output
+                          (parallel HTTP)   (context shielded, only output
                                              is returned to parent)
                                   │              │
                                   ▼              ▼
@@ -155,7 +155,7 @@ consumer ── POST /agents/{name}/run ──▶ RunController
 ```
 
 Context shielding: a parent run never sees a child's system prompt, turns,
-or intermediate tool calls — only the validated structured `output`. See
+or intermediate tool calls, only the validated structured `output`. See
 [agents.md](agents.md) for the agent definition and tool format.
 
 Long-polls and completion webhooks are in-process (no Redis, no DB queue);
