@@ -40,6 +40,10 @@ public class BedrockProvider implements LlmProvider {
             builder.system(SystemContentBlock.builder().text(req.system()).build());
         }
 
+        if (req.tools() != null && !req.tools().isEmpty()) {
+            builder.toolConfig(buildToolConfig(req.tools()));
+        }
+
         return call(builder.build(), req.model());
     }
 
@@ -173,6 +177,23 @@ public class BedrockProvider implements LlmProvider {
             return obj;
         }
         return mapper.nullNode();
+    }
+
+    private ToolConfiguration buildToolConfig(List<Map<String, Object>> tools) {
+        var toolList = tools.stream().map(t -> {
+            var specBuilder = ToolSpecification.builder()
+                    .name((String) t.get("name"));
+            if (t.containsKey("description")) {
+                specBuilder.description((String) t.get("description"));
+            }
+            if (t.containsKey("input_schema")) {
+                specBuilder.inputSchema(ToolInputSchema.builder()
+                        .json(toDocument(t.get("input_schema")))
+                        .build());
+            }
+            return Tool.builder().toolSpec(specBuilder.build()).build();
+        }).toList();
+        return ToolConfiguration.builder().tools(toolList).build();
     }
 
     private String writeJson(Object value) {

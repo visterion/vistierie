@@ -4,10 +4,13 @@ import de.vesterion.vistierie.pricing.Usage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import software.amazon.awssdk.core.document.Document;
 import software.amazon.awssdk.services.bedrockruntime.BedrockRuntimeClient;
 import software.amazon.awssdk.services.bedrockruntime.model.*;
+import tools.jackson.databind.JsonNode;
 
 import java.util.List;
 import java.util.Map;
@@ -57,5 +60,59 @@ class BedrockProviderTest {
         assertThat(res.stopReason()).isEqualTo("end_turn");
         assertThat(res.usage()).isEqualTo(new Usage(12, 5, 0, 0));
         assertThat(res.model()).isEqualTo("anthropic.claude-3-5-sonnet-20241022-v2:0");
+    }
+
+    @Test
+    void completeWithToolsSendsToolConfigAndParsesToolUse() {
+        when(client.converse(any(ConverseRequest.class))).thenReturn(
+            ConverseResponse.builder()
+                .output(ConverseOutput.builder()
+                    .message(Message.builder()
+                        .role(ConversationRole.ASSISTANT)
+                        .content(
+                            ContentBlock.fromText("thinking"),
+                            ContentBlock.fromToolUse(ToolUseBlock.builder()
+                                .toolUseId("toolu_1")
+                                .name("cell.read")
+                                .input(Document.fromMap(Map.of(
+                                    "id", Document.fromString("c1"))))
+                                .build()))
+                        .build())
+                    .build())
+                .stopReason(StopReason.TOOL_USE)
+                .usage(TokenUsage.builder().inputTokens(10).outputTokens(4).build())
+                .build()
+        );
+
+        var tools = List.of(Map.<String, Object>of(
+            "name", "cell.read",
+            "description", "read a cell",
+            "input_schema", Map.of(
+                "type", "object",
+                "properties", Map.of("id", Map.of("type", "string")),
+                "required", List.of("id"))
+        ));
+        var req = new ProviderRequest(
+            "amazon.nova-pro-v1:0", 256, null, "system",
+            List.of(Map.of("role", "user", "content", "find c1")),
+            tools, null, null
+        );
+
+        var captor = ArgumentCaptor.forClass(ConverseRequest.class);
+        var res = provider.complete(req);
+        org.mockito.Mockito.verify(client).converse(captor.capture());
+        ConverseRequest sent = captor.getValue();
+
+        assertThat(res.stopReason()).isEqualTo("tool_use");
+        assertThat(sent.toolConfig()).isNotNull();
+        assertThat(sent.toolConfig().tools()).hasSize(1);
+        assertThat(sent.toolConfig().tools().get(0).toolSpec().name()).isEqualTo("cell.read");
+
+        JsonNode blocks = res.contentBlocks();
+        assertThat(blocks).hasSize(2);
+        assertThat(blocks.get(1).path("type").asText()).isEqualTo("tool_use");
+        assertThat(blocks.get(1).path("name").asText()).isEqualTo("cell.read");
+        assertThat(blocks.get(1).path("id").asText()).isEqualTo("toolu_1");
+        assertThat(blocks.get(1).path("input").path("id").asText()).isEqualTo("c1");
     }
 }
