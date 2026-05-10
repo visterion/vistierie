@@ -10,6 +10,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import software.amazon.awssdk.core.document.Document;
 import software.amazon.awssdk.services.bedrockruntime.BedrockRuntimeClient;
 import software.amazon.awssdk.services.bedrockruntime.model.*;
+import software.amazon.awssdk.services.bedrockruntime.model.ImageFormat;
 import tools.jackson.databind.JsonNode;
 
 import java.util.List;
@@ -115,5 +116,39 @@ class BedrockProviderTest {
         assertThat(blocks.get(1).path("name").asText()).isEqualTo("cell.read");
         assertThat(blocks.get(1).path("id").asText()).isEqualTo("toolu_1");
         assertThat(blocks.get(1).path("input").path("id").asText()).isEqualTo("c1");
+    }
+
+    @Test
+    void visionBuildsImageBlock() {
+        when(client.converse(any(ConverseRequest.class))).thenReturn(
+            ConverseResponse.builder()
+                .output(ConverseOutput.builder()
+                    .message(Message.builder()
+                        .role(ConversationRole.ASSISTANT)
+                        .content(ContentBlock.fromText("a chart"))
+                        .build())
+                    .build())
+                .stopReason(StopReason.END_TURN)
+                .usage(TokenUsage.builder().inputTokens(3).outputTokens(2).build())
+                .build()
+        );
+
+        // 1×1 transparent PNG
+        String base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+        var captor = ArgumentCaptor.forClass(ConverseRequest.class);
+
+        var res = provider.vision("amazon.nova-pro-v1:0", 100, "image/png", base64, "describe it");
+
+        org.mockito.Mockito.verify(client).converse(captor.capture());
+        ConverseRequest sent = captor.getValue();
+        Message userMsg = sent.messages().get(0);
+
+        assertThat(userMsg.content()).hasSize(2);
+        assertThat(userMsg.content().get(0).type()).isEqualTo(ContentBlock.Type.IMAGE);
+        assertThat(userMsg.content().get(0).image().format()).isEqualTo(ImageFormat.PNG);
+        assertThat(userMsg.content().get(1).type()).isEqualTo(ContentBlock.Type.TEXT);
+        assertThat(userMsg.content().get(1).text()).isEqualTo("describe it");
+        assertThat(res.text()).isEqualTo("a chart");
+        assertThat(res.model()).isEqualTo("amazon.nova-pro-v1:0");
     }
 }
