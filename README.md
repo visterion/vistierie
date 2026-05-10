@@ -13,7 +13,7 @@ per tenant, and tier-based model routing.
 [![test](https://github.com/visterion/vistierie/actions/workflows/test.yml/badge.svg)](https://github.com/visterion/vistierie/actions/workflows/test.yml)
 [![codeql](https://github.com/visterion/vistierie/actions/workflows/codeql.yml/badge.svg)](https://github.com/visterion/vistierie/actions/workflows/codeql.yml)
 [![codecov](https://codecov.io/gh/visterion/vistierie/graph/badge.svg)](https://codecov.io/gh/visterion/vistierie)
-[![lines of code](https://img.shields.io/tokei/lines/github/visterion/vistierie)](https://github.com/visterion/vistierie)
+[![code size](https://img.shields.io/github/languages/code-size/visterion/vistierie)](https://github.com/visterion/vistierie)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Java](https://img.shields.io/badge/java-25-blue)](https://openjdk.org)
 [![Spring Boot](https://img.shields.io/badge/spring%20boot-4.0-6DB33F)](https://spring.io/projects/spring-boot)
