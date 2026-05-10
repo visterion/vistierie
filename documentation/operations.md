@@ -169,6 +169,40 @@ curl -sf http://localhost:8090/readyz
 
 ---
 
+## Metrics
+
+Vistierie exposes Spring Boot Actuator with a Prometheus registry. The auth
+filter bypasses `/actuator/**`, so the following endpoints are reachable
+without a bearer token — keep the service behind a network ACL or restrict
+exposure via `management.endpoints.web.exposure.include`.
+
+| Endpoint | Purpose |
+|---|---|
+| `/actuator/health` | Liveness/readiness aggregate (terse, no details) |
+| `/actuator/info` | Build/version info |
+| `/actuator/prometheus` | OpenMetrics-format scrape target |
+
+LLM-specific series (tagged by `provider`, `model`, `endpoint`, `status`):
+
+| Metric | Type | Notes |
+|---|---|---|
+| `vistierie_llm_calls_total` | counter | One increment per `complete`/`vision` call |
+| `vistierie_llm_latency_seconds` | timer/histogram | Wall-clock latency from request to provider response |
+| `vistierie_llm_cost_micros_total` | counter | Cumulative cost in EUR-micros (skipped on error/killed) |
+
+Standard JVM, HikariCP, Tomcat, and Flyway metrics ship out of the box.
+
+Sample Prometheus scrape config:
+
+```yaml
+- job_name: vistierie
+  metrics_path: /actuator/prometheus
+  static_configs:
+    - targets: [vistierie:8090]
+```
+
+---
+
 ## Agent runs
 
 ### Cost rollup by run
