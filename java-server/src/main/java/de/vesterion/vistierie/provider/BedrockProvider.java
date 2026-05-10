@@ -41,7 +41,7 @@ public class BedrockProvider implements LlmProvider {
         }
 
         if (req.tools() != null && !req.tools().isEmpty()) {
-            builder.toolConfig(buildToolConfig(req.tools()));
+            builder.toolConfig(buildToolConfig(req.tools())); // req.toolChoice() not yet forwarded
         }
 
         return call(builder.build(), req.model());
