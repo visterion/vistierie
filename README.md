@@ -10,6 +10,9 @@ per-call audit trail with token-accurate EUR-micros cost, a kill switch
 per tenant, and tier-based model routing.
 
 [![docker](https://github.com/visterion/vistierie/actions/workflows/docker.yml/badge.svg)](https://github.com/visterion/vistierie/actions/workflows/docker.yml)
+[![test](https://github.com/visterion/vistierie/actions/workflows/test.yml/badge.svg)](https://github.com/visterion/vistierie/actions/workflows/test.yml)
+[![codeql](https://github.com/visterion/vistierie/actions/workflows/codeql.yml/badge.svg)](https://github.com/visterion/vistierie/actions/workflows/codeql.yml)
+[![codecov](https://codecov.io/gh/visterion/vistierie/graph/badge.svg)](https://codecov.io/gh/visterion/vistierie)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Java](https://img.shields.io/badge/java-25-blue)](https://openjdk.org)
 [![Spring Boot](https://img.shields.io/badge/spring%20boot-4.0-6DB33F)](https://spring.io/projects/spring-boot)
