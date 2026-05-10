@@ -165,10 +165,13 @@ class AdminAuditRepositoryTest extends PostgresTestBase {
     @Test void findCallDetailReturnsBodyWhenPresent() {
         var t = Instant.parse("2026-04-01T10:00:00Z");
         var id = insertCall("p", "r", "anthropic", "m", "complete", "ok", 0, null, t);
+        // Use a current created_at for the body so the row does not get swept by
+        // LlmCallBodyRepositoryTest.deleteOlderThanRemovesOldOnly when test order
+        // varies between filesystems.
         jdbc.sql("""
                 INSERT INTO vistierie.llm_call_bodies (call_id, request_json, response_text, created_at)
                 VALUES (?, ?::jsonb, ?, ?)
-                """).params(id, "{\"hello\":\"world\"}", "response-text", Timestamp.from(t))
+                """).params(id, "{\"hello\":\"world\"}", "response-text", Timestamp.from(Instant.now()))
                 .update();
 
         var detail = repo.findCallDetail(id).orElseThrow();
