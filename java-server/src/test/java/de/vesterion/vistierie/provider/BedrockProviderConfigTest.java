@@ -2,6 +2,7 @@ package de.vesterion.vistierie.provider;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import software.amazon.awssdk.services.bedrockruntime.BedrockRuntimeClient;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -18,6 +19,7 @@ class BedrockProviderConfigTest {
         ).run(ctx -> {
             assertThat(ctx).hasSingleBean(BedrockProvider.class);
             assertThat(ctx.getBean(BedrockProvider.class).name()).isEqualTo("bedrock");
+            assertThat(ctx).hasSingleBean(BedrockRuntimeClient.class);
         });
     }
 
