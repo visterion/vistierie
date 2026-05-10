@@ -44,6 +44,9 @@ vistierie:
       api-key: ${XAI_API_KEY:}
       timeout-seconds: 60
   mock-llm: ${VISTIERIE_MOCK_LLM:false}
+  bedrock:
+    region: ${AWS_REGION:}
+    enabled: ${BEDROCK_ENABLED:false}
   audit:
     body-retention-days: 7
 
