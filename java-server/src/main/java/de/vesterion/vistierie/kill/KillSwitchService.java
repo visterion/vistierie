@@ -1,5 +1,6 @@
 package de.vesterion.vistierie.kill;
 
+import de.vesterion.vistierie.auth.AuthExceptions;
 import de.vesterion.vistierie.tenants.TenantRepository;
 import org.springframework.stereotype.Component;
 
@@ -30,7 +31,8 @@ public class KillSwitchService {
     }
 
     public void check(UUID tenantId) {
-        var t = repo.findById(tenantId).orElseThrow();
+        var t = repo.findById(tenantId).orElseThrow(() ->
+                new AuthExceptions.Unauthorized("tenant no longer exists: " + tenantId));
         if (t.killUntil() != null && t.killUntil().isAfter(clock.instant())) {
             throw new KilledException(t.killReason(), t.killUntil());
         }

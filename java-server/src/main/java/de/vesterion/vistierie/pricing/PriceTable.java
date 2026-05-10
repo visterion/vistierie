@@ -1,16 +1,28 @@
 package de.vesterion.vistierie.pricing;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
 
 /**
  * EUR-micros (1 EUR = 1_000_000 micros) per million input/output tokens.
- * Source: Anthropic public pricing converted at a fixed 1 USD = 0.92 EUR.
- * When prices change, edit the table and ship a release.
+ * Source: Anthropic public pricing converted at a fixed 1 USD = 0.92 EUR
+ * (the table values bake in this rate). When the FX rate drifts, configure
+ * {@code vistierie.pricing.cost-multiplier} to scale all costs without
+ * regenerating the table.
  */
 @Component
 public class PriceTable {
+
+    private final double costMultiplier;
+
+    public PriceTable(@Value("${vistierie.pricing.cost-multiplier:1.0}") double costMultiplier) {
+        if (costMultiplier <= 0) {
+            throw new IllegalArgumentException("cost-multiplier must be > 0");
+        }
+        this.costMultiplier = costMultiplier;
+    }
 
     private record Rates(long inputPerMtok,
                          long outputPerMtok,
@@ -45,7 +57,7 @@ public class PriceTable {
         long output = mul(u.outputTokens(),              r.outputPerMtok());
         long cwrite = mul(u.cacheCreationInputTokens(),  r.cacheWritePerMtok());
         long cread  = mul(u.cacheReadInputTokens(),      r.cacheReadPerMtok());
-        return input + output + cwrite + cread;
+        return Math.round((input + output + cwrite + cread) * costMultiplier);
     }
 
     /** Half-price for batched calls per Anthropic Batches pricing. */
