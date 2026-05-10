@@ -1,6 +1,7 @@
 package de.vesterion.vistierie.provider;
 
 import de.vesterion.vistierie.pricing.Usage;
+import software.amazon.awssdk.core.SdkBytes;
 import software.amazon.awssdk.core.document.Document;
 import software.amazon.awssdk.services.bedrockruntime.BedrockRuntimeClient;
 import software.amazon.awssdk.services.bedrockruntime.model.*;
@@ -49,8 +50,30 @@ public class BedrockProvider implements LlmProvider {
 
     @Override
     public ProviderResponse vision(String model, int maxTokens,
-                                   String mediaType, String base64, String prompt) {
-        throw new UnsupportedOperationException("vision not yet implemented");
+                                    String mediaType, String base64, String prompt) {
+        String format = mediaType.replace("image/", "");
+        var imageBlock = ImageBlock.builder()
+                .format(ImageFormat.fromValue(format))
+                .source(ImageSource.builder()
+                        .bytes(SdkBytes.fromByteArray(
+                                java.util.Base64.getDecoder().decode(base64)))
+                        .build())
+                .build();
+
+        var request = ConverseRequest.builder()
+                .modelId(model)
+                .messages(Message.builder()
+                        .role(ConversationRole.USER)
+                        .content(
+                                ContentBlock.fromImage(imageBlock),
+                                ContentBlock.fromText(prompt))
+                        .build())
+                .inferenceConfig(InferenceConfiguration.builder()
+                        .maxTokens(maxTokens)
+                        .build())
+                .build();
+
+        return call(request, model);
     }
 
     private ProviderResponse call(ConverseRequest request, String modelId) {
