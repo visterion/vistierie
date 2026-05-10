@@ -23,7 +23,7 @@ For each `/llm/complete` and `/llm/vision` call, the resolver:
 
 ## Privacy lock pattern
 
-A rule with `locked=true` ignores `allow_override` at resolution time —
+A rule with `locked=true` ignores `allow_override` at resolution time,
 the tenant cannot escape the rule by sending a `model` override. Use it
 for realms whose data must not leave a specific provider.
 

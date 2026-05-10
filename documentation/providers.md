@@ -14,7 +14,7 @@ directly via Spring's `RestClient`. No Anthropic SDK dependency is used.
 
 The API key is read from the `ANTHROPIC_API_KEY` environment variable (or
 `vistierie.anthropic.api-key` in YAML). The base URL can be overridden via
-`vistierie.anthropic.base-url` — useful for integration tests that point to a
+`vistierie.anthropic.base-url`, useful for integration tests that point to a
 local stub.
 
 Both `complete` and `vision` calls go through the same `/v1/messages` endpoint.
@@ -50,7 +50,7 @@ ships with **OpenAI** and **xAI** preconfigured.
 |---|---|
 | Endpoint | `<base-url>/chat/completions` |
 | Auth header | `Authorization: Bearer <api-key>` |
-| Method | `POST` (request/response only — no streaming) |
+| Method | `POST` (request/response only, no streaming) |
 | Body shape | OpenAI Chat Completions API |
 
 ### Wire details
@@ -99,13 +99,13 @@ Models priced: `grok-4`, `grok-4-fast`, `grok-code-fast-1`.
 ### Empty api-key behavior
 
 A provider entry with an empty or missing `api-key` is **silently skipped** at
-startup — no bean is registered, and the routing layer fails-fast with
+startup, no bean is registered, and the routing layer fails-fast with
 `unknown provider <name>` if anything tries to use it. This is intentional so
 that local dev environments without all keys configured can still boot.
 
-### Wire correctness — testing without API keys
+### Wire correctness, testing without API keys
 
-We don't ship live smoke tests against the real OpenAI/xAI endpoints — they
+We don't ship live smoke tests against the real OpenAI/xAI endpoints, they
 require keys, cost money, and are flaky for CI. Instead, the contract is
 verified offline against the official OpenAI OpenAPI spec via
 [Prism](https://github.com/stoplightio/prism), wrapped in Testcontainers:
@@ -114,10 +114,10 @@ verified offline against the official OpenAI OpenAPI spec via
   `github.com/openai/openai-openapi`).
 - `OpenAiCompatibleProviderContractIT` boots `stoplight/prism:5` in dynamic
   mode (`-d`) and points the provider at it.
-- Prism **validates incoming requests** against the spec — if our request
+- Prism **validates incoming requests** against the spec, if our request
   body has the wrong field name, wrong type, or violates a required-field
   constraint, Prism returns `422` and the test fails.
-- Prism **generates dynamic responses** from the spec's response schema —
+- Prism **generates dynamic responses** from the spec's response schema,
   if our parser expects a field that isn't there, the test fails.
 
 This catches schema-level wire mistakes that hand-crafted WireMock fixtures
@@ -137,14 +137,14 @@ Run `./mvnw -Dtest=OpenAiCompatibleProviderContractIT test` to re-validate.
 OpenAI and xAI rates are transcribed from the
 [BerriAI/litellm community price catalog](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json),
 which carries source URLs to the upstream provider pricing pages. We
-intentionally do *not* fetch this JSON at runtime — manual transcription with
+intentionally do *not* fetch this JSON at runtime, manual transcription with
 in-code source attribution keeps Vistierie offline-buildable and tests
 deterministic. When a provider changes prices, edit `PriceTable.RATES` and
 ship a release.
 
 ### Adding another OpenAI-compatible provider (Groq, DeepSeek, Ollama, …)
 
-The class is generic — adding a new provider takes three YAML lines:
+The class is generic, adding a new provider takes three YAML lines:
 
 ```yaml
 vistierie:
@@ -199,7 +199,7 @@ replace the real Anthropic HTTP calls with a deterministic mock.
 - `MockProvider` registers under `name() = "anthropic"` so it satisfies all
   routing entries that point to `provider: anthropic`.
 - `AnthropicProvider` is deactivated via `@ConditionalOnProperty` when mock mode
-  is on — so the real client is never instantiated and no `ANTHROPIC_API_KEY` is
+  is on, so the real client is never instantiated and no `ANTHROPIC_API_KEY` is
   required.
 - Mock responses are fixed strings with realistic token counts for cost
   accounting tests.
