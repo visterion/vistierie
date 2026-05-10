@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
@@ -150,5 +151,75 @@ class BedrockProviderTest {
         assertThat(userMsg.content().get(1).text()).isEqualTo("describe it");
         assertThat(res.text()).isEqualTo("a chart");
         assertThat(res.model()).isEqualTo("amazon.nova-pro-v1:0");
+    }
+
+    @Test
+    void throttlingMaps429() {
+        when(client.converse(any(ConverseRequest.class))).thenThrow(
+            ThrottlingException.builder().message("slow down").build());
+        var req = new ProviderRequest("amazon.nova-pro-v1:0", 10, null, null,
+            List.of(Map.of("role", "user", "content", "hi")), null, null, null);
+
+        assertThatThrownBy(() -> provider.complete(req))
+            .isInstanceOf(LlmProvider.ProviderException.class)
+            .satisfies(e -> {
+                var pe = (LlmProvider.ProviderException) e;
+                assertThat(pe.statusCode()).isEqualTo(429);
+                assertThat(pe.errorCode()).isEqualTo("rate_limit_exceeded");
+            });
+    }
+
+    @Test
+    void validationMaps400() {
+        when(client.converse(any(ConverseRequest.class))).thenThrow(
+            ValidationException.builder().message("bad input").build());
+        var req = new ProviderRequest("amazon.nova-pro-v1:0", 10, null, null,
+            List.of(Map.of("role", "user", "content", "hi")), null, null, null);
+
+        assertThatThrownBy(() -> provider.complete(req))
+            .isInstanceOf(LlmProvider.ProviderException.class)
+            .satisfies(e -> {
+                var pe = (LlmProvider.ProviderException) e;
+                assertThat(pe.statusCode()).isEqualTo(400);
+                assertThat(pe.errorCode()).isEqualTo("invalid_request");
+            });
+    }
+
+    @Test
+    void modelNotReadyMaps503() {
+        when(client.converse(any(ConverseRequest.class))).thenThrow(
+            ModelNotReadyException.builder().message("warming up").build());
+        var req = new ProviderRequest("amazon.nova-pro-v1:0", 10, null, null,
+            List.of(Map.of("role", "user", "content", "hi")), null, null, null);
+
+        assertThatThrownBy(() -> provider.complete(req))
+            .isInstanceOf(LlmProvider.ProviderException.class)
+            .satisfies(e -> {
+                var pe = (LlmProvider.ProviderException) e;
+                assertThat(pe.statusCode()).isEqualTo(503);
+                assertThat(pe.errorCode()).isEqualTo("model_unavailable");
+            });
+    }
+
+    @Test
+    void unknownBedrockExceptionMaps502() {
+        when(client.converse(any(ConverseRequest.class))).thenThrow(
+            BedrockRuntimeException.builder().message("nope").build());
+        var req = new ProviderRequest("amazon.nova-pro-v1:0", 10, null, null,
+            List.of(Map.of("role", "user", "content", "hi")), null, null, null);
+
+        assertThatThrownBy(() -> provider.complete(req))
+            .isInstanceOf(LlmProvider.ProviderException.class)
+            .satisfies(e -> {
+                var pe = (LlmProvider.ProviderException) e;
+                assertThat(pe.statusCode()).isEqualTo(502);
+                assertThat(pe.errorCode()).isEqualTo("transport_error");
+            });
+    }
+
+    @Test
+    void submitBatchThrowsUnsupported() {
+        assertThatThrownBy(() -> provider.submitBatch(List.of()))
+            .isInstanceOf(UnsupportedOperationException.class);
     }
 }
