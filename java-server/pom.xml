@@ -5,8 +5,8 @@
     <modelVersion>4.0.0</modelVersion>
     <properties>
         <java.version>25</java.version>
-        <testcontainers.version>1.20.4</testcontainers.version>
-        <wiremock.version>3.9.2</wiremock.version>
+        <testcontainers.version>1.21.4</testcontainers.version>
+        <wiremock.version>3.13.2</wiremock.version>
     </properties>
     <parent>
         <groupId>org.springframework.boot</groupId>
@@ -89,7 +89,7 @@
         <dependency>
             <groupId>org.awaitility</groupId>
             <artifactId>awaitility</artifactId>
-            <version>4.2.2</version>
+            <version>4.3.0</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
