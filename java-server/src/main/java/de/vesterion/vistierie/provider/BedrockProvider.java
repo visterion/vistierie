@@ -69,7 +69,7 @@ public class BedrockProvider implements LlmProvider {
                 .filter(b -> b.type() == ContentBlock.Type.TEXT)
                 .map(ContentBlock::text)
                 .collect(Collectors.joining());
-        String stopReason = resp.stopReason().toString();
+        String stopReason = resp.stopReason() != null ? resp.stopReason().toString() : "unknown";
         TokenUsage u = resp.usage();
         var usage = new Usage(u.inputTokens(), u.outputTokens(), 0, 0);
         ArrayNode contentBlocks = synthesizeContentBlocks(msg.content());
@@ -132,7 +132,8 @@ public class BedrockProvider implements LlmProvider {
                                 .content(ToolResultContentBlock.fromText(text))
                                 .build());
                     }
-                    default -> ContentBlock.fromText("");
+                    default -> throw new LlmProvider.ProviderException(400, "invalid_request",
+                            "unsupported content block type: " + block.get("type"));
                 };
             }).toList();
         }
