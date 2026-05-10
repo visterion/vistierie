@@ -32,7 +32,8 @@ public class AuthFilter extends OncePerRequestFilter {
                                     HttpServletResponse res,
                                     FilterChain chain) throws ServletException, IOException {
         var path = req.getRequestURI();
-        if (path.equals("/healthz") || path.equals("/readyz")) {
+        if (path.equals("/healthz") || path.equals("/readyz")
+                || path.startsWith("/actuator/")) {
             chain.doFilter(req, res);
             return;
         }

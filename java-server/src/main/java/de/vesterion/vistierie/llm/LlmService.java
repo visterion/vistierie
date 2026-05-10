@@ -23,24 +23,28 @@ public class LlmService {
     private final PriceTable prices;
     private final LlmCallRecorder recorder;
     private final KillSwitchService kill;
+    private final LlmMetrics metrics;
 
     public LlmService(RoutingResolver routing, ProviderRegistry providers,
-                      PriceTable prices, LlmCallRecorder recorder, KillSwitchService kill) {
+                      PriceTable prices, LlmCallRecorder recorder, KillSwitchService kill,
+                      LlmMetrics metrics) {
         this.routing = routing;
         this.providers = providers;
         this.prices = prices;
         this.recorder = recorder;
         this.kill = kill;
+        this.metrics = metrics;
     }
 
     public LlmResponse complete(CompleteRequest req) {
         var tenantId = RequestContext.requireTenantId();
         var tenant = RequestContext.requireTenantName();
-        var id = ulid();
+        var id = randomCallId();
 
         var killBlocked = isKilled(tenantId);
         if (killBlocked != null) {
             recordKilled(id, tenantId, req.purpose(), req.realm(), "complete");
+            metrics.record("n/a", "n/a", "complete", "killed", 0, 0);
             throw killBlocked;
         }
 
@@ -66,16 +70,18 @@ public class LlmService {
                     pRes.usage().inputTokens(), pRes.usage().outputTokens(),
                     pRes.usage().cacheCreationInputTokens(), pRes.usage().cacheReadInputTokens(),
                     cost, dur, "ok", null, null, null), pReq, pRes);
+            metrics.record(decision.provider(), decision.model(), "complete", "ok", dur, cost);
             return new LlmResponse(pRes.text(), pRes.stopReason(), pRes.usage(),
                     decision.provider(), decision.model(), cost, id);
         } catch (LlmProvider.ProviderException e) {
             var dur = (int) ((System.nanoTime() - start) / 1_000_000);
+            var status = e.statusCode() >= 500 ? "error" : "rate_limited";
             recorder.insertWithBody(new LlmCallRecorder.Row(
                     id, tenantId, req.purpose(), req.realm(),
                     decision.provider(), decision.model(), "complete",
-                    0, 0, 0, 0, 0, dur,
-                    e.statusCode() >= 500 ? "error" : "rate_limited",
+                    0, 0, 0, 0, 0, dur, status,
                     e.errorCode(), null, null), pReq, null);
+            metrics.record(decision.provider(), decision.model(), "complete", status, dur, 0);
             throw e;
         }
     }
@@ -83,11 +89,12 @@ public class LlmService {
     public LlmResponse vision(VisionRequest req) {
         var tenantId = RequestContext.requireTenantId();
         var tenant = RequestContext.requireTenantName();
-        var id = ulid();
+        var id = randomCallId();
 
         var killBlocked = isKilled(tenantId);
         if (killBlocked != null) {
             recordKilled(id, tenantId, req.purpose(), req.realm(), "vision");
+            metrics.record("n/a", "n/a", "vision", "killed", 0, 0);
             throw killBlocked;
         }
 
@@ -120,16 +127,18 @@ public class LlmService {
                     pRes.usage().inputTokens(), pRes.usage().outputTokens(),
                     pRes.usage().cacheCreationInputTokens(), pRes.usage().cacheReadInputTokens(),
                     cost, dur, "ok", null, null, null), pReq, pRes);
+            metrics.record(decision.provider(), decision.model(), "vision", "ok", dur, cost);
             return new LlmResponse(pRes.text(), pRes.stopReason(), pRes.usage(),
                     decision.provider(), decision.model(), cost, id);
         } catch (LlmProvider.ProviderException e) {
             var dur = (int) ((System.nanoTime() - start) / 1_000_000);
+            var status = e.statusCode() >= 500 ? "error" : "rate_limited";
             recorder.insertWithBody(new LlmCallRecorder.Row(
                     id, tenantId, req.purpose(), req.realm(),
                     decision.provider(), decision.model(), "vision",
-                    0, 0, 0, 0, 0, dur,
-                    e.statusCode() >= 500 ? "error" : "rate_limited",
+                    0, 0, 0, 0, 0, dur, status,
                     e.errorCode(), null, null), pReq, null);
+            metrics.record(decision.provider(), decision.model(), "vision", status, dur, 0);
             throw e;
         }
     }
@@ -150,7 +159,8 @@ public class LlmService {
                 0, 0, 0, 0, 0, 0, "killed", null, null, null));
     }
 
-    private static String ulid() {
+    private static String randomCallId() {
+        // Compact opaque id; not a real ULID, just a hex-style identifier.
         return UUID.randomUUID().toString().replace("-", "").toUpperCase();
     }
 }
