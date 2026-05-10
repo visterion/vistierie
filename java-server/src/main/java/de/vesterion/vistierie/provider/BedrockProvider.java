@@ -51,7 +51,7 @@ public class BedrockProvider implements LlmProvider {
     @Override
     public ProviderResponse vision(String model, int maxTokens,
                                     String mediaType, String base64, String prompt) {
-        String format = mediaType.replace("image/", "");
+        String format = mediaType.startsWith("image/") ? mediaType.substring("image/".length()) : mediaType;
         var imageBlock = ImageBlock.builder()
                 .format(ImageFormat.fromValue(format))
                 .source(ImageSource.builder()
