@@ -26,6 +26,8 @@
 | `vistierie.agents.scheduler.tick-millis` |, | `30000` | Scheduler poll interval in ms |
 | `vistierie.agents.batch.poll-millis` |, | `60000` | Polling interval for open Anthropic batches |
 | `vistierie.agents.batch.max-items` |, | `10000` | Per-request item cap on `POST /agents/{name}/batch` |
+| `vistierie.pricing.cost-multiplier` |, | `1.0` | Scales every cost value returned by `PriceTable`. The shipped table bakes in 1 USD = 0.92 EUR; set this when the FX rate drifts and you cannot ship a release. |
+| `management.endpoints.web.exposure.include` |, | `health,info,prometheus` | Actuator endpoints exposed under `/actuator/`. The auth filter bypasses `/actuator/**`, so do not include sensitive endpoints here without putting Vistierie behind a network ACL. |
 
 Environment variables take precedence over YAML values via Spring's
 `${ENV_VAR:default}` placeholder syntax. In Docker deployments pass secrets as

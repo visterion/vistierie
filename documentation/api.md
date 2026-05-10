@@ -16,7 +16,7 @@ Two surfaces:
 
 ## Authentication
 
-All endpoints except `/healthz` and `/readyz` require:
+All endpoints except `/healthz`, `/readyz`, and `/actuator/**` require:
 
 ```
 Authorization: Bearer <token>
@@ -95,7 +95,7 @@ Run a chat completion against the tenant's routed model.
 | HTTP | Meaning |
 |---|---|
 | 400 | Validation error, malformed body or missing required field |
-| 401 | Missing or invalid bearer token |
+| 401 | Missing or invalid bearer token, or the bearer's tenant has been deleted mid-request |
 | 403 | Tenant kill-switch is active |
 | 502 | Provider returned an HTTP ≥ 500 error |
 | 504 | Provider request timed out |
