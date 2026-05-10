@@ -92,7 +92,9 @@ class AgentRepositoryTest extends PostgresTestBase {
         jdbc.sql("UPDATE vistierie.agents SET schedule='0 * * * * *' WHERE id IN (?, ?)")
                 .params(schedId, pausedSchedId).update();
 
-        var found = repo.findScheduled();
+        var found = repo.findScheduled().stream()
+                .filter(a -> a.tenantId().equals(tenantId))
+                .toList();
         assertThat(found).extracting(Agent::name).containsExactly("scheduled");
     }
 
