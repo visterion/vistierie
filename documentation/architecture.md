@@ -1,16 +1,19 @@
 # Architecture
 
-## Scope (Slices 1 + 2)
+## Scope (v1.0)
 
-- **Slice 1, gateway:** tenants, auth, kill-switch, routing, synchronous
-  `POST /llm/complete` and `POST /llm/vision`, Anthropic provider, audit log.
-- **Slice 2, agent framework:** tenant-scoped agent registration,
-  asynchronous run execution with parallel HTTP tools and recursive
-  subagents (with context shielding), long-poll, completion webhook,
-  per-run event timeline, opt-in stress harness.
-
-**Out of scope:** scheduler/cron triggers, multi-tenant analytics dashboard,
-self-serve routing config (still operator-edited).
+- **Gateway:** tenants, auth, kill-switch, routing, synchronous
+  `POST /llm/complete` and `POST /llm/vision`, Anthropic / OpenAI / xAI
+  providers, per-call audit log with token-accurate EUR-micros cost.
+- **Agent framework:** tenant-scoped agent registration, asynchronous
+  run execution with parallel HTTP tools and recursive subagents (with
+  context shielding), long-poll, completion webhook, per-run event
+  timeline, opt-in stress harness.
+- **Scheduler:** cron-driven agent runs with kill-switch awareness and
+  no-overlap safety per agent.
+- **Batch:** `POST /agents/{name}/batch` via Anthropic Message Batches API.
+- **Admin:** DB-backed routing rules with privacy lock, cross-tenant audit
+  reads, hourly/daily cost rollups, retention job for stored request bodies.
 
 ---
 
@@ -83,7 +86,7 @@ Vistierie is co-located with its consumers (HiveMem, Dracul) on one host,
 communicating over a private Docker network. No TLS or HMAC between services
 in v1, the private network is the trust boundary (see spec §8.1).
 
-Production image: `ghcr.io/vesterion/vistierie:main`  
+Production image: `ghcr.io/visterion/vistierie:main` (also tagged `latest` and `v1.0.0` on releases)  
 Listen port: `8090`
 
 ---
