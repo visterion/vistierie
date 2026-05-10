@@ -24,7 +24,7 @@ jobs:
       - name: Generate badge JSON
         run: |
           mkdir -p badges
-          tokei --output json > /tmp/tokei.json
+          tokei --exclude target --exclude openapi --output json > /tmp/tokei.json
           python3 - <<'PY'
           import json
           d = json.load(open('/tmp/tokei.json'))
