@@ -4,6 +4,7 @@ import de.vesterion.vistierie.agent.webhooks.CompletionWebhookDispatcher;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
+import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -78,7 +79,25 @@ class RunStoreTest {
     }
 
     @Test void getReturnsRun() {
-        var run = mock(Run.class);
+        var run = new Run(
+                "R1",
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                mapper.createObjectNode(),
+                1,
+                null,
+                "manual",
+                "queued",
+                mapper.createObjectNode(),
+                mapper.createArrayNode(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                Instant.parse("2026-05-16T10:00:00Z"),
+                null,
+                null);
         when(repo.findById("R1")).thenReturn(Optional.of(run));
         assertThat(store.get("R1")).isSameAs(run);
     }
