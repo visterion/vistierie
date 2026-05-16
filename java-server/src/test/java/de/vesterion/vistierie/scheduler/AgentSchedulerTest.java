@@ -2,6 +2,9 @@ package de.vesterion.vistierie.scheduler;
 
 import de.vesterion.vistierie.PostgresTestBase;
 import de.vesterion.vistierie.agents.AgentRepository;
+import de.vesterion.vistierie.budget.TenantBudgetRepository;
+import de.vesterion.vistierie.budget.AgentBudgetRepository;
+import de.vesterion.vistierie.budget.admin.dto.BudgetPatchRequest;
 import de.vesterion.vistierie.routing.RoutingRule;
 import de.vesterion.vistierie.routing.RoutingRuleRepository;
 import de.vesterion.vistierie.routing.RoutingResolver;
@@ -49,6 +52,8 @@ class AgentSchedulerTest extends PostgresTestBase {
 
     @Autowired AgentScheduler scheduler;
     @Autowired AgentRepository agents;
+    @Autowired TenantBudgetRepository tenantBudgets;
+    @Autowired AgentBudgetRepository agentBudgets;
     @Autowired RunRepository runs;
     @Autowired TenantRepository tenants;
     @Autowired StubLlmProvider stub;
@@ -77,6 +82,8 @@ class AgentSchedulerTest extends PostgresTestBase {
         var schema = readObjectSchema();
         agents.insert(agentId, tenantId, "a", "p", "summarize_cell",
                 mapper.createArrayNode(), schema, 3, 30, "wt", false, null);
+        tenantBudgets.patch(tenantId, new BudgetPatchRequest(10_000L, 100_000L, 80, 90));
+        agentBudgets.patch(agentId, new BudgetPatchRequest(5_000L, 50_000L, 80, 90));
         // Set schedule and backdate created_at so the cron boundary falls within the test window
         jdbc.sql("UPDATE vistierie.agents SET schedule='0 * * * * *', created_at='2026-05-08T00:00:00Z' WHERE id=?")
                 .param(agentId).update();
@@ -159,5 +166,15 @@ class AgentSchedulerTest extends PostgresTestBase {
         assertThat(runs.findByTenant(tenantId, 10)).isEmpty();
         // last_tick_at still advances so we don't replay missed boundaries on unkill.
         assertThat(agents.findById(agentId).orElseThrow().lastTickAt()).isNotNull();
+    }
+
+    @Test
+    void schedulerSkipsAgentWithoutOperationalBudget() {
+        jdbc.sql("DELETE FROM vistierie.agent_budgets WHERE agent_id = ?").param(agentId).update();
+        MutableClockConfig.NOW.set(Instant.parse("2026-05-08T00:01:00Z"));
+
+        scheduler.tick();
+
+        assertThat(runs.findByTenant(tenantId, 10)).isEmpty();
     }
 }

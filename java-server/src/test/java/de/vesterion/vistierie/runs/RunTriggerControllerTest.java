@@ -2,6 +2,9 @@ package de.vesterion.vistierie.runs;
 
 import de.vesterion.vistierie.PostgresTestBase;
 import de.vesterion.vistierie.agents.AgentRepository;
+import de.vesterion.vistierie.budget.AgentBudgetRepository;
+import de.vesterion.vistierie.budget.TenantBudgetRepository;
+import de.vesterion.vistierie.budget.admin.dto.BudgetPatchRequest;
 import de.vesterion.vistierie.auth.AuthFilter;
 import de.vesterion.vistierie.routing.RoutingRule;
 import de.vesterion.vistierie.routing.RoutingRuleRepository;
@@ -35,6 +38,8 @@ class RunTriggerControllerTest extends PostgresTestBase {
     @Autowired AuthFilter authFilter;
     @Autowired TenantRepository tenants;
     @Autowired AgentRepository agents;
+    @Autowired TenantBudgetRepository tenantBudgets;
+    @Autowired AgentBudgetRepository agentBudgets;
     @Autowired RunRepository runs;
     @Autowired BCryptPasswordEncoder enc;
     @Autowired StubLlmProvider stub;
@@ -71,6 +76,8 @@ class RunTriggerControllerTest extends PostgresTestBase {
         var schema = mapper.readTree("{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\"}},\"required\":[\"x\"]}");
         agents.insert(agentId, tenantId, "a", "you", "summarize_cell",
                 mapper.createArrayNode(), schema, 3, 30, "wt", false, null);
+        tenantBudgets.patch(tenantId, new BudgetPatchRequest(10_000L, 100_000L, 80, 90));
+        agentBudgets.patch(agentId, new BudgetPatchRequest(5_000L, 50_000L, 80, 90));
         stub.script(StubLlmScripts.Turn.endTurn("{\"x\":\"yes\"}"));
 
         var resp = mvc.perform(post("/agents/a/run")
@@ -95,5 +102,19 @@ class RunTriggerControllerTest extends PostgresTestBase {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"payload\":{}}"))
                 .andExpect(status().isConflict());
+    }
+
+    @Test void manualRunReturnsForbiddenWhenAgentBudgetMissing() throws Exception {
+        var agentId = UUID.randomUUID();
+        agents.insert(agentId, tenantId, "writer", "you", "summarize_cell",
+                mapper.createArrayNode(), null, 3, 30, "wt", false, null);
+        tenantBudgets.patch(tenantId, new BudgetPatchRequest(10_000L, 100_000L, 80, 90));
+
+        mvc.perform(post("/agents/writer/run")
+                .header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"payload\":{}}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("budget_missing_agent"));
     }
 }

@@ -2,6 +2,9 @@ package de.vesterion.vistierie.agent.runner;
 
 import de.vesterion.vistierie.PostgresTestBase;
 import de.vesterion.vistierie.agents.AgentRepository;
+import de.vesterion.vistierie.budget.AgentBudgetRepository;
+import de.vesterion.vistierie.budget.TenantBudgetRepository;
+import de.vesterion.vistierie.budget.admin.dto.BudgetPatchRequest;
 import de.vesterion.vistierie.routing.RoutingRule;
 import de.vesterion.vistierie.routing.RoutingRuleRepository;
 import de.vesterion.vistierie.routing.RoutingResolver;
@@ -27,6 +30,8 @@ class AgentRunnerCoreTest extends PostgresTestBase {
 
     @Autowired AgentRunner runner;
     @Autowired AgentRepository agents;
+    @Autowired TenantBudgetRepository tenantBudgets;
+    @Autowired AgentBudgetRepository agentBudgets;
     @Autowired TenantRepository tenants;
     @Autowired RunStore runStore;
     @Autowired StubLlmProvider stub;
@@ -54,6 +59,8 @@ class AgentRunnerCoreTest extends PostgresTestBase {
         var schema = mapper.readTree("{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\"}},\"required\":[\"x\"]}");
         agents.insert(agentId, tenantId, "a", "you are a", "summarize_cell",
                 JsonNodeFactory.instance.arrayNode(), schema, 5, 60, "wt", false, null);
+        tenantBudgets.patch(tenantId, new BudgetPatchRequest(10_000L, 100_000L, 80, 90));
+        agentBudgets.patch(agentId, new BudgetPatchRequest(5_000L, 50_000L, 80, 90));
         stub.script(StubLlmScripts.Turn.endTurn("{\"x\":\"yes\"}"));
 
         var runId = runner.startRunSync(tenantId, agentId, "manual",

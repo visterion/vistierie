@@ -2,6 +2,8 @@ package de.vesterion.vistierie.runs;
 
 import de.vesterion.vistierie.agent.runner.AgentDispatcher;
 import de.vesterion.vistierie.agents.AgentRepository;
+import de.vesterion.vistierie.budget.BudgetEnforcer;
+import de.vesterion.vistierie.budget.BudgetException;
 import de.vesterion.vistierie.auth.RequestContext;
 import de.vesterion.vistierie.runs.dto.CreateRunRequest;
 import de.vesterion.vistierie.runs.dto.RunCreatedResponse;
@@ -20,15 +22,18 @@ public class RunController {
 
     private final AgentRepository agents;
     private final AgentDispatcher dispatcher;
+    private final BudgetEnforcer budgets;
     private final RunRepository runs;
     private final RunEventRecorder events;
     private final LongPollService longPoll;
 
     public RunController(AgentRepository agents, AgentDispatcher dispatcher,
+                         BudgetEnforcer budgets,
                          RunRepository runs, RunEventRecorder events,
                          LongPollService longPoll) {
         this.agents = agents;
         this.dispatcher = dispatcher;
+        this.budgets = budgets;
         this.runs = runs;
         this.events = events;
         this.longPoll = longPoll;
@@ -38,11 +43,13 @@ public class RunController {
     public ResponseEntity<RunCreatedResponse> trigger(@PathVariable String name,
                                                        @RequestBody CreateRunRequest req) {
         var tenantId = RequestContext.requireTenantId();
+        var tenantName = RequestContext.requireTenantName();
         var a = agents.findByName(tenantId, name)
                 .orElseThrow(() -> new RuntimeException("agent not found: " + name));
         if (a.paused()) {
             return ResponseEntity.status(HttpStatus.CONFLICT).build();
         }
+        budgets.checkOrThrow(tenantId, tenantName, a.id(), a.name());
         var runId = dispatcher.trigger(tenantId, a, "manual",
                 req.payload(), req.completion_webhook(), req.completion_webhook_token());
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(
@@ -108,5 +115,15 @@ public class RunController {
                 r.id(), agentName, r.agentVersion(), r.trigger(), r.status(),
                 r.startedAt(), r.finishedAt(), r.summary(), r.output(), r.error(),
                 r.parentRunId(), counts);
+    }
+
+    @ExceptionHandler(BudgetException.class)
+    public ResponseEntity<java.util.Map<String, Object>> budget(BudgetException e) {
+        return ResponseEntity.status(e.status()).body(java.util.Map.of(
+                "error", e.code(),
+                "message", e.getMessage(),
+                "tenant", e.tenant(),
+                "agent_name", e.agentName()
+        ));
     }
 }

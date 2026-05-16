@@ -4,6 +4,9 @@ import de.vesterion.vistierie.agents.dto.CreateAgentRequest;
 import de.vesterion.vistierie.agents.dto.PatchAgentRequest;
 import de.vesterion.vistierie.agents.dto.ToolDef;
 import de.vesterion.vistierie.agents.dto.UpdateAgentRequest;
+import de.vesterion.vistierie.budget.BudgetEnforcer;
+import de.vesterion.vistierie.tenants.Tenant;
+import de.vesterion.vistierie.tenants.TenantRepository;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import tools.jackson.databind.JsonNode;
@@ -28,11 +31,14 @@ import static org.mockito.Mockito.when;
 class AgentServiceTest {
 
     private final AgentRepository repo = mock(AgentRepository.class);
+    private final TenantRepository tenants = mock(TenantRepository.class);
+    private final BudgetEnforcer budgets = mock(BudgetEnforcer.class);
     private final ObjectMapper mapper = new ObjectMapper();
     private final AgentDefinitionValidator validator = new AgentDefinitionValidator(new JsonSchemas());
-    private final AgentService svc = new AgentService(repo, validator, mapper);
+    private final AgentService svc = new AgentService(repo, tenants, budgets, validator, mapper);
 
     private final UUID tenantId = UUID.randomUUID();
+    private final String tenantName = "tn-" + tenantId;
 
     private JsonNode schema(String json) {
         try { return mapper.readTree(json); } catch (Exception e) { throw new RuntimeException(e); }
@@ -50,6 +56,10 @@ class AgentServiceTest {
                 Instant.parse("2026-01-01T00:00:00Z"),
                 Instant.parse("2026-01-01T00:00:00Z"),
                 null, null);
+    }
+
+    private Tenant tenant() {
+        return new Tenant(tenantId, tenantName, "hash", null, null, null, Instant.now());
     }
 
     @Test void createAppliesDefaultsAndPersists() {
@@ -124,6 +134,24 @@ class AgentServiceTest {
 
         verify(repo).replace(eq(id), eq("keep-sys"), eq("keep-p"), any(), eq(null),
                 eq(7), eq(70), eq("keep-tok"), eq(true), eq("0 0 0 * * *"));
+    }
+
+    @Test void unpauseRequiresOperationalBudget() {
+        var id = UUID.randomUUID();
+        var existing = new Agent(id, tenantId, "agent-budget", "sys", "p",
+                mapper.createArrayNode(), null, 25, 1800, "tok", true, 1,
+                Instant.now(), Instant.now(), null, null);
+        when(repo.findByName(tenantId, "agent-budget")).thenReturn(Optional.of(existing));
+        when(tenants.findById(tenantId)).thenReturn(Optional.of(tenant()));
+        org.mockito.Mockito.doThrow(new RuntimeException("budget missing"))
+                .when(budgets).checkOrThrow(tenantId, tenantName, id, "agent-budget");
+
+        var patch = new PatchAgentRequest(false, null, null, null, null, null, null, null, null);
+
+        assertThatThrownBy(() -> svc.patch(tenantId, "agent-budget", patch))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("budget");
+        verify(repo, never()).replace(any(), any(), any(), any(), any(), anyInt(), anyInt(), any(), anyBoolean(), any());
     }
 
     @Test void patchEmptyScheduleClearsIt() {
