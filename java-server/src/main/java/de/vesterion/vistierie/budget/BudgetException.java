@@ -34,6 +34,12 @@ public class BudgetException extends RuntimeException {
                 tenant, agentName, null, null);
     }
 
+    public static BudgetException agentNotFound(String tenant, String agentName) {
+        return new BudgetException(HttpStatus.FORBIDDEN, "budget_missing_agent",
+                "agent not found for tenant " + tenant + ": " + agentName,
+                tenant, agentName, null, null);
+    }
+
     public static BudgetException exceeded(String scope, String period, String tenant, String agentName) {
         return new BudgetException(HttpStatus.FORBIDDEN,
                 "budget_exceeded_" + scope + "_" + period,

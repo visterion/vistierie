@@ -4,6 +4,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
 public record VisionRequest(
+        @NotBlank String agent_name,
         @NotBlank String purpose,
         String realm,
         @NotNull Image image,

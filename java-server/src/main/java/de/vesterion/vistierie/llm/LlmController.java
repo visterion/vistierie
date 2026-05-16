@@ -1,11 +1,14 @@
 package de.vesterion.vistierie.llm;
 
+import de.vesterion.vistierie.budget.BudgetException;
+import de.vesterion.vistierie.budget.BudgetHeaderWriter;
 import de.vesterion.vistierie.auth.AuthExceptions;
 import de.vesterion.vistierie.kill.KillSwitchService;
 import de.vesterion.vistierie.llm.dto.CompleteRequest;
 import de.vesterion.vistierie.llm.dto.LlmResponse;
 import de.vesterion.vistierie.llm.dto.VisionRequest;
 import de.vesterion.vistierie.provider.LlmProvider;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -18,16 +21,24 @@ import java.util.Map;
 public class LlmController {
 
     private final LlmService svc;
-    public LlmController(LlmService svc) { this.svc = svc; }
+    private final BudgetHeaderWriter headers;
+    public LlmController(LlmService svc, BudgetHeaderWriter headers) {
+        this.svc = svc;
+        this.headers = headers;
+    }
 
     @PostMapping("/complete")
-    public LlmResponse complete(@Valid @RequestBody CompleteRequest req) {
-        return svc.complete(req);
+    public LlmResponse complete(@Valid @RequestBody CompleteRequest req, HttpServletResponse response) {
+        var result = svc.complete(req);
+        headers.write(response, result.budget());
+        return result.response();
     }
 
     @PostMapping("/vision")
-    public LlmResponse vision(@Valid @RequestBody VisionRequest req) {
-        return svc.vision(req);
+    public LlmResponse vision(@Valid @RequestBody VisionRequest req, HttpServletResponse response) {
+        var result = svc.vision(req);
+        headers.write(response, result.budget());
+        return result.response();
     }
 
     @ExceptionHandler(KillSwitchService.KilledException.class)
@@ -44,6 +55,16 @@ public class LlmController {
                 "error", "provider_error",
                 "provider_status", e.statusCode(),
                 "code", e.errorCode()));
+    }
+
+    @ExceptionHandler(BudgetException.class)
+    public ResponseEntity<Map<String, Object>> budget(BudgetException e) {
+        return ResponseEntity.status(e.status()).body(Map.of(
+                "error", e.code(),
+                "message", e.getMessage(),
+                "tenant", e.tenant(),
+                "agent_name", e.agentName()
+        ));
     }
 
     @ExceptionHandler(AuthExceptions.Unauthorized.class)

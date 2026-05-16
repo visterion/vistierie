@@ -1,6 +1,9 @@
 package de.vesterion.vistierie.llm;
 
+import de.vesterion.vistierie.agents.AgentRepository;
 import de.vesterion.vistierie.audit.LlmCallRecorder;
+import de.vesterion.vistierie.budget.BudgetEnforcer;
+import de.vesterion.vistierie.budget.BudgetException;
 import de.vesterion.vistierie.auth.RequestContext;
 import de.vesterion.vistierie.kill.KillSwitchService;
 import de.vesterion.vistierie.llm.dto.CompleteRequest;
@@ -24,21 +27,30 @@ public class LlmService {
     private final LlmCallRecorder recorder;
     private final KillSwitchService kill;
     private final LlmMetrics metrics;
+    private final AgentRepository agents;
+    private final BudgetEnforcer budgets;
 
     public LlmService(RoutingResolver routing, ProviderRegistry providers,
                       PriceTable prices, LlmCallRecorder recorder, KillSwitchService kill,
-                      LlmMetrics metrics) {
+                      LlmMetrics metrics, AgentRepository agents, BudgetEnforcer budgets) {
         this.routing = routing;
         this.providers = providers;
         this.prices = prices;
         this.recorder = recorder;
         this.kill = kill;
         this.metrics = metrics;
+        this.agents = agents;
+        this.budgets = budgets;
     }
 
-    public LlmResponse complete(CompleteRequest req) {
+    public record InvocationResult(LlmResponse response, BudgetEnforcer.BudgetCheckResult budget) {}
+
+    public InvocationResult complete(CompleteRequest req) {
         var tenantId = RequestContext.requireTenantId();
         var tenant = RequestContext.requireTenantName();
+        var agent = agents.findByName(tenantId, req.agent_name())
+                .orElseThrow(() -> BudgetException.agentNotFound(tenant, req.agent_name()));
+        var budget = budgets.checkOrThrow(tenantId, tenant, agent.id(), agent.name());
         var id = randomCallId();
 
         var killBlocked = isKilled(tenantId);
@@ -65,19 +77,19 @@ public class LlmService {
             var dur = (int) ((System.nanoTime() - start) / 1_000_000);
             var cost = prices.costMicros(decision.model(), pRes.usage());
             recorder.insertWithBody(new LlmCallRecorder.Row(
-                    id, tenantId, null, req.purpose(), req.realm(),
+                    id, tenantId, agent.id(), req.purpose(), req.realm(),
                     decision.provider(), decision.model(), "complete",
                     pRes.usage().inputTokens(), pRes.usage().outputTokens(),
                     pRes.usage().cacheCreationInputTokens(), pRes.usage().cacheReadInputTokens(),
                     cost, dur, "ok", null, null, null), pReq, pRes);
             metrics.record(decision.provider(), decision.model(), "complete", "ok", dur, cost);
-            return new LlmResponse(pRes.text(), pRes.stopReason(), pRes.usage(),
-                    decision.provider(), decision.model(), cost, id);
+            return new InvocationResult(new LlmResponse(pRes.text(), pRes.stopReason(), pRes.usage(),
+                    decision.provider(), decision.model(), cost, id), budget);
         } catch (LlmProvider.ProviderException e) {
             var dur = (int) ((System.nanoTime() - start) / 1_000_000);
             var status = e.statusCode() >= 500 ? "error" : "rate_limited";
             recorder.insertWithBody(new LlmCallRecorder.Row(
-                    id, tenantId, null, req.purpose(), req.realm(),
+                    id, tenantId, agent.id(), req.purpose(), req.realm(),
                     decision.provider(), decision.model(), "complete",
                     0, 0, 0, 0, 0, dur, status,
                     e.errorCode(), null, null), pReq, null);
@@ -86,9 +98,12 @@ public class LlmService {
         }
     }
 
-    public LlmResponse vision(VisionRequest req) {
+    public InvocationResult vision(VisionRequest req) {
         var tenantId = RequestContext.requireTenantId();
         var tenant = RequestContext.requireTenantName();
+        var agent = agents.findByName(tenantId, req.agent_name())
+                .orElseThrow(() -> BudgetException.agentNotFound(tenant, req.agent_name()));
+        var budget = budgets.checkOrThrow(tenantId, tenant, agent.id(), agent.name());
         var id = randomCallId();
 
         var killBlocked = isKilled(tenantId);
@@ -122,19 +137,19 @@ public class LlmService {
             var dur = (int) ((System.nanoTime() - start) / 1_000_000);
             var cost = prices.costMicros(decision.model(), pRes.usage());
             recorder.insertWithBody(new LlmCallRecorder.Row(
-                    id, tenantId, null, req.purpose(), req.realm(),
+                    id, tenantId, agent.id(), req.purpose(), req.realm(),
                     decision.provider(), decision.model(), "vision",
                     pRes.usage().inputTokens(), pRes.usage().outputTokens(),
                     pRes.usage().cacheCreationInputTokens(), pRes.usage().cacheReadInputTokens(),
                     cost, dur, "ok", null, null, null), pReq, pRes);
             metrics.record(decision.provider(), decision.model(), "vision", "ok", dur, cost);
-            return new LlmResponse(pRes.text(), pRes.stopReason(), pRes.usage(),
-                    decision.provider(), decision.model(), cost, id);
+            return new InvocationResult(new LlmResponse(pRes.text(), pRes.stopReason(), pRes.usage(),
+                    decision.provider(), decision.model(), cost, id), budget);
         } catch (LlmProvider.ProviderException e) {
             var dur = (int) ((System.nanoTime() - start) / 1_000_000);
             var status = e.statusCode() >= 500 ? "error" : "rate_limited";
             recorder.insertWithBody(new LlmCallRecorder.Row(
-                    id, tenantId, null, req.purpose(), req.realm(),
+                    id, tenantId, agent.id(), req.purpose(), req.realm(),
                     decision.provider(), decision.model(), "vision",
                     0, 0, 0, 0, 0, dur, status,
                     e.errorCode(), null, null), pReq, null);
