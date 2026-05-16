@@ -53,15 +53,20 @@ class AgentRunnerLlmCallLinkTest extends PostgresTestBase {
         var runId = runner.startRunSync(tenantId, agentId, "manual",
                 mapper.readTree("{}"), null, null, null);
 
-        var count = jdbc.sql("""
-                SELECT count(*)
+        var rows = jdbc.sql("""
+                SELECT tenant_id, agent_id, run_id, status, endpoint
                 FROM vistierie.llm_calls
                 WHERE run_id = ?
-                  AND agent_id = ?
                 """)
-                .params(runId, agentId)
-                .query(Integer.class)
-                .single();
-        assertThat(count).isGreaterThanOrEqualTo(1);
+                .param(runId)
+                .query()
+                .listOfRows();
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0))
+                .containsEntry("tenant_id", tenantId)
+                .containsEntry("agent_id", agentId)
+                .containsEntry("run_id", runId)
+                .containsEntry("status", "ok")
+                .containsEntry("endpoint", "complete");
     }
 }

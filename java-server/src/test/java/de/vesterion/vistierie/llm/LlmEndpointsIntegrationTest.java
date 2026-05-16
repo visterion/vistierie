@@ -121,14 +121,15 @@ class LlmEndpointsIntegrationTest extends PostgresTestBase {
                 .andExpect(jsonPath("$.usage.inputTokens").value(10));
 
         var rows = jdbc.sql("""
-                SELECT status, purpose, model, input_tokens
+                SELECT status, purpose, model, input_tokens, agent_id
                 FROM vistierie.llm_calls
                 """).query().listOfRows();
         assertThat(rows).hasSize(1);
         assertThat(rows.get(0)).containsEntry("status", "ok")
                 .containsEntry("purpose", "summarize_cell")
                 .containsEntry("model", "claude-haiku-4-5")
-                .containsEntry("input_tokens", 10);
+                .containsEntry("input_tokens", 10)
+                .containsEntry("agent_id", null);
     }
 
     @Test void killSwitchBlocks() throws Exception {
