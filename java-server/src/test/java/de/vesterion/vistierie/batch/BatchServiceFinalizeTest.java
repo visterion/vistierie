@@ -107,6 +107,12 @@ class BatchServiceFinalizeTest extends PostgresTestBase {
         var llmCount = jdbc.sql("SELECT count(*) FROM vistierie.llm_calls WHERE batch_id = ?")
                 .param(batchId).query(Integer.class).single();
         assertThat(llmCount).isEqualTo(1);
+        var recordedAgentId = jdbc.sql("""
+                SELECT agent_id
+                FROM vistierie.llm_calls
+                WHERE run_id = ?
+                """).param(c1).query(UUID.class).single();
+        assertThat(recordedAgentId).isEqualTo(agentId);
     }
 
     @Test
