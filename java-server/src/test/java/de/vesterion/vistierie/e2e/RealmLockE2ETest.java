@@ -1,6 +1,10 @@
 package de.vesterion.vistierie.e2e;
 
 import de.vesterion.vistierie.PostgresTestBase;
+import de.vesterion.vistierie.agents.AgentRepository;
+import de.vesterion.vistierie.budget.AgentBudgetRepository;
+import de.vesterion.vistierie.budget.TenantBudgetRepository;
+import de.vesterion.vistierie.budget.admin.dto.BudgetPatchRequest;
 import de.vesterion.vistierie.auth.AuthFilter;
 import de.vesterion.vistierie.tenants.TenantRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -36,6 +40,9 @@ class RealmLockE2ETest extends PostgresTestBase {
     @Autowired WebApplicationContext wac;
     @Autowired AuthFilter authFilter;
     @Autowired TenantRepository tenants;
+    @Autowired AgentRepository agents;
+    @Autowired TenantBudgetRepository tenantBudgets;
+    @Autowired AgentBudgetRepository agentBudgets;
     @Autowired JdbcClient jdbc;
 
     MockMvc mvc;
@@ -51,6 +58,11 @@ class RealmLockE2ETest extends PostgresTestBase {
         tenantToken = "tok-" + tenantId;
         tenants.insert(tenantId, tenantName,
                 new BCryptPasswordEncoder().encode(tenantToken));
+        var agentId = UUID.randomUUID();
+        agents.insert(agentId, tenantId, "writer", "sys", "summarize_cell",
+                new tools.jackson.databind.ObjectMapper().createArrayNode(), null, 5, 60, "wt", false, null);
+        tenantBudgets.patch(tenantId, new BudgetPatchRequest(100_000L, 1_000_000L, 80, 90));
+        agentBudgets.patch(agentId, new BudgetPatchRequest(50_000L, 500_000L, 80, 90));
     }
 
     @Test
@@ -82,7 +94,8 @@ class RealmLockE2ETest extends PostgresTestBase {
         // 2. Tenant calls /llm/complete with realm=medical and an override model.
         //    The override (claude-opus-4-7) should be silently ignored because locked=true.
         var callBody = """
-                { "realm": "medical", "purpose": "summarize_cell",
+                { "agent_name":"writer",
+                  "realm": "medical", "purpose": "summarize_cell",
                   "model": "claude-opus-4-7",
                   "messages": [{"role":"user","content":"x"}],
                   "max_tokens": 16 }
@@ -126,7 +139,8 @@ class RealmLockE2ETest extends PostgresTestBase {
                 .andExpect(status().isCreated());
 
         var callBody = """
-                { "realm": "privat", "purpose": "summarize_cell",
+                { "agent_name":"writer",
+                  "realm": "privat", "purpose": "summarize_cell",
                   "messages": [{"role":"user","content":"x"}],
                   "max_tokens": 16 }
                 """;

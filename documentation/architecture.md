@@ -4,7 +4,8 @@
 
 - **Gateway:** tenants, auth, kill-switch, routing, synchronous
   `POST /llm/complete` and `POST /llm/vision`, Anthropic / OpenAI / xAI
-  providers, per-call audit log with token-accurate EUR-micros cost.
+  providers, per-call audit log with token-accurate EUR-micros cost, and
+  hard tenant/agent budgets on every billable path.
 - **Agent framework:** tenant-scoped agent registration, asynchronous
   run execution with parallel HTTP tools and recursive subagents (with
   context shielding), long-poll, completion webhook, per-run event
@@ -17,7 +18,7 @@
 
 ---
 
-## Data model (Slice 1)
+## Data model
 
 Two tables in the `vistierie` schema (see `V1__baseline.sql`):
 
@@ -34,6 +35,7 @@ tenants
 llm_calls
   id                           TEXT PK   -- ULID
   tenant_id                    UUID FK → tenants.id
+  agent_id                     UUID FK → agents.id (nullable for historic backfill only)
   purpose                      TEXT
   realm                        TEXT
   provider                     TEXT
@@ -48,6 +50,24 @@ llm_calls
   status                       TEXT      -- "ok" | error code
   error_code                   TEXT
   created_at                   TIMESTAMPTZ
+
+tenant_budgets
+  tenant_id                    UUID PK → tenants.id
+  daily_cap_micros             BIGINT
+  monthly_cap_micros           BIGINT
+  daily_warn_percent           INTEGER
+  monthly_warn_percent         INTEGER
+  created_at                   TIMESTAMPTZ
+  updated_at                   TIMESTAMPTZ
+
+agent_budgets
+  agent_id                     UUID PK → agents.id
+  daily_cap_micros             BIGINT
+  monthly_cap_micros           BIGINT
+  daily_warn_percent           INTEGER
+  monthly_warn_percent         INTEGER
+  created_at                   TIMESTAMPTZ
+  updated_at                   TIMESTAMPTZ
 ```
 
 ---
@@ -55,12 +75,12 @@ llm_calls
 ## Request flow
 
 ```
-HiveMem (AnthropicSummarizer / VisionClient)
-   │  POST /llm/complete | /llm/vision   (tenant bearer token)
+HiveMem / Dracul / internal callers
+   │  POST /llm/complete | /llm/vision   (tenant bearer token + agent_name)
    ▼
-Vistierie ── auth filter ── kill check ── routing ── AnthropicProvider ── api.anthropic.com
-                                                          │
-                                                          └── audit row → llm_calls
+Vistierie ── auth filter ── agent resolve ── kill check ── budget check ── routing ── AnthropicProvider ── api.anthropic.com
+                                                                                           │
+                                                                                           └── audit row → llm_calls
 ```
 
 Step by step:
@@ -68,15 +88,20 @@ Step by step:
 1. `AuthFilter` extracts the `Authorization: Bearer` token, matches it against
    `tenants.token_hash` via BCrypt, and stores the resolved `Tenant` in request
    context.
-2. `LlmService` checks the kill-switch (`kill_until > now()`); if active it
+2. `LlmService` resolves `agent_name` inside the authenticated tenant.
+3. `LlmService` checks the kill-switch (`kill_until > now()`); if active it
    returns `403` immediately.
-3. `RoutingResolver` looks up the purpose in the tenant's routing config and
+4. `BudgetEnforcer` loads tenant and agent budget policy, aggregates current
+   day/month usage from `llm_calls.cost_micros`, and blocks when a hard cap is
+   missing or exceeded.
+5. `RoutingResolver` looks up the purpose in the tenant's routing config and
    returns a `RoutingDecision` (provider + model + allow-override flag).
-4. `ProviderRegistry` dispatches to `AnthropicProvider` (or `MockProvider` in
+6. `ProviderRegistry` dispatches to `AnthropicProvider` (or `MockProvider` in
    mock-LLM mode).
-5. `LlmCallRecorder` writes one row to `vistierie.llm_calls` regardless of
+7. `LlmCallRecorder` writes one row to `vistierie.llm_calls` regardless of
    whether the provider call succeeded or failed.
-6. The response DTO is returned to the caller.
+8. The response DTO is returned to the caller, including remaining-budget
+   headers on direct `/llm/**` success responses when caps are configured.
 
 ---
 
@@ -122,13 +147,15 @@ routing_rules_audit
 Schema overview (all tables under `vistierie`):
 
 - `tenants`          : registered tenants, bcrypt token hash, kill-switch state
-- `llm_calls`        : per-call audit (tokens, cost, provider, model, run link)
+- `llm_calls`        : per-call audit (tokens, cost, provider, model, agent link, run link)
 - `agents`           : tenant-scoped agent definitions
 - `runs`             : agent run lifecycle
 - `run_events`       : append-only event timeline per run
 - `routing_rules`    : operator-managed routing policy (per tenant, realm, purpose)
 - `routing_rules_audit`: append-only history of admin writes to routing_rules
 - `llm_call_bodies`  : full request JSON (vision blobs redacted to sha256 stub) and response text per LLM call; cleaned by BodyRetentionJob
+- `tenant_budgets`   : operator-managed hard tenant caps and optional warn thresholds
+- `agent_budgets`    : operator-managed hard per-agent caps and optional warn thresholds
 
 ---
 
@@ -140,6 +167,9 @@ LLM call audits can be aggregated per agent run.
 
 ```
 consumer ── POST /agents/{name}/run ──▶ RunController
+                                         │
+                                         ▼
+                                  BudgetEnforcer   (tenant + agent readiness gate)
                                          │
                                          ▼
                                   AgentDispatcher  (writes runs row, queues async)
@@ -160,6 +190,15 @@ consumer ── POST /agents/{name}/run ──▶ RunController
 Context shielding: a parent run never sees a child's system prompt, turns,
 or intermediate tool calls, only the validated structured `output`. See
 [agents.md](agents.md) for the agent definition and tool format.
+
+Budget gates also apply beyond manual runs:
+
+- direct `/llm/complete` and `/llm/vision`
+- manual `/agents/{name}/run`
+- scheduler ticks
+- batch submission
+- unpausing an agent
+- each iterative provider dispatch inside `AgentRunner`
 
 Long-polls and completion webhooks are in-process (no Redis, no DB queue);
 a Vistierie restart drops open polls and re-fires pending webhooks based on

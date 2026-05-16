@@ -63,6 +63,23 @@ Credentials use the standard AWS credential chain. No API key property.
 
 ---
 
+## Budgeting
+
+Hard budgets do not use static application properties. They are runtime data
+stored in PostgreSQL and managed through the admin budget endpoints:
+
+- `PATCH /admin/tenants/{name}/budget`
+- `PATCH /admin/tenants/{tenant}/agents/{agent}/budget`
+
+Operational rules:
+
+- Every direct `/llm/complete` and `/llm/vision` request must include `agent_name`.
+- The referenced agent must exist in the authenticated tenant.
+- Both a tenant budget and an agent budget must be operational before a billable call or activation path is allowed.
+- Daily and monthly caps are evaluated on persisted `llm_calls.cost_micros`.
+
+---
+
 ## Feature Flags
 
 | Property | Env var | Default | Description |
