@@ -65,7 +65,7 @@ public class LlmService {
             var dur = (int) ((System.nanoTime() - start) / 1_000_000);
             var cost = prices.costMicros(decision.model(), pRes.usage());
             recorder.insertWithBody(new LlmCallRecorder.Row(
-                    id, tenantId, req.purpose(), req.realm(),
+                    id, tenantId, null, req.purpose(), req.realm(),
                     decision.provider(), decision.model(), "complete",
                     pRes.usage().inputTokens(), pRes.usage().outputTokens(),
                     pRes.usage().cacheCreationInputTokens(), pRes.usage().cacheReadInputTokens(),
@@ -77,7 +77,7 @@ public class LlmService {
             var dur = (int) ((System.nanoTime() - start) / 1_000_000);
             var status = e.statusCode() >= 500 ? "error" : "rate_limited";
             recorder.insertWithBody(new LlmCallRecorder.Row(
-                    id, tenantId, req.purpose(), req.realm(),
+                    id, tenantId, null, req.purpose(), req.realm(),
                     decision.provider(), decision.model(), "complete",
                     0, 0, 0, 0, 0, dur, status,
                     e.errorCode(), null, null), pReq, null);
@@ -122,7 +122,7 @@ public class LlmService {
             var dur = (int) ((System.nanoTime() - start) / 1_000_000);
             var cost = prices.costMicros(decision.model(), pRes.usage());
             recorder.insertWithBody(new LlmCallRecorder.Row(
-                    id, tenantId, req.purpose(), req.realm(),
+                    id, tenantId, null, req.purpose(), req.realm(),
                     decision.provider(), decision.model(), "vision",
                     pRes.usage().inputTokens(), pRes.usage().outputTokens(),
                     pRes.usage().cacheCreationInputTokens(), pRes.usage().cacheReadInputTokens(),
@@ -134,7 +134,7 @@ public class LlmService {
             var dur = (int) ((System.nanoTime() - start) / 1_000_000);
             var status = e.statusCode() >= 500 ? "error" : "rate_limited";
             recorder.insertWithBody(new LlmCallRecorder.Row(
-                    id, tenantId, req.purpose(), req.realm(),
+                    id, tenantId, null, req.purpose(), req.realm(),
                     decision.provider(), decision.model(), "vision",
                     0, 0, 0, 0, 0, dur, status,
                     e.errorCode(), null, null), pReq, null);
@@ -154,7 +154,7 @@ public class LlmService {
 
     private void recordKilled(String id, UUID tenantId, String purpose, String realm, String endpoint) {
         recorder.insert(new LlmCallRecorder.Row(
-                id, tenantId, purpose, realm,
+                id, tenantId, null, purpose, realm,
                 "n/a", "n/a", endpoint,
                 0, 0, 0, 0, 0, 0, "killed", null, null, null));
     }

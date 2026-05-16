@@ -8,6 +8,7 @@ import de.vesterion.vistierie.tenants.TenantRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 import java.util.Base64;
 import java.util.List;
@@ -21,20 +22,61 @@ class LlmCallRecorderBodyTest extends PostgresTestBase {
     @Autowired LlmCallRecorder recorder;
     @Autowired LlmCallBodyRepository bodies;
     @Autowired TenantRepository tenants;
+    @Autowired JdbcClient jdbc;
 
     UUID tenantId;
+    UUID agentId;
 
     @BeforeEach
     void seed() {
         tenantId = UUID.randomUUID();
         tenants.insert(tenantId, "tnt-" + tenantId.toString().substring(0, 8), "x");
+        agentId = UUID.randomUUID();
+        jdbc.sql("""
+                INSERT INTO vistierie.agents
+                  (id, tenant_id, name, system_prompt, model_purpose, tools, webhook_token, paused)
+                VALUES (?, ?, ?, ?, ?, '[]'::jsonb, ?, false)
+                """)
+                .params(agentId, tenantId, "agent-" + agentId.toString().substring(0, 8),
+                        "sys", "summarize", "wt")
+                .update();
     }
 
     private LlmCallRecorder.Row row(String callId) {
         return new LlmCallRecorder.Row(
-                callId, tenantId, "summarize", null,
+                callId, tenantId, agentId, "summarize", null,
                 "anthropic", "claude-haiku-4-5", "complete",
                 10, 5, 0, 0, 12L, 100, "ok", null, null, null);
+    }
+
+    @Test
+    void migrationAddsBudgetTablesAndLlmCallAgentId() {
+        var tables = jdbc.sql("""
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = 'vistierie'
+                  AND table_name IN ('tenant_budgets', 'agent_budgets')
+                ORDER BY table_name
+                """).query(String.class).list();
+        assertThat(tables).containsExactly("agent_budgets", "tenant_budgets");
+
+        var llmCallColumns = jdbc.sql("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'vistierie'
+                  AND table_name = 'llm_calls'
+                  AND column_name = 'agent_id'
+                """).query(String.class).list();
+        assertThat(llmCallColumns).containsExactly("agent_id");
+
+        var indexes = jdbc.sql("""
+                SELECT indexname
+                FROM pg_indexes
+                WHERE schemaname = 'vistierie'
+                  AND indexname IN ('llm_calls_agent_time_idx', 'llm_calls_tenant_agent_time_idx')
+                ORDER BY indexname
+                """).query(String.class).list();
+        assertThat(indexes).containsExactly("llm_calls_agent_time_idx", "llm_calls_tenant_agent_time_idx");
     }
 
     @Test
@@ -48,6 +90,12 @@ class LlmCallRecorderBodyTest extends PostgresTestBase {
         recorder.insertWithBody(row(callId), req, res);
 
         var body = bodies.findByCallId(callId).orElseThrow();
+        var savedAgentId = jdbc.sql("""
+                SELECT agent_id
+                FROM vistierie.llm_calls
+                WHERE id = ?
+                """).param(callId).query(UUID.class).single();
+        assertThat(savedAgentId).isEqualTo(agentId);
         assertThat(body.responseText()).isEqualTo("answer");
         assertThat(body.requestJson().get("system").asText()).isEqualTo("sys");
     }

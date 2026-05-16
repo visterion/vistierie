@@ -26,7 +26,7 @@ public class LlmCallRecorder {
     }
 
     public record Row(
-            String id, UUID tenantId, String purpose, String realm,
+            String id, UUID tenantId, UUID agentId, String purpose, String realm,
             String provider, String model, String endpoint,
             int inputTokens, int outputTokens, int cacheCreate, int cacheRead,
             long costMicros, int durationMs, String status, String errorCode,
@@ -45,12 +45,12 @@ public class LlmCallRecorder {
     public void insert(Row r) {
         jdbc.sql("""
                 INSERT INTO vistierie.llm_calls
-                  (id, tenant_id, purpose, realm, provider, model, endpoint,
+                  (id, tenant_id, agent_id, purpose, realm, provider, model, endpoint,
                    input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens,
                    cost_micros, duration_ms, status, error_code, run_id, batch_id)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """)
-                .params(r.id(), r.tenantId(), r.purpose(), r.realm(),
+                .params(r.id(), r.tenantId(), r.agentId(), r.purpose(), r.realm(),
                         r.provider(), r.model(), r.endpoint(),
                         r.inputTokens(), r.outputTokens(), r.cacheCreate(), r.cacheRead(),
                         r.costMicros(), r.durationMs(), r.status(), r.errorCode(),
