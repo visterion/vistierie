@@ -31,6 +31,12 @@ CREATE TABLE agent_budgets (
 ALTER TABLE llm_calls
     ADD COLUMN agent_id UUID REFERENCES agents(id) ON DELETE SET NULL;
 
+UPDATE vistierie.llm_calls c
+SET agent_id = r.agent_id
+FROM vistierie.runs r
+WHERE c.run_id = r.id
+  AND c.agent_id IS NULL;
+
 CREATE INDEX llm_calls_agent_time_idx
     ON llm_calls (agent_id, created_at DESC)
     WHERE agent_id IS NOT NULL;

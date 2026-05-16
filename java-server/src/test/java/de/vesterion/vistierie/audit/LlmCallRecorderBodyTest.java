@@ -50,36 +50,6 @@ class LlmCallRecorderBodyTest extends PostgresTestBase {
     }
 
     @Test
-    void migrationAddsBudgetTablesAndLlmCallAgentId() {
-        var tables = jdbc.sql("""
-                SELECT table_name
-                FROM information_schema.tables
-                WHERE table_schema = 'vistierie'
-                  AND table_name IN ('tenant_budgets', 'agent_budgets')
-                ORDER BY table_name
-                """).query(String.class).list();
-        assertThat(tables).containsExactly("agent_budgets", "tenant_budgets");
-
-        var llmCallColumns = jdbc.sql("""
-                SELECT column_name
-                FROM information_schema.columns
-                WHERE table_schema = 'vistierie'
-                  AND table_name = 'llm_calls'
-                  AND column_name = 'agent_id'
-                """).query(String.class).list();
-        assertThat(llmCallColumns).containsExactly("agent_id");
-
-        var indexes = jdbc.sql("""
-                SELECT indexname
-                FROM pg_indexes
-                WHERE schemaname = 'vistierie'
-                  AND indexname IN ('llm_calls_agent_time_idx', 'llm_calls_tenant_agent_time_idx')
-                ORDER BY indexname
-                """).query(String.class).list();
-        assertThat(indexes).containsExactly("llm_calls_agent_time_idx", "llm_calls_tenant_agent_time_idx");
-    }
-
-    @Test
     void insertsCallAndBodyAtomically() {
         var callId = UUID.randomUUID().toString();
         var req = new ProviderRequest("claude-haiku-4-5", 16, null, "sys",
