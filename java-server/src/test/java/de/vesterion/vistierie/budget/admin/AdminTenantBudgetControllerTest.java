@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -15,6 +16,8 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 import tools.jackson.databind.ObjectMapper;
 
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -36,16 +39,30 @@ class AdminTenantBudgetControllerTest extends PostgresTestBase {
     @Autowired WebApplicationContext wac;
     @Autowired AuthFilter authFilter;
     @Autowired TenantRepository tenants;
+    @Autowired JdbcClient jdbc;
     @Autowired ObjectMapper json;
 
     MockMvc mvc;
     String tenantName;
+    UUID tenantId;
 
     @BeforeEach
     void setUp() {
         mvc = MockMvcBuilders.webAppContextSetup(wac).addFilter(authFilter).build();
-        tenantName = "tenant-" + UUID.randomUUID().toString().substring(0, 8);
-        tenants.insert(UUID.randomUUID(), tenantName, "tok");
+        tenantId = UUID.randomUUID();
+        tenantName = "tenant-" + tenantId.toString().substring(0, 8);
+        tenants.insert(tenantId, tenantName, "tok");
+    }
+
+    private void insertCall(long costMicros, Instant createdAt) {
+        jdbc.sql("""
+                INSERT INTO vistierie.llm_calls
+                  (id, tenant_id, purpose, provider, model, endpoint, status, cost_micros, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """)
+                .params(UUID.randomUUID().toString(), tenantId, "routine", "anthropic", "haiku", "complete", "ok",
+                        costMicros, Timestamp.from(createdAt))
+                .update();
     }
 
     @Test
@@ -114,5 +131,66 @@ class AdminTenantBudgetControllerTest extends PostgresTestBase {
         assertThat(node.path("monthly_cap_micros").asLong()).isEqualTo(6000L);
         assertThat(node.path("daily_warn_percent").asInt()).isEqualTo(80);
         assertThat(node.path("monthly_warn_percent").asInt()).isEqualTo(90);
+    }
+
+    @Test
+    void getComputesTenantUsageAndRemainingBudget() throws Exception {
+        insertCall(400L, Instant.now().minusSeconds(60));
+        insertCall(700L, Instant.now().minusSeconds(120));
+
+        mvc.perform(patch("/admin/tenants/" + tenantName + "/budget")
+                        .header("Authorization", ADMIN_HEADER)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "daily_cap_micros": 1000,
+                                  "monthly_cap_micros": 2000,
+                                  "daily_warn_percent": 80,
+                                  "monthly_warn_percent": 90
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        var fetched = mvc.perform(get("/admin/tenants/" + tenantName + "/budget")
+                        .header("Authorization", ADMIN_HEADER))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        var node = json.readTree(fetched);
+        assertThat(node.path("daily_usage_micros").asLong()).isEqualTo(1100L);
+        assertThat(node.path("monthly_usage_micros").asLong()).isEqualTo(1100L);
+        assertThat(node.path("daily_remaining_micros").isNull()).isTrue();
+        assertThat(node.path("monthly_remaining_micros").asLong()).isEqualTo(900L);
+        assertThat(node.path("daily_warned").asBoolean()).isTrue();
+        assertThat(node.path("monthly_warned").asBoolean()).isFalse();
+        assertThat(node.path("daily_blocked").asBoolean()).isTrue();
+        assertThat(node.path("monthly_blocked").asBoolean()).isFalse();
+    }
+
+    @Test
+    void patchRejectsOutOfRangeWarnPercent() throws Exception {
+        mvc.perform(patch("/admin/tenants/" + tenantName + "/budget")
+                        .header("Authorization", ADMIN_HEADER)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "daily_warn_percent": 101
+                                }
+                                """))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void patchRejectsWrongJsonTypes() throws Exception {
+        mvc.perform(patch("/admin/tenants/" + tenantName + "/budget")
+                        .header("Authorization", ADMIN_HEADER)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "daily_cap_micros": "oops",
+                                  "monthly_warn_percent": true
+                                }
+                                """))
+                .andExpect(status().isBadRequest());
     }
 }

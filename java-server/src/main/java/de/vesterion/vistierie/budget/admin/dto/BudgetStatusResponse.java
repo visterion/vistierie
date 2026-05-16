@@ -16,24 +16,41 @@ public record BudgetStatusResponse(
         boolean daily_blocked,
         boolean monthly_blocked
 ) {
-    public static BudgetStatusResponse fromPolicy(BudgetPolicy policy) {
+    public static BudgetStatusResponse fromPolicy(BudgetPolicy policy, long dailyUsageMicros, long monthlyUsageMicros) {
+        Long dailyRemainingMicros = remaining(policy.dailyCapMicros(), dailyUsageMicros);
+        Long monthlyRemainingMicros = remaining(policy.monthlyCapMicros(), monthlyUsageMicros);
         return new BudgetStatusResponse(
                 policy.dailyCapMicros(),
                 policy.monthlyCapMicros(),
                 policy.dailyWarnPercent(),
                 policy.monthlyWarnPercent(),
-                0L,
-                0L,
-                policy.dailyCapMicros(),
-                policy.monthlyCapMicros(),
-                false,
-                false,
-                false,
-                false
+                dailyUsageMicros,
+                monthlyUsageMicros,
+                dailyRemainingMicros,
+                monthlyRemainingMicros,
+                warned(policy.dailyCapMicros(), policy.dailyWarnPercent(), dailyUsageMicros),
+                warned(policy.monthlyCapMicros(), policy.monthlyWarnPercent(), monthlyUsageMicros),
+                blocked(policy.dailyCapMicros(), dailyUsageMicros),
+                blocked(policy.monthlyCapMicros(), monthlyUsageMicros)
         );
     }
 
     public static BudgetStatusResponse empty() {
         return new BudgetStatusResponse(null, null, null, null, 0L, 0L, null, null, false, false, false, false);
+    }
+
+    private static Long remaining(Long capMicros, long usageMicros) {
+        if (capMicros == null) return null;
+        long remaining = capMicros - usageMicros;
+        return remaining >= 0 ? remaining : null;
+    }
+
+    private static boolean warned(Long capMicros, Integer warnPercent, long usageMicros) {
+        if (capMicros == null || warnPercent == null) return false;
+        return usageMicros * 100L >= capMicros * warnPercent;
+    }
+
+    private static boolean blocked(Long capMicros, long usageMicros) {
+        return capMicros != null && usageMicros >= capMicros;
     }
 }
