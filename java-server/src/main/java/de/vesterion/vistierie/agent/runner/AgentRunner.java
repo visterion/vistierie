@@ -126,7 +126,7 @@ public class AgentRunner {
             var pRes = provider.complete(providerReq);
             var cost = prices.costMicros(decision.model(), pRes.usage());
             recorder.insertWithBody(new LlmCallRecorder.Row(
-                    newUlid(), run.tenantId(), modelPurpose, null,
+                    newUlid(), run.tenantId(), run.agentId(), modelPurpose, null,
                     providerName, decision.model(), "complete",
                     pRes.usage().inputTokens(), pRes.usage().outputTokens(),
                     pRes.usage().cacheCreationInputTokens(), pRes.usage().cacheReadInputTokens(),

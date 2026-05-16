@@ -189,7 +189,7 @@ public class BatchService {
                             var pRes = new de.vesterion.vistierie.provider.ProviderResponse(
                                     r.text(), r.stopReason(), r.usage(), r.model());
                             recorder.insertWithBody(new de.vesterion.vistierie.audit.LlmCallRecorder.Row(
-                                    newUlid(), parent.tenantId(), purpose, null,
+                                    newUlid(), parent.tenantId(), child.agentId(), purpose, null,
                                     "anthropic", r.model(), "batch",
                                     r.usage().inputTokens(), r.usage().outputTokens(),
                                     r.usage().cacheCreationInputTokens(), r.usage().cacheReadInputTokens(),

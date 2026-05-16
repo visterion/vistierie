@@ -33,7 +33,7 @@ class AgentRunnerLlmCallLinkTest extends PostgresTestBase {
 
     @BeforeEach void resetStub() { stub.resetAll(); }
 
-    @Test void llmCallsHaveRunId() throws Exception {
+    @Test void llmCallsHaveRunIdAndAgentId() throws Exception {
         var tenantId = UUID.randomUUID();
         var tenantName = "tn-" + tenantId;
         tenants.insert(tenantId, tenantName, "h");
@@ -53,9 +53,15 @@ class AgentRunnerLlmCallLinkTest extends PostgresTestBase {
         var runId = runner.startRunSync(tenantId, agentId, "manual",
                 mapper.readTree("{}"), null, null, null);
 
-        var count = jdbc.sql(
-                "SELECT count(*) FROM vistierie.llm_calls WHERE run_id = ?")
-                .param(runId).query(Integer.class).single();
+        var count = jdbc.sql("""
+                SELECT count(*)
+                FROM vistierie.llm_calls
+                WHERE run_id = ?
+                  AND agent_id = ?
+                """)
+                .params(runId, agentId)
+                .query(Integer.class)
+                .single();
         assertThat(count).isGreaterThanOrEqualTo(1);
     }
 }
