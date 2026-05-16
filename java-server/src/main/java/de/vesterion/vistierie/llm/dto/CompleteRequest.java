@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 
 public record CompleteRequest(
+        @NotBlank String agent_name,
         @NotBlank String purpose,
         String realm,
         String system,

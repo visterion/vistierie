@@ -1,6 +1,9 @@
 package de.vesterion.vistierie.llm;
 
+import de.vesterion.vistierie.agents.Agent;
+import de.vesterion.vistierie.agents.AgentRepository;
 import de.vesterion.vistierie.audit.LlmCallRecorder;
+import de.vesterion.vistierie.budget.BudgetEnforcer;
 import de.vesterion.vistierie.auth.RequestContext;
 import de.vesterion.vistierie.kill.KillSwitchService;
 import de.vesterion.vistierie.llm.dto.CompleteRequest;
@@ -41,14 +44,22 @@ class LlmServiceTest {
     private final KillSwitchService kill = mock(KillSwitchService.class);
     private final LlmProvider provider = mock(LlmProvider.class);
     private final LlmMetrics metrics = mock(LlmMetrics.class);
+    private final AgentRepository agents = mock(AgentRepository.class);
+    private final BudgetEnforcer budgets = mock(BudgetEnforcer.class);
 
     private final UUID tenantId = UUID.randomUUID();
     private final String tenantName = "tn-x";
+    private final UUID agentId = UUID.randomUUID();
+    private final Agent agent = new Agent(agentId, tenantId, "writer", "sys", "test_purpose",
+            null, null, 5, 60, "wt", false, 1, Instant.now(), Instant.now(), null, null);
 
-    private final LlmService svc = new LlmService(routing, providers, prices, recorder, kill, metrics);
+    private final LlmService svc = new LlmService(routing, providers, prices, recorder, kill, metrics, agents, budgets);
 
     @BeforeEach void setContext() {
         RequestContext.set(new RequestContext.Principal(tenantId, tenantName, false));
+        when(agents.findByName(tenantId, "writer")).thenReturn(java.util.Optional.of(agent));
+        when(budgets.checkOrThrow(tenantId, tenantName, agentId, "writer"))
+                .thenReturn(new BudgetEnforcer.BudgetCheckResult(1000L, 5000L, 800L, 4000L));
     }
 
     @AfterEach void clearContext() {
@@ -56,13 +67,13 @@ class LlmServiceTest {
     }
 
     private CompleteRequest completeReq() {
-        return new CompleteRequest("test_purpose", "test_realm", "sys",
+        return new CompleteRequest("writer", "test_purpose", "test_realm", "sys",
                 List.of(Map.of("role", "user", "content", "hi")),
                 null, null, null);
     }
 
     private VisionRequest visionReq() {
-        return new VisionRequest("test_purpose", "test_realm",
+        return new VisionRequest("writer", "test_purpose", "test_realm",
                 new VisionRequest.Image("base64", "image/png", "AAAA"),
                 "describe", null, null);
     }
@@ -76,11 +87,11 @@ class LlmServiceTest {
 
         var res = svc.complete(completeReq());
 
-        assertThat(res.text()).isEqualTo("ok");
-        assertThat(res.provider()).isEqualTo("anthropic");
-        assertThat(res.model()).isEqualTo("claude-haiku-4-5");
-        assertThat(res.cost_micros()).isGreaterThan(0L);
-        assertThat(res.llm_call_id()).isNotBlank();
+        assertThat(res.response().text()).isEqualTo("ok");
+        assertThat(res.response().provider()).isEqualTo("anthropic");
+        assertThat(res.response().model()).isEqualTo("claude-haiku-4-5");
+        assertThat(res.response().cost_micros()).isGreaterThan(0L);
+        assertThat(res.response().llm_call_id()).isNotBlank();
 
         var captor = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
         verify(recorder).insertWithBody(captor.capture(), any(), any());
@@ -88,6 +99,7 @@ class LlmServiceTest {
         assertThat(row.status()).isEqualTo("ok");
         assertThat(row.endpoint()).isEqualTo("complete");
         assertThat(row.tenantId()).isEqualTo(tenantId);
+        assertThat(row.agentId()).isEqualTo(agentId);
         assertThat(row.inputTokens()).isEqualTo(10);
         assertThat(row.outputTokens()).isEqualTo(20);
     }
@@ -169,11 +181,12 @@ class LlmServiceTest {
 
         var res = svc.vision(visionReq());
 
-        assertThat(res.text()).isEqualTo("a cat");
+        assertThat(res.response().text()).isEqualTo("a cat");
         var captor = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
         verify(recorder).insertWithBody(captor.capture(), any(), any());
         assertThat(captor.getValue().endpoint()).isEqualTo("vision");
         assertThat(captor.getValue().status()).isEqualTo("ok");
+        assertThat(captor.getValue().agentId()).isEqualTo(agentId);
     }
 
     @Test void visionBlockedByKillSwitch() {

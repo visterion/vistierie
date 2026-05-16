@@ -37,10 +37,10 @@ public class BudgetEnforcer {
     }
 
     public record BudgetCheckResult(
-            long tenantDailyRemaining,
-            long tenantMonthlyRemaining,
-            long agentDailyRemaining,
-            long agentMonthlyRemaining
+            Long tenantDailyRemaining,
+            Long tenantMonthlyRemaining,
+            Long agentDailyRemaining,
+            Long agentMonthlyRemaining
     ) {}
 
     public BudgetCheckResult checkOrThrow(UUID tenantId, String tenantName, UUID agentId, String agentName) {
@@ -93,8 +93,8 @@ public class BudgetEnforcer {
         }
     }
 
-    private static long remaining(Long capMicros, long usageMicros) {
-        if (capMicros == null) return Long.MAX_VALUE;
+    private static Long remaining(Long capMicros, long usageMicros) {
+        if (capMicros == null) return null;
         long remaining = capMicros - usageMicros;
         return Math.max(0L, remaining);
     }

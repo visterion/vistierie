@@ -2,6 +2,10 @@ package de.vesterion.vistierie.llm;
 
 import com.github.tomakehurst.wiremock.WireMockServer;
 import de.vesterion.vistierie.PostgresTestBase;
+import de.vesterion.vistierie.agents.AgentRepository;
+import de.vesterion.vistierie.budget.AgentBudgetRepository;
+import de.vesterion.vistierie.budget.TenantBudgetRepository;
+import de.vesterion.vistierie.budget.admin.dto.BudgetPatchRequest;
 import de.vesterion.vistierie.auth.AuthFilter;
 import de.vesterion.vistierie.routing.RoutingRule;
 import de.vesterion.vistierie.routing.RoutingRuleRepository;
@@ -41,6 +45,9 @@ class LlmEndpointsIntegrationTest extends PostgresTestBase {
     @Autowired WebApplicationContext wac;
     @Autowired AuthFilter authFilter;
     @Autowired TenantRepository tenants;
+    @Autowired AgentRepository agents;
+    @Autowired TenantBudgetRepository tenantBudgets;
+    @Autowired AgentBudgetRepository agentBudgets;
     @Autowired BCryptPasswordEncoder enc;
     @Autowired JdbcClient jdbc;
     @Autowired RoutingRuleRepository routingRules;
@@ -80,6 +87,25 @@ class LlmEndpointsIntegrationTest extends PostgresTestBase {
         routingResolver.bumpVersion();
     }
 
+    private UUID seedAgent(UUID tenantId, String name) {
+        var agentId = UUID.randomUUID();
+        agents.insert(agentId, tenantId, name, "sys", "summarize_cell",
+                new tools.jackson.databind.ObjectMapper().createArrayNode(), null, 5, 60, "wt", false, null);
+        return agentId;
+    }
+
+    private UUID resetHivememTenant(String token) {
+        var existing = tenants.findByName("hivemem").orElse(null);
+        if (existing != null) {
+            jdbc.sql("DELETE FROM vistierie.routing_rules WHERE tenant_id = ?").param(existing.id()).update();
+            jdbc.sql("DELETE FROM vistierie.llm_calls WHERE tenant_id = ?").param(existing.id()).update();
+            jdbc.sql("DELETE FROM vistierie.tenants WHERE id = ?").param(existing.id()).update();
+        }
+        var tenantId = UUID.randomUUID();
+        tenants.insert(tenantId, "hivemem", enc.encode(token));
+        return tenantId;
+    }
+
     @Test void completeRecordsLlmCall() throws Exception {
         var token = "tok-" + UUID.randomUUID();
         // routing config matches by tenant *name*. Insert as 'hivemem' so existing routing rules apply.
@@ -99,6 +125,9 @@ class LlmEndpointsIntegrationTest extends PostgresTestBase {
             tenants.insert(hivememId, "hivemem", enc.encode(token));
         }
         seedRouting(hivememId);
+        var agentId = seedAgent(hivememId, "writer");
+        tenantBudgets.patch(hivememId, new BudgetPatchRequest(10_000L, 100_000L, 80, 90));
+        agentBudgets.patch(agentId, new BudgetPatchRequest(5_000L, 50_000L, 80, 90));
 
         stubFor(com.github.tomakehurst.wiremock.client.WireMock.post(urlEqualTo("/v1/messages")).willReturn(okJson("""
                 {"id":"m","type":"message","role":"assistant","model":"claude-haiku-4-5",
@@ -111,14 +140,16 @@ class LlmEndpointsIntegrationTest extends PostgresTestBase {
                 .header("Authorization", "Bearer " + token)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
-                        {"purpose":"summarize_cell","realm":"privat",
+                        {"agent_name":"writer","purpose":"summarize_cell","realm":"privat",
                          "messages":[{"role":"user","content":"hi"}],
                          "max_tokens":256}
                         """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.text").value("out"))
                 .andExpect(jsonPath("$.model").value("claude-haiku-4-5"))
-                .andExpect(jsonPath("$.usage.inputTokens").value(10));
+                .andExpect(jsonPath("$.usage.inputTokens").value(10))
+                .andExpect(header().exists("X-Vistierie-Agent-Daily-Budget-Remaining-Micros"))
+                .andExpect(header().exists("X-Vistierie-Tenant-Monthly-Budget-Remaining-Micros"));
 
         var rows = jdbc.sql("""
                 SELECT status, purpose, model, input_tokens, agent_id
@@ -129,7 +160,7 @@ class LlmEndpointsIntegrationTest extends PostgresTestBase {
                 .containsEntry("purpose", "summarize_cell")
                 .containsEntry("model", "claude-haiku-4-5")
                 .containsEntry("input_tokens", 10)
-                .containsEntry("agent_id", null);
+                .containsEntry("agent_id", agentId);
     }
 
     @Test void killSwitchBlocks() throws Exception {
@@ -144,13 +175,16 @@ class LlmEndpointsIntegrationTest extends PostgresTestBase {
         var id = UUID.randomUUID();
         tenants.insert(id, "hivemem", enc.encode(token));
         seedRouting(id);
+        var agentId = seedAgent(id, "writer");
+        tenantBudgets.patch(id, new BudgetPatchRequest(10_000L, 100_000L, 80, 90));
+        agentBudgets.patch(agentId, new BudgetPatchRequest(5_000L, 50_000L, 80, 90));
         tenants.setKill(id, java.time.Instant.parse("2099-01-01T00:00:00Z"), "freeze", "test");
 
         mvc.perform(post("/llm/complete")
                 .header("Authorization", "Bearer " + token)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
-                        {"purpose":"summarize_cell",
+                        {"agent_name":"writer","purpose":"summarize_cell",
                          "messages":[{"role":"user","content":"hi"}],
                          "max_tokens":10}
                         """))
@@ -173,6 +207,9 @@ class LlmEndpointsIntegrationTest extends PostgresTestBase {
         var visionId = UUID.randomUUID();
         tenants.insert(visionId, "hivemem", enc.encode(token));
         seedRouting(visionId);
+        var agentId = seedAgent(visionId, "visionary");
+        tenantBudgets.patch(visionId, new BudgetPatchRequest(10_000L, 100_000L, 80, 90));
+        agentBudgets.patch(agentId, new BudgetPatchRequest(5_000L, 50_000L, 80, 90));
 
         stubFor(com.github.tomakehurst.wiremock.client.WireMock.post(urlEqualTo("/v1/messages")).willReturn(okJson("""
                 {"id":"m","type":"message","role":"assistant","model":"claude-haiku-4-5",
@@ -185,7 +222,7 @@ class LlmEndpointsIntegrationTest extends PostgresTestBase {
                 .header("Authorization", "Bearer " + token)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
-                        {"purpose":"vision_attachment",
+                        {"agent_name":"visionary","purpose":"vision_attachment",
                          "image":{"type":"base64","media_type":"image/png","data":"AAAA"},
                          "prompt":"describe","max_tokens":256}
                         """))
@@ -194,5 +231,39 @@ class LlmEndpointsIntegrationTest extends PostgresTestBase {
 
         verify(postRequestedFor(urlEqualTo("/v1/messages"))
                 .withRequestBody(containing("\"type\":\"image\"")));
+    }
+
+    @Test void completeRejectsMissingAgentName() throws Exception {
+        var token = "tok-missing-" + UUID.randomUUID();
+        var tenantId = resetHivememTenant(token);
+        seedRouting(tenantId);
+
+        mvc.perform(post("/llm/complete")
+                .header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {"purpose":"summarize_cell",
+                         "messages":[{"role":"user","content":"hi"}],
+                         "max_tokens":256}
+                        """))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test void completeRejectsUnknownAgentName() throws Exception {
+        var token = "tok-unknown-" + UUID.randomUUID();
+        var tenantId = resetHivememTenant(token);
+        seedRouting(tenantId);
+        tenantBudgets.patch(tenantId, new BudgetPatchRequest(10_000L, 100_000L, 80, 90));
+
+        mvc.perform(post("/llm/complete")
+                .header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {"agent_name":"ghost","purpose":"summarize_cell",
+                         "messages":[{"role":"user","content":"hi"}],
+                         "max_tokens":256}
+                        """))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("budget_missing_agent"));
     }
 }
