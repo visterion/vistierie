@@ -5,7 +5,9 @@
 Vistierie is a tenant-scoped, audited, kill-switchable LLM gateway and agent
 framework. Every call is authenticated with a bearer token, resolved against
 a routing policy, forwarded to the configured provider (Anthropic), and
-recorded in the `llm_calls` audit table.
+recorded in the `llm_calls` audit table. Every billable LLM call must also
+resolve to a concrete tenant-local agent so tenant and per-agent hard budgets
+can be enforced consistently.
 
 Two surfaces:
 - **Synchronous LLM gateway**: `POST /llm/complete`, `POST /llm/vision`.
@@ -38,6 +40,7 @@ Run a chat completion against the tenant's routed model.
 
 ```json
 {
+  "agent_name": "summarizer",
   "purpose":    "summarize_cell",
   "realm":      "personal",
   "system":     "You are a concise summarizer.",
@@ -50,6 +53,7 @@ Run a chat completion against the tenant's routed model.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
+| `agent_name` | string | yes | Existing agent name in the calling tenant; required for budget enforcement and audit attribution |
 | `purpose` | string | yes | Routing key, matched against tenant routing config |
 | `realm` | string | no | Informational label; stored in audit log (no routing effect in Slice 1) |
 | `system` | string | no | System prompt prepended before `messages` |
@@ -90,15 +94,44 @@ Run a chat completion against the tenant's routed model.
 | `cost_micros` | integer | Estimated cost in micro-EUR (divide by 1 000 000 for EUR) |
 | `llm_call_id` | string | Audit row ID, safe to log and reference in support requests |
 
+### Response headers
+
+When the relevant caps are configured, successful direct calls also return:
+
+- `X-Vistierie-Tenant-Daily-Budget-Remaining-Micros`
+- `X-Vistierie-Tenant-Monthly-Budget-Remaining-Micros`
+- `X-Vistierie-Agent-Daily-Budget-Remaining-Micros`
+- `X-Vistierie-Agent-Monthly-Budget-Remaining-Micros`
+
 ### Error codes
 
 | HTTP | Meaning |
 |---|---|
 | 400 | Validation error, malformed body or missing required field |
 | 401 | Missing or invalid bearer token, or the bearer's tenant has been deleted mid-request |
-| 403 | Tenant kill-switch is active |
+| 403 | Tenant kill-switch is active, `agent_name` is unknown, or a tenant/agent budget gate blocked the call |
 | 502 | Provider returned an HTTP ≥ 500 error |
 | 504 | Provider request timed out |
+
+Budget-related `403` responses are JSON objects with at least:
+
+```json
+{
+  "error": "budget_exceeded_agent_daily",
+  "message": "agent daily budget exceeded for tenant dracul and agent summarizer",
+  "tenant": "dracul",
+  "agent_name": "summarizer"
+}
+```
+
+Known budget/agent error codes:
+
+- `budget_missing_tenant`
+- `budget_missing_agent`
+- `budget_exceeded_tenant_daily`
+- `budget_exceeded_tenant_monthly`
+- `budget_exceeded_agent_daily`
+- `budget_exceeded_agent_monthly`
 
 ### curl example
 
@@ -107,6 +140,7 @@ curl -s -X POST http://localhost:8090/llm/complete \
   -H "Authorization: Bearer $TENANT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
+    "agent_name": "summarizer",
     "purpose": "summarize_cell",
     "messages": [{"role":"user","content":"Summarize: the quick brown fox."}]
   }' | jq .
@@ -122,6 +156,7 @@ Run a vision (image-understanding) completion against the tenant's routed model.
 
 ```json
 {
+  "agent_name": "vision-reader",
   "purpose":    "vision_attachment",
   "realm":      "personal",
   "image": {
@@ -137,6 +172,7 @@ Run a vision (image-understanding) completion against the tenant's routed model.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
+| `agent_name` | string | yes | Existing agent name in the calling tenant; required for budget enforcement and audit attribution |
 | `purpose` | string | yes | Routing key |
 | `realm` | string | no | Informational label |
 | `image.type` | string | yes | Always `"base64"` in Slice 1 |
@@ -160,6 +196,7 @@ curl -s -X POST http://localhost:8090/llm/vision \
   -H "Authorization: Bearer $TENANT_TOKEN" \
   -H "Content-Type: application/json" \
   -d "{
+    \"agent_name\": \"vision-reader\",
     \"purpose\": \"vision_attachment\",
     \"image\": {
       \"type\": \"base64\",
@@ -248,6 +285,76 @@ tenant return `403` until the switch is cleared or `until` elapses.
 | `setBy` | no | Free-form attribution string (defaults to `"admin"`) |
 
 ### Response `204 No Content`
+
+---
+
+## `GET /admin/tenants/{name}/budget`
+
+Returns the current tenant budget policy plus live daily/monthly usage state.
+
+**Auth:** admin token required.
+
+### Response `200 OK`
+
+```json
+{
+  "daily_cap_micros": 100000,
+  "monthly_cap_micros": 2000000,
+  "daily_warn_percent": 80,
+  "monthly_warn_percent": 90,
+  "daily_usage_micros": 320,
+  "monthly_usage_micros": 1820,
+  "daily_remaining_micros": 99680,
+  "monthly_remaining_micros": 1998180,
+  "daily_warned": false,
+  "monthly_warned": false,
+  "daily_blocked": false,
+  "monthly_blocked": false
+}
+```
+
+If no tenant budget exists yet, the cap and warn fields are `null` and usage is `0`.
+
+## `PATCH /admin/tenants/{name}/budget`
+
+Create or partially update a tenant budget policy.
+
+**Auth:** admin token required.
+
+### Request
+
+```json
+{
+  "daily_cap_micros": 100000,
+  "monthly_cap_micros": 2000000,
+  "daily_warn_percent": 80,
+  "monthly_warn_percent": 90
+}
+```
+
+Fields may be omitted to leave the current value unchanged. Explicit `null` clears that field.
+
+### Response `200 OK`
+
+Returns the same shape as `GET /admin/tenants/{name}/budget`.
+
+---
+
+## `GET /admin/tenants/{tenant}/agents/{agent}/budget`
+
+Returns the configured budget policy and live usage state for one agent inside one tenant.
+
+**Auth:** admin token required.
+
+## `PATCH /admin/tenants/{tenant}/agents/{agent}/budget`
+
+Create or partially update an agent budget policy. Request and response shapes are identical to the tenant budget endpoints.
+
+Agent budgets are operational gating, not metadata:
+
+- direct `/llm/**` calls require `agent_name` and a live agent budget
+- manual `/agents/{name}/run` triggers require an operational agent budget
+- scheduler ticks, batch submission, and unpausing an agent are blocked without budget readiness
 
 ---
 
@@ -351,6 +458,7 @@ Returns `202 Accepted`:
 ```
 
 `409 Conflict` if the agent is paused.
+`403 Forbidden` if tenant or agent budget policy is missing or exceeded.
 
 ### `POST /agents/{name}/batch`
 
@@ -387,6 +495,7 @@ Submit `N` agent invocations as one Anthropic Message-Batch.
 **Errors:**
 - `400`: agent has tools, missing `output_schema`, empty/oversized
   `items`, or invalid/duplicate `custom_id`.
+- `403`: tenant or agent budget gate blocked submission.
 - `404`: agent not found in this tenant.
 - `409`: agent paused.
 - `502`: upstream Anthropic batch submission failed.

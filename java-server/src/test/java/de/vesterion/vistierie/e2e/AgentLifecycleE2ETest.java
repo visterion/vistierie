@@ -1,6 +1,10 @@
 package de.vesterion.vistierie.e2e;
 
 import de.vesterion.vistierie.PostgresTestBase;
+import de.vesterion.vistierie.agents.AgentRepository;
+import de.vesterion.vistierie.budget.AgentBudgetRepository;
+import de.vesterion.vistierie.budget.TenantBudgetRepository;
+import de.vesterion.vistierie.budget.admin.dto.BudgetPatchRequest;
 import de.vesterion.vistierie.auth.AuthFilter;
 import de.vesterion.vistierie.routing.RoutingRule;
 import de.vesterion.vistierie.routing.RoutingRuleRepository;
@@ -12,6 +16,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
@@ -32,9 +37,13 @@ class AgentLifecycleE2ETest extends PostgresTestBase {
     @Autowired WebApplicationContext wac;
     @Autowired AuthFilter authFilter;
     @Autowired TenantRepository tenants;
+    @Autowired AgentRepository agents;
+    @Autowired TenantBudgetRepository tenantBudgets;
+    @Autowired AgentBudgetRepository agentBudgets;
     @Autowired BCryptPasswordEncoder enc;
     @Autowired StubLlmProvider stub;
     @Autowired ObjectMapper mapper;
+    @Autowired JdbcClient jdbc;
     @Autowired RoutingRuleRepository routingRules;
     @Autowired RoutingResolver routingResolver;
 
@@ -57,6 +66,15 @@ class AgentLifecycleE2ETest extends PostgresTestBase {
         stub.resetAll();
     }
 
+    private UUID agentId(String name) {
+        return agents.findByName(tenants.findByName(tenantName).orElseThrow().id(), name).orElseThrow().id();
+    }
+
+    private void seedOperationalBudget(UUID tenantId, UUID agentId, long tenantCapMicros, long agentCapMicros) {
+        tenantBudgets.patch(tenantId, new BudgetPatchRequest(tenantCapMicros, tenantCapMicros * 10, 80, 90));
+        agentBudgets.patch(agentId, new BudgetPatchRequest(agentCapMicros, agentCapMicros * 10, 80, 90));
+    }
+
     @Test void createTriggerLongPollDone() throws Exception {
         var createBody = """
                 { "name":"a", "system_prompt":"p", "model_purpose":"summarize_cell",
@@ -68,6 +86,8 @@ class AgentLifecycleE2ETest extends PostgresTestBase {
                 .header("Authorization", "Bearer " + token)
                 .contentType(MediaType.APPLICATION_JSON).content(createBody))
                 .andExpect(status().isCreated());
+        var agentId = agentId("a");
+        seedOperationalBudget(tenants.findByName(tenantName).orElseThrow().id(), agentId, 100_000L, 50_000L);
 
         stub.script(StubLlmScripts.Turn.endTurn("{\"x\":\"yes\"}"));
         var triggerResp = mvc.perform(post("/agents/a/run")
@@ -84,5 +104,51 @@ class AgentLifecycleE2ETest extends PostgresTestBase {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("done"))
                 .andExpect(jsonPath("$.output.x").value("yes"));
+    }
+
+    @Test void directCallConsumptionBlocksSubsequentRunOnSameAgentBudget() throws Exception {
+        var createBody = """
+                { "name":"a", "system_prompt":"p", "model_purpose":"summarize_cell",
+                  "tools":[],
+                  "output_schema":{"type":"object","properties":{"x":{"type":"string"}},"required":["x"]},
+                  "webhook_token":"wt" }
+                """;
+        mvc.perform(post("/agents")
+                .header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content(createBody))
+                .andExpect(status().isCreated());
+
+        var tenantId = tenants.findByName(tenantName).orElseThrow().id();
+        var agentId = agentId("a");
+        seedOperationalBudget(tenantId, agentId, 100_000L, 50_000L);
+
+        stub.script(StubLlmScripts.Turn.endTurn("direct"));
+        mvc.perform(post("/llm/complete")
+                .header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {"agent_name":"a","purpose":"summarize_cell",
+                         "messages":[{"role":"user","content":"hi"}],
+                         "max_tokens":32}
+                        """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.text").value("direct"));
+
+        long consumed = jdbc.sql("""
+                SELECT cost_micros
+                FROM vistierie.llm_calls
+                WHERE tenant_id = ? AND agent_id = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+                """).params(tenantId, agentId).query(Long.class).single();
+        agentBudgets.patch(agentId, new BudgetPatchRequest(consumed, consumed * 10, 80, 90));
+
+        mvc.perform(post("/agents/a/run")
+                .header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"payload\":{}}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("budget_exceeded_agent_daily"))
+                .andExpect(jsonPath("$.agent_name").value("a"))
+                .andExpect(jsonPath("$.tenant").value(tenantName));
     }
 }
