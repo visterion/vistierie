@@ -1,6 +1,8 @@
 package de.vesterion.vistierie.batch;
 
 import de.vesterion.vistierie.agents.Agent;
+import de.vesterion.vistierie.budget.BudgetEnforcer;
+import de.vesterion.vistierie.budget.BudgetException;
 import de.vesterion.vistierie.provider.BatchItem;
 import de.vesterion.vistierie.provider.BatchSubmission;
 import de.vesterion.vistierie.provider.ProviderRegistry;
@@ -33,6 +35,7 @@ public class BatchService {
     private final de.vesterion.vistierie.agent.runner.OutputSchemaValidator schemaValidator;
     private final de.vesterion.vistierie.audit.LlmCallRecorder recorder;
     private final de.vesterion.vistierie.pricing.PriceTable prices;
+    private final BudgetEnforcer budgets;
     private final int maxItems;
 
     public BatchService(RunStore runs, RunRepository runRepo, RoutingResolver routing,
@@ -40,6 +43,7 @@ public class BatchService {
                         de.vesterion.vistierie.agent.runner.OutputSchemaValidator schemaValidator,
                         de.vesterion.vistierie.audit.LlmCallRecorder recorder,
                         de.vesterion.vistierie.pricing.PriceTable prices,
+                        BudgetEnforcer budgets,
                         @Value("${vistierie.agents.batch.max-items:10000}") int maxItems) {
         this.runs = runs;
         this.runRepo = runRepo;
@@ -49,6 +53,7 @@ public class BatchService {
         this.schemaValidator = schemaValidator;
         this.recorder = recorder;
         this.prices = prices;
+        this.budgets = budgets;
         this.maxItems = maxItems;
     }
 
@@ -67,6 +72,11 @@ public class BatchService {
                                String completionWebhook, String completionWebhookToken) {
 
         if (agent.paused()) throw new BadBatchException("agent paused");
+        try {
+            budgets.checkOrThrow(tenantId, tenantName, agent.id(), agent.name());
+        } catch (BudgetException e) {
+            throw new BadBatchException("budget: " + e.code());
+        }
         if (agent.outputSchema() == null) throw new BadBatchException("agent missing output_schema");
         if (agent.tools() != null && agent.tools().isArray() && agent.tools().size() > 0) {
             throw new BadBatchException("batched agents must not have tools (single-turn only in v1)");

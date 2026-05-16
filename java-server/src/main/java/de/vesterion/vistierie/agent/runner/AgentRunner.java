@@ -3,6 +3,8 @@ package de.vesterion.vistierie.agent.runner;
 import de.vesterion.vistierie.agents.AgentRepository;
 import de.vesterion.vistierie.agents.dto.ToolDef;
 import de.vesterion.vistierie.audit.LlmCallRecorder;
+import de.vesterion.vistierie.budget.BudgetEnforcer;
+import de.vesterion.vistierie.budget.BudgetException;
 import de.vesterion.vistierie.kill.KillSwitchService;
 import de.vesterion.vistierie.pricing.PriceTable;
 import de.vesterion.vistierie.provider.ProviderRegistry;
@@ -33,6 +35,7 @@ public class AgentRunner {
     private final ProviderRegistry providers;
     private final PriceTable prices;
     private final LlmCallRecorder recorder;
+    private final BudgetEnforcer budgets;
     private final KillSwitchService kill;
     private final TenantRepository tenants;
     private final ToolUseParser parser;
@@ -45,6 +48,7 @@ public class AgentRunner {
     public AgentRunner(AgentRepository agents, RunStore runs,
                        RoutingResolver routing, ProviderRegistry providers,
                        PriceTable prices, LlmCallRecorder recorder,
+                       BudgetEnforcer budgets,
                        KillSwitchService kill, TenantRepository tenants,
                        ToolUseParser parser, OutputSchemaValidator schema,
                        ToolDispatcher toolDispatcher,
@@ -57,6 +61,7 @@ public class AgentRunner {
         this.providers = providers;
         this.prices = prices;
         this.recorder = recorder;
+        this.budgets = budgets;
         this.kill = kill;
         this.tenants = tenants;
         this.parser = parser;
@@ -108,6 +113,12 @@ public class AgentRunner {
             try { kill.check(run.tenantId()); }
             catch (KillSwitchService.KilledException e) {
                 runs.markTerminal(runId, "failed", null, "killed: " + e.reason(), null);
+                return;
+            }
+            try {
+                budgets.checkOrThrow(run.tenantId(), tenantName, run.agentId(), snap.path("name").asText());
+            } catch (BudgetException e) {
+                runs.markTerminal(runId, "failed", null, e.code() + ": " + e.getMessage(), null);
                 return;
             }
 

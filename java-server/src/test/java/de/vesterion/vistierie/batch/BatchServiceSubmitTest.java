@@ -2,6 +2,9 @@ package de.vesterion.vistierie.batch;
 
 import de.vesterion.vistierie.PostgresTestBase;
 import de.vesterion.vistierie.agents.AgentRepository;
+import de.vesterion.vistierie.budget.AgentBudgetRepository;
+import de.vesterion.vistierie.budget.TenantBudgetRepository;
+import de.vesterion.vistierie.budget.admin.dto.BudgetPatchRequest;
 import de.vesterion.vistierie.routing.RoutingRule;
 import de.vesterion.vistierie.routing.RoutingRuleRepository;
 import de.vesterion.vistierie.routing.RoutingResolver;
@@ -27,6 +30,8 @@ class BatchServiceSubmitTest extends PostgresTestBase {
 
     @Autowired BatchService batchService;
     @Autowired AgentRepository agents;
+    @Autowired TenantBudgetRepository tenantBudgets;
+    @Autowired AgentBudgetRepository agentBudgets;
     @Autowired RunRepository runs;
     @Autowired TenantRepository tenants;
     @Autowired StubLlmProvider stub;
@@ -48,6 +53,7 @@ class BatchServiceSubmitTest extends PostgresTestBase {
         routingRules.insert(new RoutingRule(UUID.randomUUID(), tenantId, null, "summarize_cell",
                 "anthropic", "claude-haiku-4-5", 500, false, false, now, now));
         routingResolver.bumpVersion();
+        tenantBudgets.patch(tenantId, new BudgetPatchRequest(10_000L, 100_000L, 80, 90));
     }
 
     @Test
@@ -56,6 +62,7 @@ class BatchServiceSubmitTest extends PostgresTestBase {
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "summarize", "p", "summarize_cell",
                 mapper.createArrayNode(), schema, 3, 30, "wt", false, null);
+        agentBudgets.patch(agentId, new BudgetPatchRequest(5_000L, 50_000L, 80, 90));
         var agent = agents.findById(agentId).orElseThrow();
 
         var items = List.of(
@@ -93,6 +100,7 @@ class BatchServiceSubmitTest extends PostgresTestBase {
         var schema = mapper.readTree("{\"type\":\"object\"}");
         agents.insert(agentId, tenantId, "with-tools", "p", "summarize_cell",
                 tools, schema, 3, 30, "wt", false, null);
+        agentBudgets.patch(agentId, new BudgetPatchRequest(5_000L, 50_000L, 80, 90));
         var agent = agents.findById(agentId).orElseThrow();
         assertThatThrownBy(() -> batchService.submit(tenantId, tenantName, agent,
                 List.of(new BatchItemRequest(null, mapper.createObjectNode())), null, null))
@@ -105,6 +113,7 @@ class BatchServiceSubmitTest extends PostgresTestBase {
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "no-schema", "p", "summarize_cell",
                 mapper.createArrayNode(), null, 3, 30, "wt", false, null);
+        agentBudgets.patch(agentId, new BudgetPatchRequest(5_000L, 50_000L, 80, 90));
         var agent = agents.findById(agentId).orElseThrow();
         assertThatThrownBy(() -> batchService.submit(tenantId, tenantName, agent,
                 List.of(new BatchItemRequest(null, mapper.createObjectNode())), null, null))
@@ -118,6 +127,7 @@ class BatchServiceSubmitTest extends PostgresTestBase {
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "summ2", "p", "summarize_cell",
                 mapper.createArrayNode(), schema, 3, 30, "wt", false, null);
+        agentBudgets.patch(agentId, new BudgetPatchRequest(5_000L, 50_000L, 80, 90));
         var agent = agents.findById(agentId).orElseThrow();
         var items = List.of(
                 new BatchItemRequest("ABC", mapper.createObjectNode()),
@@ -133,10 +143,25 @@ class BatchServiceSubmitTest extends PostgresTestBase {
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "summ3", "p", "summarize_cell",
                 mapper.createArrayNode(), schema, 3, 30, "wt", false, null);
+        agentBudgets.patch(agentId, new BudgetPatchRequest(5_000L, 50_000L, 80, 90));
         var agent = agents.findById(agentId).orElseThrow();
         var items = List.of(new BatchItemRequest("has spaces!", mapper.createObjectNode()));
         assertThatThrownBy(() -> batchService.submit(tenantId, tenantName, agent, items, null, null))
                 .isInstanceOf(BatchService.BadBatchException.class)
                 .hasMessageContaining("custom_id");
+    }
+
+    @Test
+    void batchSubmitRejectsAgentWithoutBudget() throws Exception {
+        var schema = mapper.readTree("{\"type\":\"object\"}");
+        var agentId = UUID.randomUUID();
+        agents.insert(agentId, tenantId, "no-budget", "p", "summarize_cell",
+                mapper.createArrayNode(), schema, 3, 30, "wt", false, null);
+        var agent = agents.findById(agentId).orElseThrow();
+
+        assertThatThrownBy(() -> batchService.submit(tenantId, tenantName, agent,
+                List.of(new BatchItemRequest(null, mapper.createObjectNode())), null, null))
+                .isInstanceOf(BatchService.BadBatchException.class)
+                .hasMessageContaining("budget");
     }
 }

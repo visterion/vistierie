@@ -1,6 +1,8 @@
 package de.vesterion.vistierie.agents;
 
 import de.vesterion.vistierie.agents.dto.*;
+import de.vesterion.vistierie.budget.BudgetEnforcer;
+import de.vesterion.vistierie.tenants.TenantRepository;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -12,11 +14,18 @@ import java.util.UUID;
 public class AgentService {
 
     private final AgentRepository repo;
+    private final TenantRepository tenants;
+    private final BudgetEnforcer budgets;
     private final AgentDefinitionValidator validator;
     private final ObjectMapper mapper;
 
-    public AgentService(AgentRepository repo, AgentDefinitionValidator validator, ObjectMapper mapper) {
-        this.repo = repo; this.validator = validator; this.mapper = mapper;
+    public AgentService(AgentRepository repo, TenantRepository tenants, BudgetEnforcer budgets,
+                        AgentDefinitionValidator validator, ObjectMapper mapper) {
+        this.repo = repo;
+        this.tenants = tenants;
+        this.budgets = budgets;
+        this.validator = validator;
+        this.mapper = mapper;
     }
 
     public AgentDetail create(UUID tenantId, CreateAgentRequest req) {
@@ -78,6 +87,10 @@ public class AgentService {
         }
         if (req.output_schema() != null) {
             validator.validateOutputSchemaIfPresent(req.output_schema());
+        }
+        if (a.paused() && !newPaused) {
+            var tenant = tenants.findById(tenantId).orElseThrow();
+            budgets.checkOrThrow(tenantId, tenant.name(), a.id(), a.name());
         }
         repo.replace(a.id(), newSysPrompt, newPurpose, newTools, newOutSchema,
                 newMaxTurns, newMaxSeconds, newToken, newPaused, newSchedule);
