@@ -13,5 +13,7 @@ public record AgentDetail(
         boolean paused, int version,
         Instant created_at, Instant updated_at,
         String schedule,
-        Instant last_tick_at
+        Instant last_tick_at,
+        String completion_webhook,
+        String completion_webhook_token
 ) {}
