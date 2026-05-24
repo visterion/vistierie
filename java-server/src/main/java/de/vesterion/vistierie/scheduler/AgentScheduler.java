@@ -101,7 +101,8 @@ public class AgentScheduler {
             // Fire
             try {
                 dispatcher.trigger(a.tenantId(), a, "cron",
-                        mapper.createObjectNode(), null, null);
+                        mapper.createObjectNode(),
+                        a.completionWebhook(), a.completionWebhookToken());
                 agents.updateLastTick(a.id(), now);
             } catch (Exception e) {
                 log.warn("agent {} cron dispatch failed: {}", a.id(), e.getMessage());
