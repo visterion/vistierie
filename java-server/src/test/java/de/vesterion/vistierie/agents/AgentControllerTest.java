@@ -30,9 +30,7 @@ class AgentControllerTest extends PostgresTestBase {
     @BeforeEach void setUp() {
         mvc = MockMvcBuilders.webAppContextSetup(wac).addFilter(authFilter).build();
         token = "tok-" + UUID.randomUUID();
-        var existing = tenants.findByName("hivemem");
-        existing.ifPresent(t -> tenants.delete(t.id()));
-        tenants.insert(UUID.randomUUID(), "hivemem", enc.encode(token));
+        tenants.insert(UUID.randomUUID(), "agent-controller-" + UUID.randomUUID(), enc.encode(token));
     }
 
     @Test void createListGetUpdateDelete() throws Exception {
