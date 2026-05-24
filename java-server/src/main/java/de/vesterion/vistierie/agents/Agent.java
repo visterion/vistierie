@@ -21,5 +21,7 @@ public record Agent(
         Instant createdAt,
         Instant updatedAt,
         String schedule,
-        Instant lastTickAt
+        Instant lastTickAt,
+        String completionWebhook,
+        String completionWebhookToken
 ) {}
