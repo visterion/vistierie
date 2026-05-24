@@ -80,7 +80,7 @@ class BatchE2ETest extends PostgresTestBase {
         var schema = mapper.readTree("{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\"}},\"required\":[\"x\"]}");
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "summ-e2e", "p", "summarize_cell",
-                mapper.createArrayNode(), schema, 3, 30, "wt", false, null);
+                mapper.createArrayNode(), schema, 3, 30, "wt", false, null, null, null);
         budgetFixtures.seed(tenantId, agentId);
 
         var resp = mvc.perform(post("/agents/summ-e2e/batch")

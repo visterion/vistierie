@@ -58,7 +58,7 @@ class BatchPollingServiceTest extends PostgresTestBase {
         var schema = mapper.readTree("{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\"}},\"required\":[\"x\"]}");
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "summ", "p", "summarize_cell",
-                mapper.createArrayNode(), schema, 3, 30, "wt", false, null);
+                mapper.createArrayNode(), schema, 3, 30, "wt", false, null, null, null);
         budgetFixtures.seed(tenantId, agentId);
         var agent = agents.findById(agentId).orElseThrow();
 
@@ -99,7 +99,7 @@ class BatchPollingServiceTest extends PostgresTestBase {
         var schema = mapper.readTree("{\"type\":\"object\"}");
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "summ", "p", "summarize_cell",
-                mapper.createArrayNode(), schema, 3, 30, "wt", false, null);
+                mapper.createArrayNode(), schema, 3, 30, "wt", false, null, null, null);
         budgetFixtures.seed(tenantId, agentId);
         var agent = agents.findById(agentId).orElseThrow();
         var items = List.of(new BatchItemRequest(null, mapper.createObjectNode()));

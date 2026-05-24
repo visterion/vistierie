@@ -66,7 +66,7 @@ class BatchControllerTest extends PostgresTestBase {
         var schema = mapper.readTree("{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\"}},\"required\":[\"x\"]}");
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "summ", "p", "summarize_cell",
-                mapper.createArrayNode(), schema, 3, 30, "wt", false, null);
+                mapper.createArrayNode(), schema, 3, 30, "wt", false, null, null, null);
         budgetFixtures.seed(tenantId, agentId);
 
         var body = """
@@ -95,7 +95,7 @@ class BatchControllerTest extends PostgresTestBase {
         var schema = mapper.readTree("{\"type\":\"object\"}");
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "with-tools", "p", "summarize_cell",
-                tools, schema, 3, 30, "wt", false, null);
+                tools, schema, 3, 30, "wt", false, null, null, null);
         budgetFixtures.seed(tenantId, agentId);
 
         mvc.perform(post("/agents/with-tools/batch")
@@ -109,7 +109,7 @@ class BatchControllerTest extends PostgresTestBase {
     void rejectsAgentWithoutOutputSchemaAs400() throws Exception {
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "no-schema", "p", "summarize_cell",
-                mapper.createArrayNode(), null, 3, 30, "wt", false, null);
+                mapper.createArrayNode(), null, 3, 30, "wt", false, null, null, null);
         budgetFixtures.seed(tenantId, agentId);
 
         mvc.perform(post("/agents/no-schema/batch")
@@ -124,7 +124,7 @@ class BatchControllerTest extends PostgresTestBase {
         var schema = mapper.readTree("{\"type\":\"object\"}");
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "paused", "p", "summarize_cell",
-                mapper.createArrayNode(), schema, 3, 30, "wt", true, null);
+                mapper.createArrayNode(), schema, 3, 30, "wt", true, null, null, null);
 
         mvc.perform(post("/agents/paused/batch")
                 .header("Authorization", "Bearer " + token)

@@ -55,7 +55,7 @@ class AgentServiceTest {
                 25, 1800, "tok", false, 1,
                 Instant.parse("2026-01-01T00:00:00Z"),
                 Instant.parse("2026-01-01T00:00:00Z"),
-                null, null);
+                null, null, null, null);
     }
 
     private Tenant tenant() {
@@ -64,7 +64,7 @@ class AgentServiceTest {
 
     @Test void createAppliesDefaultsAndPersists() {
         var req = new CreateAgentRequest("agent-a", "sys", "purpose",
-                List.of(httpTool()), null, null, null, "tok", null);
+                List.of(httpTool()), null, null, null, "tok", null, null, null);
         when(repo.findByTenant(tenantId)).thenReturn(List.of());
         UUID[] inserted = new UUID[1];
         org.mockito.Mockito.doAnswer(inv -> {
@@ -72,7 +72,7 @@ class AgentServiceTest {
             return null;
         }).when(repo).insert(any(), eq(tenantId), eq("agent-a"),
                 eq("sys"), eq("purpose"), any(), any(),
-                eq(25), eq(1800), eq("tok"), eq(false), eq(null));
+                eq(25), eq(1800), eq("tok"), eq(false), eq(null), eq(null), eq(null));
         when(repo.findById(any())).thenAnswer(inv -> Optional.of(existing(inv.getArgument(0), "agent-a")));
 
         var detail = svc.create(tenantId, req);
@@ -82,16 +82,16 @@ class AgentServiceTest {
 
     @Test void createRejectsBadName() {
         var req = new CreateAgentRequest("Bad Name!", "sys", "purpose",
-                List.of(), null, null, null, "tok", null);
+                List.of(), null, null, null, "tok", null, null, null);
         assertThatThrownBy(() -> svc.create(tenantId, req))
                 .isInstanceOf(AgentDefinitionValidator.InvalidDefinitionException.class);
         verify(repo, never()).insert(any(), any(), any(), any(), any(), any(), any(),
-                anyInt(), anyInt(), any(), anyBoolean(), any());
+                anyInt(), anyInt(), any(), anyBoolean(), any(), any(), any());
     }
 
     @Test void createRejectsBadSchedule() {
         var req = new CreateAgentRequest("agent-b", "sys", "purpose",
-                List.of(), null, null, null, "tok", "not-a-cron");
+                List.of(), null, null, null, "tok", "not-a-cron", null, null);
         when(repo.findByTenant(tenantId)).thenReturn(List.of());
         assertThatThrownBy(() -> svc.create(tenantId, req))
                 .isInstanceOf(AgentDefinitionValidator.InvalidDefinitionException.class);
@@ -101,22 +101,22 @@ class AgentServiceTest {
         var id = UUID.randomUUID();
         var existing = new Agent(id, tenantId, "agent-c", "old", "old-p",
                 mapper.createArrayNode(), null, 10, 60, "old-tok", true, 1,
-                Instant.now(), Instant.now(), null, null);
+                Instant.now(), Instant.now(), null, null, null, null);
         when(repo.findByName(tenantId, "agent-c")).thenReturn(Optional.of(existing));
         when(repo.findByTenant(tenantId)).thenReturn(List.of(existing));
         when(repo.findById(id)).thenReturn(Optional.of(existing));
 
         var req = new UpdateAgentRequest("new-sys", "new-p", List.of(httpTool()),
-                null, 50, 600, "new-tok", null);
+                null, 50, 600, "new-tok", null, null, null);
         svc.replace(tenantId, "agent-c", req);
 
         verify(repo).replace(eq(id), eq("new-sys"), eq("new-p"), any(), eq(null),
-                eq(50), eq(600), eq("new-tok"), eq(true), eq(null));
+                eq(50), eq(600), eq("new-tok"), eq(true), eq(null), eq(null), eq(null));
     }
 
     @Test void replaceThrowsNotFound() {
         when(repo.findByName(tenantId, "missing")).thenReturn(Optional.empty());
-        var req = new UpdateAgentRequest("sys", "p", List.of(), null, null, null, "tok", null);
+        var req = new UpdateAgentRequest("sys", "p", List.of(), null, null, null, "tok", null, null, null);
         assertThatThrownBy(() -> svc.replace(tenantId, "missing", req))
                 .isInstanceOf(AgentService.NotFound.class);
     }
@@ -125,62 +125,62 @@ class AgentServiceTest {
         var id = UUID.randomUUID();
         var existing = new Agent(id, tenantId, "agent-d", "keep-sys", "keep-p",
                 mapper.createArrayNode(), null, 7, 70, "keep-tok", false, 1,
-                Instant.now(), Instant.now(), "0 0 0 * * *", null);
+                Instant.now(), Instant.now(), "0 0 0 * * *", null, null, null);
         when(repo.findByName(tenantId, "agent-d")).thenReturn(Optional.of(existing));
         when(repo.findById(id)).thenReturn(Optional.of(existing));
 
-        var patch = new PatchAgentRequest(true, null, null, null, null, null, null, null, null);
+        var patch = new PatchAgentRequest(true, null, null, null, null, null, null, null, null, null, null);
         svc.patch(tenantId, "agent-d", patch);
 
         verify(repo).replace(eq(id), eq("keep-sys"), eq("keep-p"), any(), eq(null),
-                eq(7), eq(70), eq("keep-tok"), eq(true), eq("0 0 0 * * *"));
+                eq(7), eq(70), eq("keep-tok"), eq(true), eq("0 0 0 * * *"), eq(null), eq(null));
     }
 
     @Test void unpauseRequiresOperationalBudget() {
         var id = UUID.randomUUID();
         var existing = new Agent(id, tenantId, "agent-budget", "sys", "p",
                 mapper.createArrayNode(), null, 25, 1800, "tok", true, 1,
-                Instant.now(), Instant.now(), null, null);
+                Instant.now(), Instant.now(), null, null, null, null);
         when(repo.findByName(tenantId, "agent-budget")).thenReturn(Optional.of(existing));
         when(tenants.findById(tenantId)).thenReturn(Optional.of(tenant()));
         org.mockito.Mockito.doThrow(new RuntimeException("budget missing"))
                 .when(budgets).checkOrThrow(tenantId, tenantName, id, "agent-budget");
 
-        var patch = new PatchAgentRequest(false, null, null, null, null, null, null, null, null);
+        var patch = new PatchAgentRequest(false, null, null, null, null, null, null, null, null, null, null);
 
         assertThatThrownBy(() -> svc.patch(tenantId, "agent-budget", patch))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("budget");
-        verify(repo, never()).replace(any(), any(), any(), any(), any(), anyInt(), anyInt(), any(), anyBoolean(), any());
+        verify(repo, never()).replace(any(), any(), any(), any(), any(), anyInt(), anyInt(), any(), anyBoolean(), any(), any(), any());
     }
 
     @Test void patchEmptyScheduleClearsIt() {
         var id = UUID.randomUUID();
         var existing = new Agent(id, tenantId, "agent-e", "sys", "p",
                 mapper.createArrayNode(), null, 25, 1800, "tok", false, 1,
-                Instant.now(), Instant.now(), "0 0 0 * * *", null);
+                Instant.now(), Instant.now(), "0 0 0 * * *", null, null, null);
         when(repo.findByName(tenantId, "agent-e")).thenReturn(Optional.of(existing));
         when(repo.findById(id)).thenReturn(Optional.of(existing));
 
-        var patch = new PatchAgentRequest(null, null, null, null, null, null, null, null, "");
+        var patch = new PatchAgentRequest(null, null, null, null, null, null, null, null, "", null, null);
         svc.patch(tenantId, "agent-e", patch);
 
         verify(repo).replace(eq(id), any(), any(), any(), any(),
-                anyInt(), anyInt(), any(), anyBoolean(), eq(null));
+                anyInt(), anyInt(), any(), anyBoolean(), eq(null), any(), any());
     }
 
     @Test void patchValidatesNewToolsAgainstOtherAgents() {
         var id = UUID.randomUUID();
         var existing = new Agent(id, tenantId, "agent-f", "sys", "p",
                 mapper.createArrayNode(), null, 25, 1800, "tok", false, 1,
-                Instant.now(), Instant.now(), null, null);
+                Instant.now(), Instant.now(), null, null, null, null);
         when(repo.findByName(tenantId, "agent-f")).thenReturn(Optional.of(existing));
         when(repo.findByTenant(tenantId)).thenReturn(List.of(existing));
 
         var subagent = new ToolDef("dispatch", "desc", schema("{\"type\":\"object\"}"),
                 "subagent", "ghost", null, null);
         var patch = new PatchAgentRequest(null, null, null, List.of(subagent),
-                null, null, null, null, null);
+                null, null, null, null, null, null, null);
 
         assertThatThrownBy(() -> svc.patch(tenantId, "agent-f", patch))
                 .isInstanceOf(AgentDefinitionValidator.InvalidDefinitionException.class)
@@ -230,7 +230,7 @@ class AgentServiceTest {
         var sub = new ToolDef("dispatch", "desc", schema("{\"type\":\"object\"}"),
                 "subagent", "ghost", null, null);
         var req = new CreateAgentRequest("agent-g", "sys", "purpose",
-                List.of(sub), null, null, null, "tok", null);
+                List.of(sub), null, null, null, "tok", null, null, null);
         when(repo.findByTenant(tenantId)).thenReturn(List.of());
         assertThatThrownBy(() -> svc.create(tenantId, req))
                 .isInstanceOf(AgentDefinitionValidator.InvalidDefinitionException.class);
@@ -239,19 +239,19 @@ class AgentServiceTest {
     @Test void detailDeserializesToolsRoundtrip() {
         // create an agent with one HTTP tool, then ensure detail returns it deserialized
         var req = new CreateAgentRequest("agent-h", "sys", "purpose",
-                List.of(httpTool()), null, null, null, "tok", null);
+                List.of(httpTool()), null, null, null, "tok", null, null, null);
         when(repo.findByTenant(tenantId)).thenReturn(List.of());
 
         var captor = ArgumentCaptor.forClass(JsonNode.class);
         org.mockito.Mockito.doAnswer(inv -> null)
                 .when(repo).insert(any(), eq(tenantId), eq("agent-h"), any(), any(),
-                        captor.capture(), any(), anyInt(), anyInt(), any(), anyBoolean(), any());
+                        captor.capture(), any(), anyInt(), anyInt(), any(), anyBoolean(), any(), any(), any());
 
         when(repo.findById(any())).thenAnswer(inv -> {
             UUID id = inv.getArgument(0);
             return Optional.of(new Agent(id, tenantId, "agent-h", "sys", "purpose",
                     captor.getValue(), null, 25, 1800, "tok", false, 1,
-                    Instant.now(), Instant.now(), null, null));
+                    Instant.now(), Instant.now(), null, null, null, null));
         });
 
         var detail = svc.create(tenantId, req);

@@ -90,7 +90,7 @@ class LlmEndpointsIntegrationTest extends PostgresTestBase {
     private UUID seedAgent(UUID tenantId, String name) {
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, name, "sys", "summarize_cell",
-                new tools.jackson.databind.ObjectMapper().createArrayNode(), null, 5, 60, "wt", false, null);
+                new tools.jackson.databind.ObjectMapper().createArrayNode(), null, 5, 60, "wt", false, null, null, null);
         return agentId;
     }
 
