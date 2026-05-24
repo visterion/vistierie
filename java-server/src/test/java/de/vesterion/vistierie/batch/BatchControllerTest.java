@@ -7,6 +7,7 @@ import de.vesterion.vistierie.routing.RoutingRule;
 import de.vesterion.vistierie.routing.RoutingRuleRepository;
 import de.vesterion.vistierie.routing.RoutingResolver;
 import de.vesterion.vistierie.tenants.TenantRepository;
+import de.vesterion.vistierie.testsupport.OperationalBudgetFixtures;
 import de.vesterion.vistierie.testsupport.StubLlmProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,6 +39,7 @@ class BatchControllerTest extends PostgresTestBase {
     @Autowired ObjectMapper mapper;
     @Autowired RoutingRuleRepository routingRules;
     @Autowired RoutingResolver routingResolver;
+    @Autowired OperationalBudgetFixtures budgetFixtures;
 
     MockMvc mvc;
     String token;
@@ -65,6 +67,7 @@ class BatchControllerTest extends PostgresTestBase {
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "summ", "p", "summarize_cell",
                 mapper.createArrayNode(), schema, 3, 30, "wt", false, null);
+        budgetFixtures.seed(tenantId, agentId);
 
         var body = """
                 { "items": [
@@ -93,6 +96,7 @@ class BatchControllerTest extends PostgresTestBase {
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "with-tools", "p", "summarize_cell",
                 tools, schema, 3, 30, "wt", false, null);
+        budgetFixtures.seed(tenantId, agentId);
 
         mvc.perform(post("/agents/with-tools/batch")
                 .header("Authorization", "Bearer " + token)
@@ -106,6 +110,7 @@ class BatchControllerTest extends PostgresTestBase {
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "no-schema", "p", "summarize_cell",
                 mapper.createArrayNode(), null, 3, 30, "wt", false, null);
+        budgetFixtures.seed(tenantId, agentId);
 
         mvc.perform(post("/agents/no-schema/batch")
                 .header("Authorization", "Bearer " + token)

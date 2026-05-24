@@ -10,6 +10,7 @@ import de.vesterion.vistierie.routing.RoutingRuleRepository;
 import de.vesterion.vistierie.routing.RoutingResolver;
 import de.vesterion.vistierie.runs.RunRepository;
 import de.vesterion.vistierie.tenants.TenantRepository;
+import de.vesterion.vistierie.testsupport.OperationalBudgetFixtures;
 import de.vesterion.vistierie.testsupport.StubLlmProvider;
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,6 +48,7 @@ class BatchE2ETest extends PostgresTestBase {
     @Autowired ObjectMapper mapper;
     @Autowired RoutingRuleRepository routingRules;
     @Autowired RoutingResolver routingResolver;
+    @Autowired OperationalBudgetFixtures budgetFixtures;
 
     MockMvc mvc;
     String token;
@@ -79,6 +81,7 @@ class BatchE2ETest extends PostgresTestBase {
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "summ-e2e", "p", "summarize_cell",
                 mapper.createArrayNode(), schema, 3, 30, "wt", false, null);
+        budgetFixtures.seed(tenantId, agentId);
 
         var resp = mvc.perform(post("/agents/summ-e2e/batch")
                 .header("Authorization", "Bearer " + token)

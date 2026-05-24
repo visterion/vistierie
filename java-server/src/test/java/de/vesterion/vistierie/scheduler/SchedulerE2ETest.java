@@ -7,6 +7,7 @@ import de.vesterion.vistierie.routing.RoutingRuleRepository;
 import de.vesterion.vistierie.routing.RoutingResolver;
 import de.vesterion.vistierie.runs.RunRepository;
 import de.vesterion.vistierie.tenants.TenantRepository;
+import de.vesterion.vistierie.testsupport.OperationalBudgetFixtures;
 import de.vesterion.vistierie.testsupport.StubLlmProvider;
 import de.vesterion.vistierie.testsupport.StubLlmScripts;
 import org.awaitility.Awaitility;
@@ -36,6 +37,7 @@ class SchedulerE2ETest extends PostgresTestBase {
     @Autowired RoutingRuleRepository routingRules;
     @Autowired RoutingResolver routingResolver;
     @Autowired JdbcClient jdbc;
+    @Autowired OperationalBudgetFixtures budgetFixtures;
 
     @Test
     void everySecondCronProducesMultipleRunsWithinFiveSeconds() throws Exception {
@@ -57,6 +59,7 @@ class SchedulerE2ETest extends PostgresTestBase {
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "every-second", "p", "summarize_cell",
                 mapper.createArrayNode(), schema, 3, 30, "wt", false, null);
+        budgetFixtures.seed(tenantId, agentId);
         jdbc.sql("UPDATE vistierie.agents SET schedule='* * * * * *' WHERE id=?")
                 .param(agentId).update();
 

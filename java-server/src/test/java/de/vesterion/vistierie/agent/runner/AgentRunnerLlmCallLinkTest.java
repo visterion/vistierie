@@ -6,6 +6,7 @@ import de.vesterion.vistierie.routing.RoutingRule;
 import de.vesterion.vistierie.routing.RoutingRuleRepository;
 import de.vesterion.vistierie.routing.RoutingResolver;
 import de.vesterion.vistierie.tenants.TenantRepository;
+import de.vesterion.vistierie.testsupport.OperationalBudgetFixtures;
 import de.vesterion.vistierie.testsupport.StubLlmProvider;
 import de.vesterion.vistierie.testsupport.StubLlmScripts;
 import org.junit.jupiter.api.BeforeEach;
@@ -30,6 +31,7 @@ class AgentRunnerLlmCallLinkTest extends PostgresTestBase {
     @Autowired ObjectMapper mapper;
     @Autowired RoutingRuleRepository routingRules;
     @Autowired RoutingResolver routingResolver;
+    @Autowired OperationalBudgetFixtures budgetFixtures;
 
     @BeforeEach void resetStub() { stub.resetAll(); }
 
@@ -48,6 +50,7 @@ class AgentRunnerLlmCallLinkTest extends PostgresTestBase {
         var schema = mapper.readTree("{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\"}},\"required\":[\"x\"]}");
         agents.insert(agentId, tenantId, "a", "p", "summarize_cell",
                 mapper.createArrayNode(), schema, 3, 30, "wt", false, null);
+        budgetFixtures.seed(tenantId, agentId);
         stub.script(StubLlmScripts.Turn.endTurn("{\"x\":\"v\"}"));
 
         var runId = runner.startRunSync(tenantId, agentId, "manual",

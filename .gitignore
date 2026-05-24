@@ -1,6 +1,7 @@
 docs/
 CLAUDE.md
 AGENTS.md
+TODO.md
 target/
 node_modules/
 dist/

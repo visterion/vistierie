@@ -9,6 +9,7 @@ import de.vesterion.vistierie.routing.RoutingRuleRepository;
 import de.vesterion.vistierie.routing.RoutingResolver;
 import de.vesterion.vistierie.runs.RunRepository;
 import de.vesterion.vistierie.tenants.TenantRepository;
+import de.vesterion.vistierie.testsupport.OperationalBudgetFixtures;
 import de.vesterion.vistierie.testsupport.StubLlmProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,6 +37,7 @@ class BatchServiceFinalizeTest extends PostgresTestBase {
     @Autowired RoutingRuleRepository routingRules;
     @Autowired RoutingResolver routingResolver;
     @Autowired JdbcClient jdbc;
+    @Autowired OperationalBudgetFixtures budgetFixtures;
 
     UUID tenantId;
     String tenantName;
@@ -59,6 +61,7 @@ class BatchServiceFinalizeTest extends PostgresTestBase {
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "summ", "p", "summarize_cell",
                 mapper.createArrayNode(), schema, 3, 30, "wt", false, null);
+        budgetFixtures.seed(tenantId, agentId);
         var agent = agents.findById(agentId).orElseThrow();
 
         var items = List.of(
@@ -121,6 +124,7 @@ class BatchServiceFinalizeTest extends PostgresTestBase {
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "summ", "p", "summarize_cell",
                 mapper.createArrayNode(), schema, 3, 30, "wt", false, null);
+        budgetFixtures.seed(tenantId, agentId);
         var agent = agents.findById(agentId).orElseThrow();
 
         var items = List.of(new BatchItemRequest(null, mapper.readTree("{\"cell\":\"c1\"}")));

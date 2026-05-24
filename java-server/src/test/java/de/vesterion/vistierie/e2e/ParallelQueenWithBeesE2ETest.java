@@ -10,6 +10,7 @@ import de.vesterion.vistierie.runs.Run;
 import de.vesterion.vistierie.runs.RunRepository;
 import de.vesterion.vistierie.runs.RunStore;
 import de.vesterion.vistierie.tenants.TenantRepository;
+import de.vesterion.vistierie.testsupport.OperationalBudgetFixtures;
 import de.vesterion.vistierie.testsupport.StubLlmProvider;
 import de.vesterion.vistierie.testsupport.StubLlmScripts;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,6 +38,7 @@ class ParallelQueenWithBeesE2ETest extends PostgresTestBase {
     @Autowired ObjectMapper mapper;
     @Autowired RoutingRuleRepository routingRules;
     @Autowired RoutingResolver routingResolver;
+    @Autowired OperationalBudgetFixtures budgetFixtures;
 
     @BeforeEach void resetStub() { stub.resetAll(); }
 
@@ -55,6 +57,7 @@ class ParallelQueenWithBeesE2ETest extends PostgresTestBase {
         var beeId = UUID.randomUUID();
         agents.insert(beeId, tenantId, "bee", "p", "summarize_cell",
                 mapper.createArrayNode(), beeSchema, 3, 60, "wt", false, null);
+        budgetFixtures.seed(tenantId, beeId);
 
         var queenTools = mapper.createArrayNode();
         queenTools.add(mapper.valueToTree(Map.of(
@@ -65,6 +68,7 @@ class ParallelQueenWithBeesE2ETest extends PostgresTestBase {
         var queenId = UUID.randomUUID();
         agents.insert(queenId, tenantId, "queen", "p", "summarize_cell",
                 queenTools, queenSchema, 5, 60, "wt", false, null);
+        budgetFixtures.seed(tenantId, queenId);
 
         stub.scriptForAgent("queen",
                 StubLlmScripts.Turn.toolUses(

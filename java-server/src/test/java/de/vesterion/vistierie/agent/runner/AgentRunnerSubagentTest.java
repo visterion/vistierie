@@ -9,6 +9,7 @@ import de.vesterion.vistierie.runs.Run;
 import de.vesterion.vistierie.runs.RunRepository;
 import de.vesterion.vistierie.runs.RunStore;
 import de.vesterion.vistierie.tenants.TenantRepository;
+import de.vesterion.vistierie.testsupport.OperationalBudgetFixtures;
 import de.vesterion.vistierie.testsupport.StubLlmProvider;
 import de.vesterion.vistierie.testsupport.StubLlmScripts;
 import org.junit.jupiter.api.BeforeEach;
@@ -36,6 +37,7 @@ class AgentRunnerSubagentTest extends PostgresTestBase {
     @Autowired ObjectMapper mapper;
     @Autowired RoutingRuleRepository routingRules;
     @Autowired RoutingResolver routingResolver;
+    @Autowired OperationalBudgetFixtures budgetFixtures;
 
     @BeforeEach void resetStub() { stub.resetAll(); }
 
@@ -60,6 +62,7 @@ class AgentRunnerSubagentTest extends PostgresTestBase {
         var beeId = UUID.randomUUID();
         agents.insert(beeId, tenantId, "bee", "you are bee", "summarize_cell",
                 mapper.createArrayNode(), beeSchema, 5, 60, "wt", false, null);
+        budgetFixtures.seed(tenantId, beeId);
 
         var queenTools = mapper.createArrayNode();
         queenTools.add(mapper.valueToTree(Map.of(
@@ -72,6 +75,7 @@ class AgentRunnerSubagentTest extends PostgresTestBase {
                 """);
         agents.insert(queenId, tenantId, "queen", "you are queen", "summarize_cell",
                 queenTools, queenSchema, 5, 60, "wt", false, null);
+        budgetFixtures.seed(tenantId, queenId);
 
         stub.scriptForAgent("queen",
                 StubLlmScripts.Turn.toolUses(
@@ -107,6 +111,7 @@ class AgentRunnerSubagentTest extends PostgresTestBase {
         var beeId = UUID.randomUUID();
         agents.insert(beeId, tenantId, "bee", "p", "summarize_cell",
                 mapper.createArrayNode(), beeSchema, 3, 60, "wt", false, null);
+        budgetFixtures.seed(tenantId, beeId);
         var queenTools = mapper.createArrayNode();
         queenTools.add(mapper.valueToTree(Map.of(
                 "name","dispatch_bee","description","go","input_schema",Map.of("type","object"),
@@ -114,6 +119,7 @@ class AgentRunnerSubagentTest extends PostgresTestBase {
         var queenId = UUID.randomUUID();
         agents.insert(queenId, tenantId, "queen", "p", "summarize_cell",
                 queenTools, null, 3, 60, "wt", false, null);
+        budgetFixtures.seed(tenantId, queenId);
 
         stub.scriptForAgent("queen",
                 StubLlmScripts.Turn.toolUses(StubLlmScripts.Turn.toolUse("dispatch_bee", Map.of())));
