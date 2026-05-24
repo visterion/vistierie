@@ -41,7 +41,8 @@ public class AgentService {
                 toolsJson, req.output_schema(),
                 req.max_turns() == null ? 25 : req.max_turns(),
                 req.max_run_seconds() == null ? 1800 : req.max_run_seconds(),
-                req.webhook_token(), false, req.schedule());
+                req.webhook_token(), false, req.schedule(),
+                req.completion_webhook(), req.completion_webhook_token());
         return toDetail(repo.findById(id).orElseThrow());
     }
 
@@ -57,7 +58,8 @@ public class AgentService {
                 toolsJson, req.output_schema(),
                 req.max_turns() == null ? 25 : req.max_turns(),
                 req.max_run_seconds() == null ? 1800 : req.max_run_seconds(),
-                req.webhook_token(), a.paused(), req.schedule());
+                req.webhook_token(), a.paused(), req.schedule(),
+                req.completion_webhook(), req.completion_webhook_token());
         return toDetail(repo.findById(a.id()).orElseThrow());
     }
 
@@ -92,8 +94,15 @@ public class AgentService {
             var tenant = tenants.findById(tenantId).orElseThrow();
             budgets.checkOrThrow(tenantId, tenant.name(), a.id(), a.name());
         }
+        String newCompletionWebhook = req.completion_webhook() != null
+                ? (req.completion_webhook().isBlank() ? null : req.completion_webhook())
+                : a.completionWebhook();
+        String newCompletionWebhookToken = req.completion_webhook_token() != null
+                ? (req.completion_webhook_token().isBlank() ? null : req.completion_webhook_token())
+                : a.completionWebhookToken();
         repo.replace(a.id(), newSysPrompt, newPurpose, newTools, newOutSchema,
-                newMaxTurns, newMaxSeconds, newToken, newPaused, newSchedule);
+                newMaxTurns, newMaxSeconds, newToken, newPaused, newSchedule,
+                newCompletionWebhook, newCompletionWebhookToken);
         return toDetail(repo.findById(a.id()).orElseThrow());
     }
 
@@ -123,7 +132,8 @@ public class AgentService {
                     a.systemPrompt(), a.modelPurpose(), tools, a.outputSchema(),
                     a.maxTurns(), a.maxRunSeconds(), a.paused(), a.version(),
                     a.createdAt(), a.updatedAt(),
-                    a.schedule(), a.lastTickAt());
+                    a.schedule(), a.lastTickAt(),
+                    a.completionWebhook(), a.completionWebhookToken());
         } catch (Exception e) { throw new RuntimeException(e); }
     }
 

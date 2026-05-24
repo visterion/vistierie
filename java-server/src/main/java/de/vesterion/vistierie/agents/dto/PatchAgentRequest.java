@@ -13,5 +13,7 @@ public record PatchAgentRequest(
         Integer max_turns,
         Integer max_run_seconds,
         String webhook_token,
-        String schedule
+        String schedule,
+        String completion_webhook,
+        String completion_webhook_token
 ) {}
