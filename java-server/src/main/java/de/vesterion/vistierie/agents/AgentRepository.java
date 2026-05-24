@@ -27,17 +27,20 @@ public class AgentRepository {
                        JsonNode tools, JsonNode outputSchema,
                        int maxTurns, int maxRunSeconds,
                        String webhookToken, boolean paused,
-                       String schedule) {
+                       String schedule,
+                       String completionWebhook, String completionWebhookToken) {
         jdbc.sql("""
                 INSERT INTO vistierie.agents
                   (id, tenant_id, name, system_prompt, model_purpose,
                    tools, output_schema, max_turns, max_run_seconds,
-                   webhook_token, paused, schedule)
-                VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?)
+                   webhook_token, paused, schedule,
+                   completion_webhook, completion_webhook_token)
+                VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, ?)
                 """)
                 .params(id, tenantId, name, systemPrompt, modelPurpose,
                         toJsonString(tools), toJsonString(outputSchema),
-                        maxTurns, maxRunSeconds, webhookToken, paused, schedule)
+                        maxTurns, maxRunSeconds, webhookToken, paused, schedule,
+                        completionWebhook, completionWebhookToken)
                 .update();
     }
 
@@ -45,7 +48,8 @@ public class AgentRepository {
                         JsonNode tools, JsonNode outputSchema,
                         int maxTurns, int maxRunSeconds,
                         String webhookToken, boolean paused,
-                        String schedule) {
+                        String schedule,
+                        String completionWebhook, String completionWebhookToken) {
         jdbc.sql("""
                 UPDATE vistierie.agents
                 SET system_prompt = ?, model_purpose = ?,
@@ -53,12 +57,14 @@ public class AgentRepository {
                     max_turns = ?, max_run_seconds = ?,
                     webhook_token = ?, paused = ?,
                     schedule = ?,
+                    completion_webhook = ?, completion_webhook_token = ?,
                     version = version + 1, updated_at = now()
                 WHERE id = ?
                 """)
                 .params(systemPrompt, modelPurpose,
                         toJsonString(tools), toJsonString(outputSchema),
-                        maxTurns, maxRunSeconds, webhookToken, paused, schedule, id)
+                        maxTurns, maxRunSeconds, webhookToken, paused, schedule,
+                        completionWebhook, completionWebhookToken, id)
                 .update();
     }
 
@@ -119,7 +125,8 @@ public class AgentRepository {
             SELECT id, tenant_id, name, system_prompt, model_purpose,
                    tools, output_schema, max_turns, max_run_seconds,
                    webhook_token, paused, version, created_at, updated_at,
-                   schedule, last_tick_at
+                   schedule, last_tick_at,
+                   completion_webhook, completion_webhook_token
             FROM vistierie.agents
             """;
 
@@ -141,7 +148,9 @@ public class AgentRepository {
                 rs.getTimestamp("created_at").toInstant(),
                 rs.getTimestamp("updated_at").toInstant(),
                 rs.getString("schedule"),
-                lastTick == null ? null : lastTick.toInstant()
+                lastTick == null ? null : lastTick.toInstant(),
+                rs.getString("completion_webhook"),
+                rs.getString("completion_webhook_token")
         );
     }
 
