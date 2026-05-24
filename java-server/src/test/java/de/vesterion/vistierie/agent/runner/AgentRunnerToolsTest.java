@@ -9,6 +9,7 @@ import de.vesterion.vistierie.routing.RoutingResolver;
 import de.vesterion.vistierie.runs.Run;
 import de.vesterion.vistierie.runs.RunStore;
 import de.vesterion.vistierie.tenants.TenantRepository;
+import de.vesterion.vistierie.testsupport.OperationalBudgetFixtures;
 import de.vesterion.vistierie.testsupport.StubLlmProvider;
 import de.vesterion.vistierie.testsupport.StubLlmScripts;
 import org.junit.jupiter.api.AfterEach;
@@ -39,6 +40,7 @@ class AgentRunnerToolsTest extends PostgresTestBase {
     @Autowired ObjectMapper mapper;
     @Autowired RoutingRuleRepository routingRules;
     @Autowired RoutingResolver routingResolver;
+    @Autowired OperationalBudgetFixtures budgetFixtures;
 
     @BeforeEach void up() {
         if (wm == null) { wm = new WireMockServer(0); wm.start(); }
@@ -81,6 +83,7 @@ class AgentRunnerToolsTest extends PostgresTestBase {
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "explorer", "you explore", "summarize_cell",
                 tools, schema, 5, 60, "wt-tok", false, null);
+        budgetFixtures.seed(tenantId, agentId);
 
         stub.script(
                 StubLlmScripts.Turn.toolUses(
@@ -113,6 +116,7 @@ class AgentRunnerToolsTest extends PostgresTestBase {
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "ax", "p", "summarize_cell",
                 tools, null, 3, 60, "wt", false, null);
+        budgetFixtures.seed(tenantId, agentId);
         stub.script(
                 StubLlmScripts.Turn.toolUses(StubLlmScripts.Turn.toolUse("x", Map.of())));
         var runId = runner.startRunSync(tenantId, agentId, "manual",

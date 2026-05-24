@@ -7,6 +7,7 @@ import de.vesterion.vistierie.routing.RoutingRule;
 import de.vesterion.vistierie.routing.RoutingRuleRepository;
 import de.vesterion.vistierie.routing.RoutingResolver;
 import de.vesterion.vistierie.tenants.TenantRepository;
+import de.vesterion.vistierie.testsupport.OperationalBudgetFixtures;
 import de.vesterion.vistierie.testsupport.StubLlmProvider;
 import de.vesterion.vistierie.testsupport.StubLlmScripts;
 import org.junit.jupiter.api.BeforeEach;
@@ -39,6 +40,7 @@ class LongPollServiceTest extends PostgresTestBase {
     @Autowired ObjectMapper mapper;
     @Autowired RoutingRuleRepository routingRules;
     @Autowired RoutingResolver routingResolver;
+    @Autowired OperationalBudgetFixtures budgetFixtures;
 
     MockMvc mvc;
     String token;
@@ -65,6 +67,7 @@ class LongPollServiceTest extends PostgresTestBase {
         var schema = mapper.readTree("{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\"}},\"required\":[\"x\"]}");
         agents.insert(agentId, tenantId, "a", "p", "summarize_cell",
                 mapper.createArrayNode(), schema, 3, 30, "wt", false, null);
+        budgetFixtures.seed(tenantId, agentId);
         stub.script(StubLlmScripts.Turn.endTurn("{\"x\":\"v\"}"));
         var startResp = mvc.perform(post("/agents/a/run")
                 .header("Authorization", "Bearer " + token)
