@@ -294,7 +294,7 @@ cd java-server
 ./mvnw test                        # full suite
 ./mvnw -Pstress test               # opt-in concurrency stress
 ./mvnw -DskipTests package
-java -jar target/vistierie-1.1.0.jar
+java -jar target/vistierie-1.2.0.jar
 ```
 
 ---
