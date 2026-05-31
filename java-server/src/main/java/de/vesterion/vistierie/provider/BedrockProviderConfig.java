@@ -18,8 +18,8 @@ public class BedrockProviderConfig {
         if (region != null && !region.isBlank()) {
             builder.region(Region.of(region));
         }
-        // AWS SDK picks up AWS_BEARER_TOKEN_BEDROCK env var automatically
-        // for Bedrock API Key (ABSK) bearer-token authentication.
+        // AWS_BEARER_TOKEN_BEDROCK env var is read natively by the SDK
+        // (EnvironmentTokenSystemSettings) for ABSK API key auth.
         return builder.build();
     }
 
