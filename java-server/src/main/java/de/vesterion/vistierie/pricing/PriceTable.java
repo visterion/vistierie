@@ -38,6 +38,7 @@ public class PriceTable {
             Map.entry("claude-haiku-4-5",  new Rates(   920_000,  4_600_000,  1_150_000,    92_000)),
             Map.entry("claude-sonnet-4-6", new Rates( 2_760_000, 13_800_000,  3_450_000,   276_000)),
             Map.entry("claude-opus-4-7",   new Rates(13_800_000, 69_000_000, 17_250_000, 1_380_000)),
+            Map.entry("claude-opus-4-8",   new Rates(13_800_000, 69_000_000, 17_250_000, 1_380_000)),
             // OpenAI — no cache_creation cost; only cache_read discount.
             Map.entry("gpt-4o",            new Rates( 2_300_000,  9_200_000,          0, 1_150_000)),
             Map.entry("gpt-4o-mini",       new Rates(   138_000,    552_000,          0,    69_000)),
@@ -65,12 +66,18 @@ public class PriceTable {
         return costMicros(model, u) / 2L;
     }
 
-    /** Strips Bedrock inference-profile prefixes (eu.anthropic., global.anthropic., anthropic.) */
+    /**
+     * Strips Bedrock inference-profile prefixes and version suffixes so that
+     * e.g. "eu.anthropic.claude-haiku-4-5-20251001-v1:0" maps to "claude-haiku-4-5".
+     */
     private static String normalize(String model) {
+        String m = model;
         for (String prefix : new String[]{"eu.anthropic.", "global.anthropic.", "anthropic."}) {
-            if (model.startsWith(prefix)) return model.substring(prefix.length());
+            if (m.startsWith(prefix)) { m = m.substring(prefix.length()); break; }
         }
-        return model;
+        // strip -YYYYMMDD-vN:N Bedrock version suffix
+        m = m.replaceAll("-\\d{8}-v\\d+:\\d+$", "");
+        return m;
     }
 
     private static long mul(int tokens, long perMtok) {
