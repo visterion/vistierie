@@ -42,7 +42,7 @@ and operational controls are first-class concepts, not add-ons.
 - **Tier-based routing**: declare an agent's purpose (`reasoning`,
   `routine`, `bulk`); the resolver picks the concrete model. Switching
   Opus → Haiku is a config change, not a code change.
-- **Tenant kill switch**: one PATCH freezes all autonomous activity
+- **Tenant kill switch**: one POST freezes all autonomous activity
   for a tenant. Checked before every dispatch and every cron tick.
 - **Per-call audit**: every LLM call writes a row to
   `vistierie.llm_calls` with input/output/cache tokens and EUR-micros
@@ -222,7 +222,8 @@ Every run shares one execution path; only the trigger differs.
 
 For tasks that tolerate < 1 h latency, `POST /agents/{name}/batch`
 routes through Anthropic's Message Batches API at 50 % cost (up to
-10 000 items per batch).
+10 000 items per batch). Batch mode requires the Anthropic provider;
+Bedrock and other providers are not supported for batch runs.
 
 ---
 
@@ -239,6 +240,24 @@ docker run --rm -p 8090:8090 \
   -e XAI_API_KEY='xai-...' \
   ghcr.io/visterion/vistierie:main
 ```
+
+To use **AWS Bedrock** instead of (or alongside) direct provider APIs:
+
+```bash
+docker run --rm -p 8090:8090 \
+  -e VISTIERIE_DB_URL=jdbc:postgresql://host.docker.internal:5432/vistierie \
+  -e VISTIERIE_DB_USER=vistierie \
+  -e VISTIERIE_DB_PASSWORD=vistierie \
+  -e VISTIERIE_ADMIN_TOKEN_HASH='<bcrypt-hash>' \
+  -e BEDROCK_ENABLED=true \
+  -e AWS_REGION=eu-north-1 \
+  -e AWS_BEARER_TOKEN_BEDROCK='ABSK...' \
+  ghcr.io/visterion/vistierie:main
+```
+
+After startup, point a routing rule at `"provider": "bedrock"` with an inference
+profile ID such as `eu.anthropic.claude-sonnet-4-6`. The SDK reads
+`AWS_BEARER_TOKEN_BEDROCK` natively for ABSK API key authentication.
 
 For local development:
 
@@ -259,7 +278,7 @@ queries: [`documentation/operations.md`](documentation/operations.md).
 | [api.md](documentation/api.md) | REST endpoint reference (`/llm/*`, `/agents/*`, `/runs/*`, `/admin/*`) |
 | [architecture.md](documentation/architecture.md) | System overview, data model, request flow |
 | [routing.md](documentation/routing.md) | `<tenant, realm, purpose>` → `<provider, model>` resolution |
-| [providers.md](documentation/providers.md) | Anthropic plugin, mock mode, adding providers |
+| [providers.md](documentation/providers.md) | Anthropic, Bedrock, OpenAI, xAI plugins, mock mode, adding providers |
 | [configuration.md](documentation/configuration.md) | All `vistierie.*` properties and env vars |
 | [operations.md](documentation/operations.md) | Tenants, kill switch, cost queries, cron caveats, backups |
 
@@ -275,7 +294,7 @@ cd java-server
 ./mvnw test                        # full suite
 ./mvnw -Pstress test               # opt-in concurrency stress
 ./mvnw -DskipTests package
-java -jar target/vistierie-1.0.0.jar
+java -jar target/vistierie-1.1.0.jar
 ```
 
 ---
