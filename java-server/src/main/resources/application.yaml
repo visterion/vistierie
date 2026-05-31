@@ -47,7 +47,6 @@ vistierie:
   bedrock:
     region: ${AWS_REGION:}
     enabled: ${BEDROCK_ENABLED:false}
-    api-key: ${BEDROCK_API_KEY:}
   audit:
     body-retention-days: 7
 
