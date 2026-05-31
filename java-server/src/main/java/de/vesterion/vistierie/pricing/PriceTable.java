@@ -51,7 +51,7 @@ public class PriceTable {
     );
 
     public long costMicros(String model, Usage u) {
-        var r = RATES.get(model);
+        var r = RATES.get(normalize(model));
         if (r == null) throw new UnknownModelException(model);
         long input  = mul(u.inputTokens(),               r.inputPerMtok());
         long output = mul(u.outputTokens(),              r.outputPerMtok());
@@ -63,6 +63,14 @@ public class PriceTable {
     /** Half-price for batched calls per Anthropic Batches pricing. */
     public long costMicrosBatch(String model, Usage u) {
         return costMicros(model, u) / 2L;
+    }
+
+    /** Strips Bedrock inference-profile prefixes (eu.anthropic., global.anthropic., anthropic.) */
+    private static String normalize(String model) {
+        for (String prefix : new String[]{"eu.anthropic.", "global.anthropic.", "anthropic."}) {
+            if (model.startsWith(prefix)) return model.substring(prefix.length());
+        }
+        return model;
     }
 
     private static long mul(int tokens, long perMtok) {
