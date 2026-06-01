@@ -84,4 +84,12 @@ class OutputSchemaValidatorTest {
             .isInstanceOf(OutputSchemaValidator.SchemaViolation.class)
             .hasMessageStartingWith("parse:");
     }
+
+    @Test void schemaInvalidInsideFenceYieldsSchemaErrorNotParse() throws Exception {
+        var schema = M.readTree(NUM_SCHEMA);
+        assertThatThrownBy(() ->
+                v.parseAndValidate("```json\n{\"x\":\"not-a-number\"}\n```", schema))
+            .isInstanceOf(OutputSchemaValidator.SchemaViolation.class)
+            .hasMessageNotContaining("parse:");
+    }
 }

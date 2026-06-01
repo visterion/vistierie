@@ -23,7 +23,7 @@ public class OutputSchemaValidator {
 
     /** First markdown fenced block: ```lang\n ... ``` (DOTALL, non-greedy). */
     private static final Pattern FENCE =
-            Pattern.compile("```[a-zA-Z0-9]*\\s*\\n?(.*?)```", Pattern.DOTALL);
+            Pattern.compile("```[\\w.+-]*\\s*\\n?(.*?)```", Pattern.DOTALL);
 
     private final JsonSchemas schemas;
     private final ObjectMapper mapper = new ObjectMapper();
