@@ -12,6 +12,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -38,7 +39,7 @@ class RunStoreTest {
 
         verify(repo).insert(eq("R1"), eq(tenantId), eq(agentId), eq(snap), eq(7),
                 eq("PARENT"), eq("manual"), eq("queued"),
-                eq(payload), eq("https://hook"), eq("tok"));
+                eq(payload), eq("https://hook"), eq("tok"), isNull());
         verifyNoInteractions(events, longPoll, webhook);
     }
 
