@@ -82,7 +82,7 @@ class AgentSchedulerTest extends PostgresTestBase {
         var schema = readObjectSchema();
         agents.insert(agentId, tenantId, "a", "p", "summarize_cell",
                 mapper.createArrayNode(), schema, 3, 30, "wt", false, null,
-                null, null);
+                null, null, null, null, null);
         tenantBudgets.patch(tenantId, new BudgetPatchRequest(10_000L, 100_000L, 80, 90));
         agentBudgets.patch(agentId, new BudgetPatchRequest(5_000L, 50_000L, 80, 90));
         // Set schedule and backdate created_at so the cron boundary falls within the test window

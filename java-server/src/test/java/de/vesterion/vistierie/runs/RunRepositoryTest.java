@@ -23,7 +23,7 @@ class RunRepositoryTest extends PostgresTestBase {
         tenants.insert(tenantId, "tn-" + tenantId, "h");
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "a", "p", "purpose",
-                JsonNodeFactory.instance.arrayNode(), null, 5, 60, "wt", false, null, null, null);
+                JsonNodeFactory.instance.arrayNode(), null, 5, 60, "wt", false, null, null, null, null, null, null);
 
         var runId = "01J" + UUID.randomUUID().toString().replace("-", "").toUpperCase().substring(0, 23);
         var snapshot = mapper.readTree("{\"version\":1,\"name\":\"a\"}");
@@ -53,7 +53,7 @@ class RunRepositoryTest extends PostgresTestBase {
         tenants.insert(tenantId, "tn-" + tenantId, "h");
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "a", "p", "summarize_cell",
-                mapper.createArrayNode(), null, 3, 30, "wt", false, null, null, null);
+                mapper.createArrayNode(), null, 3, 30, "wt", false, null, null, null, null, null, null);
 
         assertThat(runs.hasOpenRun(agentId)).isFalse();
         assertThat(runs.latestOpenRunId(agentId)).isEmpty();

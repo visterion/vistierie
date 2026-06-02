@@ -41,7 +41,7 @@ class CompletionWebhookDispatcherTest extends PostgresTestBase {
         tenants.insert(tenantId, "tn-" + tenantId, "h");
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "a", "p", "summarize_cell",
-                JsonNodeFactory.instance.arrayNode(), null, 3, 30, "wt", false, null, null, null);
+                JsonNodeFactory.instance.arrayNode(), null, 3, 30, "wt", false, null, null, null, null, null, null);
         var runId = "01J" + UUID.randomUUID().toString().replace("-", "").toUpperCase().substring(0, 23);
         var snap = mapper.readTree("{\"version\":1,\"name\":\"a\"}");
         runStore.create(runId, tenantId, agentId, snap, 1, null, "manual",

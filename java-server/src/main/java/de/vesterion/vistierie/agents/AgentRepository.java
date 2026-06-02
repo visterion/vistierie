@@ -28,19 +28,23 @@ public class AgentRepository {
                        int maxTurns, int maxRunSeconds,
                        String webhookToken, boolean paused,
                        String schedule,
-                       String completionWebhook, String completionWebhookToken) {
+                       String completionWebhook, String completionWebhookToken,
+                       String eventSourceUrl, Integer sessionDurationSeconds,
+                       Integer pollIntervalSeconds) {
         jdbc.sql("""
                 INSERT INTO vistierie.agents
                   (id, tenant_id, name, system_prompt, model_purpose,
                    tools, output_schema, max_turns, max_run_seconds,
                    webhook_token, paused, schedule,
-                   completion_webhook, completion_webhook_token)
-                VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, ?)
+                   completion_webhook, completion_webhook_token,
+                   event_source_url, session_duration_seconds, poll_interval_seconds)
+                VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """)
                 .params(id, tenantId, name, systemPrompt, modelPurpose,
                         toJsonString(tools), toJsonString(outputSchema),
                         maxTurns, maxRunSeconds, webhookToken, paused, schedule,
-                        completionWebhook, completionWebhookToken)
+                        completionWebhook, completionWebhookToken,
+                        eventSourceUrl, sessionDurationSeconds, pollIntervalSeconds)
                 .update();
     }
 
@@ -49,7 +53,9 @@ public class AgentRepository {
                         int maxTurns, int maxRunSeconds,
                         String webhookToken, boolean paused,
                         String schedule,
-                        String completionWebhook, String completionWebhookToken) {
+                        String completionWebhook, String completionWebhookToken,
+                        String eventSourceUrl, Integer sessionDurationSeconds,
+                        Integer pollIntervalSeconds) {
         jdbc.sql("""
                 UPDATE vistierie.agents
                 SET system_prompt = ?, model_purpose = ?,
@@ -58,13 +64,16 @@ public class AgentRepository {
                     webhook_token = ?, paused = ?,
                     schedule = ?,
                     completion_webhook = ?, completion_webhook_token = ?,
+                    event_source_url = ?, session_duration_seconds = ?,
+                    poll_interval_seconds = ?,
                     version = version + 1, updated_at = now()
                 WHERE id = ?
                 """)
                 .params(systemPrompt, modelPurpose,
                         toJsonString(tools), toJsonString(outputSchema),
                         maxTurns, maxRunSeconds, webhookToken, paused, schedule,
-                        completionWebhook, completionWebhookToken, id)
+                        completionWebhook, completionWebhookToken,
+                        eventSourceUrl, sessionDurationSeconds, pollIntervalSeconds, id)
                 .update();
     }
 
@@ -126,12 +135,15 @@ public class AgentRepository {
                    tools, output_schema, max_turns, max_run_seconds,
                    webhook_token, paused, version, created_at, updated_at,
                    schedule, last_tick_at,
-                   completion_webhook, completion_webhook_token
+                   completion_webhook, completion_webhook_token,
+                   event_source_url, session_duration_seconds, poll_interval_seconds
             FROM vistierie.agents
             """;
 
     private Agent map(java.sql.ResultSet rs, int n) throws SQLException {
         var lastTick = rs.getTimestamp("last_tick_at");
+        Integer sessionDuration = (Integer) rs.getObject("session_duration_seconds");
+        Integer pollInterval = (Integer) rs.getObject("poll_interval_seconds");
         return new Agent(
                 rs.getObject("id", UUID.class),
                 rs.getObject("tenant_id", UUID.class),
@@ -150,7 +162,10 @@ public class AgentRepository {
                 rs.getString("schedule"),
                 lastTick == null ? null : lastTick.toInstant(),
                 rs.getString("completion_webhook"),
-                rs.getString("completion_webhook_token")
+                rs.getString("completion_webhook_token"),
+                rs.getString("event_source_url"),
+                sessionDuration,
+                pollInterval
         );
     }
 

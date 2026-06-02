@@ -61,7 +61,7 @@ class AgentRunnerSubagentTest extends PostgresTestBase {
                 """);
         var beeId = UUID.randomUUID();
         agents.insert(beeId, tenantId, "bee", "you are bee", "summarize_cell",
-                mapper.createArrayNode(), beeSchema, 5, 60, "wt", false, null, null, null);
+                mapper.createArrayNode(), beeSchema, 5, 60, "wt", false, null, null, null, null, null, null);
         budgetFixtures.seed(tenantId, beeId);
 
         var queenTools = mapper.createArrayNode();
@@ -74,7 +74,7 @@ class AgentRunnerSubagentTest extends PostgresTestBase {
                 {"type":"object","properties":{"verdict":{"type":"string"}},"required":["verdict"]}
                 """);
         agents.insert(queenId, tenantId, "queen", "you are queen", "summarize_cell",
-                queenTools, queenSchema, 5, 60, "wt", false, null, null, null);
+                queenTools, queenSchema, 5, 60, "wt", false, null, null, null, null, null, null);
         budgetFixtures.seed(tenantId, queenId);
 
         stub.scriptForAgent("queen",
@@ -110,7 +110,7 @@ class AgentRunnerSubagentTest extends PostgresTestBase {
                 {"type":"object","properties":{"finding":{"type":"string"}},"required":["finding"]}""");
         var beeId = UUID.randomUUID();
         agents.insert(beeId, tenantId, "bee", "p", "summarize_cell",
-                mapper.createArrayNode(), beeSchema, 3, 60, "wt", false, null, null, null);
+                mapper.createArrayNode(), beeSchema, 3, 60, "wt", false, null, null, null, null, null, null);
         budgetFixtures.seed(tenantId, beeId);
         var queenTools = mapper.createArrayNode();
         queenTools.add(mapper.valueToTree(Map.of(
@@ -118,7 +118,7 @@ class AgentRunnerSubagentTest extends PostgresTestBase {
                 "type","subagent","target_agent","bee")));
         var queenId = UUID.randomUUID();
         agents.insert(queenId, tenantId, "queen", "p", "summarize_cell",
-                queenTools, null, 3, 60, "wt", false, null, null, null);
+                queenTools, null, 3, 60, "wt", false, null, null, null, null, null, null);
         budgetFixtures.seed(tenantId, queenId);
 
         stub.scriptForAgent("queen",

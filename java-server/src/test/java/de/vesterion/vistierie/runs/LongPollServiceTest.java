@@ -66,7 +66,7 @@ class LongPollServiceTest extends PostgresTestBase {
         var agentId = UUID.randomUUID();
         var schema = mapper.readTree("{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\"}},\"required\":[\"x\"]}");
         agents.insert(agentId, tenantId, "a", "p", "summarize_cell",
-                mapper.createArrayNode(), schema, 3, 30, "wt", false, null, null, null);
+                mapper.createArrayNode(), schema, 3, 30, "wt", false, null, null, null, null, null, null);
         budgetFixtures.seed(tenantId, agentId);
         stub.script(StubLlmScripts.Turn.endTurn("{\"x\":\"v\"}"));
         var startResp = mvc.perform(post("/agents/a/run")

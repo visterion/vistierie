@@ -68,7 +68,7 @@ class KillSwitchE2ETest extends PostgresTestBase {
         tenants.insert(tenantId, tenantName, new BCryptPasswordEncoder().encode(tenantToken));
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "writer", "sys", "summarize_cell",
-                new tools.jackson.databind.ObjectMapper().createArrayNode(), null, 5, 60, "wt", false, null, null, null);
+                new tools.jackson.databind.ObjectMapper().createArrayNode(), null, 5, 60, "wt", false, null, null, null, null, null, null);
         // Operational budgets so the call passes the budget gate and reaches the kill check.
         tenantBudgets.patch(tenantId, new BudgetPatchRequest(100_000L, 1_000_000L, 80, 90));
         agentBudgets.patch(agentId, new BudgetPatchRequest(50_000L, 500_000L, 80, 90));

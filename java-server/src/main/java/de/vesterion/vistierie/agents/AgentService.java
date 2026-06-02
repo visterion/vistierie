@@ -33,8 +33,8 @@ public class AgentService {
         validator.validateOutputSchemaIfPresent(req.output_schema());
         var existingNames = repo.findByTenant(tenantId).stream().map(Agent::name).toList();
         for (var t : req.tools()) validator.validateTool(t, existingNames);
-
         validator.validateSchedule(req.schedule());
+        validator.validateStreaming(req.event_source_url(), req.schedule(), req.session_duration_seconds());
         var id = UUID.randomUUID();
         var toolsJson = mapper.valueToTree(req.tools());
         repo.insert(id, tenantId, req.name(), req.system_prompt(), req.model_purpose(),
@@ -42,7 +42,9 @@ public class AgentService {
                 req.max_turns() == null ? 25 : req.max_turns(),
                 req.max_run_seconds() == null ? 1800 : req.max_run_seconds(),
                 req.webhook_token(), false, req.schedule(),
-                req.completion_webhook(), req.completion_webhook_token());
+                req.completion_webhook(), req.completion_webhook_token(),
+                req.event_source_url(), req.session_duration_seconds(),
+                req.poll_interval_seconds());
         return toDetail(repo.findById(id).orElseThrow());
     }
 
@@ -53,13 +55,16 @@ public class AgentService {
                 .map(Agent::name).filter(n -> !n.equals(name)).toList();
         for (var t : req.tools()) validator.validateTool(t, existing);
         validator.validateSchedule(req.schedule());
+        validator.validateStreaming(req.event_source_url(), req.schedule(), req.session_duration_seconds());
         var toolsJson = mapper.valueToTree(req.tools());
         repo.replace(a.id(), req.system_prompt(), req.model_purpose(),
                 toolsJson, req.output_schema(),
                 req.max_turns() == null ? 25 : req.max_turns(),
                 req.max_run_seconds() == null ? 1800 : req.max_run_seconds(),
                 req.webhook_token(), a.paused(), req.schedule(),
-                req.completion_webhook(), req.completion_webhook_token());
+                req.completion_webhook(), req.completion_webhook_token(),
+                req.event_source_url(), req.session_duration_seconds(),
+                req.poll_interval_seconds());
         return toDetail(repo.findById(a.id()).orElseThrow());
     }
 
@@ -75,12 +80,21 @@ public class AgentService {
         boolean newPaused = req.paused() != null ? req.paused() : a.paused();
         String newSchedule;
         if (req.schedule() != null) {
-            // Treat empty string as "clear schedule"
             newSchedule = req.schedule().isBlank() ? null : req.schedule();
             validator.validateSchedule(newSchedule);
         } else {
             newSchedule = a.schedule();
         }
+        String newEventSourceUrl;
+        if (req.event_source_url() != null) {
+            newEventSourceUrl = req.event_source_url().isBlank() ? null : req.event_source_url();
+        } else {
+            newEventSourceUrl = a.eventSourceUrl();
+        }
+        Integer newSessionDuration = req.session_duration_seconds() != null
+                ? req.session_duration_seconds() : a.sessionDurationSeconds();
+        Integer newPollInterval = req.poll_interval_seconds() != null
+                ? req.poll_interval_seconds() : a.pollIntervalSeconds();
 
         if (req.tools() != null) {
             var existing = repo.findByTenant(tenantId).stream()
@@ -90,6 +104,7 @@ public class AgentService {
         if (req.output_schema() != null) {
             validator.validateOutputSchemaIfPresent(req.output_schema());
         }
+        validator.validateStreaming(newEventSourceUrl, newSchedule, newSessionDuration);
         if (a.paused() && !newPaused) {
             var tenant = tenants.findById(tenantId).orElseThrow();
             budgets.checkOrThrow(tenantId, tenant.name(), a.id(), a.name());
@@ -102,7 +117,8 @@ public class AgentService {
                 : a.completionWebhookToken();
         repo.replace(a.id(), newSysPrompt, newPurpose, newTools, newOutSchema,
                 newMaxTurns, newMaxSeconds, newToken, newPaused, newSchedule,
-                newCompletionWebhook, newCompletionWebhookToken);
+                newCompletionWebhook, newCompletionWebhookToken,
+                newEventSourceUrl, newSessionDuration, newPollInterval);
         return toDetail(repo.findById(a.id()).orElseThrow());
     }
 
@@ -133,7 +149,8 @@ public class AgentService {
                     a.maxTurns(), a.maxRunSeconds(), a.paused(), a.version(),
                     a.createdAt(), a.updatedAt(),
                     a.schedule(), a.lastTickAt(),
-                    a.completionWebhook(), a.completionWebhookToken());
+                    a.completionWebhook(), a.completionWebhookToken(),
+                    a.eventSourceUrl(), a.sessionDurationSeconds(), a.pollIntervalSeconds());
         } catch (Exception e) { throw new RuntimeException(e); }
     }
 

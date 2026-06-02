@@ -24,7 +24,7 @@ class RunEventRecorderTest extends PostgresTestBase {
         tenants.insert(tenantId, "tn-" + tenantId, "h");
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "a", "p", "purpose",
-                JsonNodeFactory.instance.arrayNode(), null, 5, 60, "wt", false, null, null, null);
+                JsonNodeFactory.instance.arrayNode(), null, 5, 60, "wt", false, null, null, null, null, null, null);
         var runId = "01J" + UUID.randomUUID().toString().replace("-", "").toUpperCase().substring(0, 23);
         runs.insert(runId, tenantId, agentId,
                 mapper.readTree("{\"version\":1}"), 1, null, "manual", "queued", null, null, null);

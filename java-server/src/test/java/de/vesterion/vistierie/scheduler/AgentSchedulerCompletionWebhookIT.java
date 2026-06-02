@@ -85,7 +85,7 @@ class AgentSchedulerCompletionWebhookIT extends PostgresTestBase {
         agents.insert(agentId, tenantId, "cw-test-agent", "test prompt", "summarize_cell",
                 mapper.createArrayNode(), schema, 3, 30, "wt-cwit", false,
                 "* * * * * *",
-                callbackUrl, "cb-token-xyz");
+                callbackUrl, "cb-token-xyz", null, null, null);
         budgetFixtures.seed(tenantId, agentId);
 
         // Wait for the webhook to be called with the correct auth header and run-id
