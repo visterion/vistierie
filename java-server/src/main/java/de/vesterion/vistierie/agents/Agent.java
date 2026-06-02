@@ -23,5 +23,8 @@ public record Agent(
         String schedule,
         Instant lastTickAt,
         String completionWebhook,
-        String completionWebhookToken
+        String completionWebhookToken,
+        String eventSourceUrl,
+        Integer sessionDurationSeconds,
+        Integer pollIntervalSeconds
 ) {}

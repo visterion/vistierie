@@ -16,5 +16,8 @@ public record UpdateAgentRequest(
         @NotBlank String webhook_token,
         String schedule,
         String completion_webhook,
-        String completion_webhook_token
+        String completion_webhook_token,
+        String event_source_url,
+        Integer session_duration_seconds,
+        Integer poll_interval_seconds
 ) {}

@@ -82,7 +82,7 @@ class AgentRunnerToolsTest extends PostgresTestBase {
         var schema = mapper.readTree("{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\"}},\"required\":[\"x\"]}");
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "explorer", "you explore", "summarize_cell",
-                tools, schema, 5, 60, "wt-tok", false, null, null, null);
+                tools, schema, 5, 60, "wt-tok", false, null, null, null, null, null, null);
         budgetFixtures.seed(tenantId, agentId);
 
         stub.script(
@@ -115,7 +115,7 @@ class AgentRunnerToolsTest extends PostgresTestBase {
                 "webhook_url","http://localhost:" + wm.port() + "/tools/x")));
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "ax", "p", "summarize_cell",
-                tools, null, 3, 60, "wt", false, null, null, null);
+                tools, null, 3, 60, "wt", false, null, null, null, null, null, null);
         budgetFixtures.seed(tenantId, agentId);
         stub.script(
                 StubLlmScripts.Turn.toolUses(StubLlmScripts.Turn.toolUse("x", Map.of())));

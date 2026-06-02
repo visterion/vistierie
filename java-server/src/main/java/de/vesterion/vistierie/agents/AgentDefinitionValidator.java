@@ -73,6 +73,22 @@ public class AgentDefinitionValidator {
         }
     }
 
+    public void validateStreaming(String eventSourceUrl, String schedule, Integer sessionDurationSeconds) {
+        if (sessionDurationSeconds == null) return;
+        if (sessionDurationSeconds <= 0) {
+            throw new InvalidDefinitionException(
+                    "session_duration_seconds must be > 0");
+        }
+        if (eventSourceUrl == null || eventSourceUrl.isBlank()) {
+            throw new InvalidDefinitionException(
+                    "event_source_url is required when session_duration_seconds is set");
+        }
+        if (schedule == null || schedule.isBlank()) {
+            throw new InvalidDefinitionException(
+                    "schedule is required when session_duration_seconds is set (used as session-open trigger)");
+        }
+    }
+
     public static class InvalidDefinitionException extends RuntimeException {
         public InvalidDefinitionException(String m) { super(m); }
     }

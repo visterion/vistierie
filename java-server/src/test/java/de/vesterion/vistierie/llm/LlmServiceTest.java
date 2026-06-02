@@ -51,7 +51,7 @@ class LlmServiceTest {
     private final String tenantName = "tn-x";
     private final UUID agentId = UUID.randomUUID();
     private final Agent agent = new Agent(agentId, tenantId, "writer", "sys", "test_purpose",
-            null, null, 5, 60, "wt", false, 1, Instant.now(), Instant.now(), null, null, null, null);
+            null, null, 5, 60, "wt", false, 1, Instant.now(), Instant.now(), null, null, null, null, null, null, null);
 
     private final LlmService svc = new LlmService(routing, providers, prices, recorder, kill, metrics, agents, budgets);
 

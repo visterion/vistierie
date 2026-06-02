@@ -75,7 +75,7 @@ class RunTriggerControllerTest extends PostgresTestBase {
         var agentId = UUID.randomUUID();
         var schema = mapper.readTree("{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\"}},\"required\":[\"x\"]}");
         agents.insert(agentId, tenantId, "a", "you", "summarize_cell",
-                mapper.createArrayNode(), schema, 3, 30, "wt", false, null, null, null);
+                mapper.createArrayNode(), schema, 3, 30, "wt", false, null, null, null, null, null, null);
         tenantBudgets.patch(tenantId, new BudgetPatchRequest(10_000L, 100_000L, 80, 90));
         agentBudgets.patch(agentId, new BudgetPatchRequest(5_000L, 50_000L, 80, 90));
         stub.script(StubLlmScripts.Turn.endTurn("{\"x\":\"yes\"}"));
@@ -96,7 +96,7 @@ class RunTriggerControllerTest extends PostgresTestBase {
     @Test void rejectsPausedAgent() throws Exception {
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "p", "p", "summarize_cell",
-                mapper.createArrayNode(), null, 3, 30, "wt", true, null, null, null);
+                mapper.createArrayNode(), null, 3, 30, "wt", true, null, null, null, null, null, null);
         mvc.perform(post("/agents/p/run")
                 .header("Authorization", "Bearer " + token)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -107,7 +107,7 @@ class RunTriggerControllerTest extends PostgresTestBase {
     @Test void manualRunReturnsForbiddenWhenAgentBudgetMissing() throws Exception {
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "writer", "you", "summarize_cell",
-                mapper.createArrayNode(), null, 3, 30, "wt", false, null, null, null);
+                mapper.createArrayNode(), null, 3, 30, "wt", false, null, null, null, null, null, null);
         tenantBudgets.patch(tenantId, new BudgetPatchRequest(10_000L, 100_000L, 80, 90));
 
         mvc.perform(post("/agents/writer/run")

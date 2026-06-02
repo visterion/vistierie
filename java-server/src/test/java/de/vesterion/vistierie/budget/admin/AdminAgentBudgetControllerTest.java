@@ -59,7 +59,7 @@ class AdminAgentBudgetControllerTest extends PostgresTestBase {
         agentId = UUID.randomUUID();
         agentName = "agent-" + agentId.toString().substring(0, 8);
         agents.insert(agentId, tenantId, agentName, "sys", "routine",
-                mapper.createArrayNode(), null, 5, 60, "wt", false, null, null, null);
+                mapper.createArrayNode(), null, 5, 60, "wt", false, null, null, null, null, null, null);
     }
 
     private void insertCall(long costMicros, Instant createdAt) {

@@ -61,7 +61,7 @@ class BatchServiceSubmitTest extends PostgresTestBase {
         var schema = mapper.readTree("{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\"}},\"required\":[\"x\"]}");
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "summarize", "p", "summarize_cell",
-                mapper.createArrayNode(), schema, 3, 30, "wt", false, null, null, null);
+                mapper.createArrayNode(), schema, 3, 30, "wt", false, null, null, null, null, null, null);
         agentBudgets.patch(agentId, new BudgetPatchRequest(5_000L, 50_000L, 80, 90));
         var agent = agents.findById(agentId).orElseThrow();
 
@@ -99,7 +99,7 @@ class BatchServiceSubmitTest extends PostgresTestBase {
         var agentId = UUID.randomUUID();
         var schema = mapper.readTree("{\"type\":\"object\"}");
         agents.insert(agentId, tenantId, "with-tools", "p", "summarize_cell",
-                tools, schema, 3, 30, "wt", false, null, null, null);
+                tools, schema, 3, 30, "wt", false, null, null, null, null, null, null);
         agentBudgets.patch(agentId, new BudgetPatchRequest(5_000L, 50_000L, 80, 90));
         var agent = agents.findById(agentId).orElseThrow();
         assertThatThrownBy(() -> batchService.submit(tenantId, tenantName, agent,
@@ -112,7 +112,7 @@ class BatchServiceSubmitTest extends PostgresTestBase {
     void rejectsAgentWithoutOutputSchema() throws Exception {
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "no-schema", "p", "summarize_cell",
-                mapper.createArrayNode(), null, 3, 30, "wt", false, null, null, null);
+                mapper.createArrayNode(), null, 3, 30, "wt", false, null, null, null, null, null, null);
         agentBudgets.patch(agentId, new BudgetPatchRequest(5_000L, 50_000L, 80, 90));
         var agent = agents.findById(agentId).orElseThrow();
         assertThatThrownBy(() -> batchService.submit(tenantId, tenantName, agent,
@@ -126,7 +126,7 @@ class BatchServiceSubmitTest extends PostgresTestBase {
         var schema = mapper.readTree("{\"type\":\"object\"}");
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "summ2", "p", "summarize_cell",
-                mapper.createArrayNode(), schema, 3, 30, "wt", false, null, null, null);
+                mapper.createArrayNode(), schema, 3, 30, "wt", false, null, null, null, null, null, null);
         agentBudgets.patch(agentId, new BudgetPatchRequest(5_000L, 50_000L, 80, 90));
         var agent = agents.findById(agentId).orElseThrow();
         var items = List.of(
@@ -142,7 +142,7 @@ class BatchServiceSubmitTest extends PostgresTestBase {
         var schema = mapper.readTree("{\"type\":\"object\"}");
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "summ3", "p", "summarize_cell",
-                mapper.createArrayNode(), schema, 3, 30, "wt", false, null, null, null);
+                mapper.createArrayNode(), schema, 3, 30, "wt", false, null, null, null, null, null, null);
         agentBudgets.patch(agentId, new BudgetPatchRequest(5_000L, 50_000L, 80, 90));
         var agent = agents.findById(agentId).orElseThrow();
         var items = List.of(new BatchItemRequest("has spaces!", mapper.createObjectNode()));
@@ -156,7 +156,7 @@ class BatchServiceSubmitTest extends PostgresTestBase {
         var schema = mapper.readTree("{\"type\":\"object\"}");
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "no-budget", "p", "summarize_cell",
-                mapper.createArrayNode(), schema, 3, 30, "wt", false, null, null, null);
+                mapper.createArrayNode(), schema, 3, 30, "wt", false, null, null, null, null, null, null);
         var agent = agents.findById(agentId).orElseThrow();
 
         assertThatThrownBy(() -> batchService.submit(tenantId, tenantName, agent,

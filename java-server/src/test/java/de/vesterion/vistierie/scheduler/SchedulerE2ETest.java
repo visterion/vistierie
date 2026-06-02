@@ -58,7 +58,7 @@ class SchedulerE2ETest extends PostgresTestBase {
         var schema = mapper.readTree("{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\"}},\"required\":[\"x\"]}");
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "every-second", "p", "summarize_cell",
-                mapper.createArrayNode(), schema, 3, 30, "wt", false, null, null, null);
+                mapper.createArrayNode(), schema, 3, 30, "wt", false, null, null, null, null, null, null);
         budgetFixtures.seed(tenantId, agentId);
         jdbc.sql("UPDATE vistierie.agents SET schedule='* * * * * *' WHERE id=?")
                 .param(agentId).update();

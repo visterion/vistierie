@@ -56,7 +56,7 @@ class ParallelQueenWithBeesE2ETest extends PostgresTestBase {
         var beeSchema = mapper.readTree("{\"type\":\"object\",\"properties\":{\"finding\":{\"type\":\"string\"}},\"required\":[\"finding\"]}");
         var beeId = UUID.randomUUID();
         agents.insert(beeId, tenantId, "bee", "p", "summarize_cell",
-                mapper.createArrayNode(), beeSchema, 3, 60, "wt", false, null, null, null);
+                mapper.createArrayNode(), beeSchema, 3, 60, "wt", false, null, null, null, null, null, null);
         budgetFixtures.seed(tenantId, beeId);
 
         var queenTools = mapper.createArrayNode();
@@ -67,7 +67,7 @@ class ParallelQueenWithBeesE2ETest extends PostgresTestBase {
         var queenSchema = mapper.readTree("{\"type\":\"object\",\"properties\":{\"verdict\":{\"type\":\"string\"}},\"required\":[\"verdict\"]}");
         var queenId = UUID.randomUUID();
         agents.insert(queenId, tenantId, "queen", "p", "summarize_cell",
-                queenTools, queenSchema, 5, 60, "wt", false, null, null, null);
+                queenTools, queenSchema, 5, 60, "wt", false, null, null, null, null, null, null);
         budgetFixtures.seed(tenantId, queenId);
 
         stub.scriptForAgent("queen",

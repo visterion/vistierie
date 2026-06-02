@@ -28,7 +28,7 @@ class AgentBudgetRepositoryTest extends PostgresTestBase {
         tenants.insert(tenantId, "tenant-" + tenantId.toString().substring(0, 8), "tok");
         agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "agent-" + agentId.toString().substring(0, 8),
-                "sys", "routine", mapper.createArrayNode(), null, 5, 60, "wt", false, null, null, null);
+                "sys", "routine", mapper.createArrayNode(), null, 5, 60, "wt", false, null, null, null, null, null, null);
     }
 
     @Test

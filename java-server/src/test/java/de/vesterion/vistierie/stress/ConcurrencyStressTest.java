@@ -51,7 +51,7 @@ class ConcurrencyStressTest extends PostgresTestBase {
         var schema = mapper.readTree("{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\"}},\"required\":[\"x\"]}");
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "stress", "p", "summarize_cell",
-                mapper.createArrayNode(), schema, 3, 60, "wt", false, null, null, null);
+                mapper.createArrayNode(), schema, 3, 60, "wt", false, null, null, null, null, null, null);
 
         var script = new ArrayList<StubLlmScripts.ScriptedTurn>();
         for (int i = 0; i < 100; i++) script.add(StubLlmScripts.Turn.endTurn("{\"x\":\"v" + i + "\"}"));

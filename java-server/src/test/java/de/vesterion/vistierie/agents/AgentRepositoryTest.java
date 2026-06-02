@@ -27,7 +27,7 @@ class AgentRepositoryTest extends PostgresTestBase {
         var schema = JsonNodeFactory.instance.objectNode();
         repo.insert(UUID.randomUUID(), tenantId, name,
                 "system-prompt", "bee-isolation",
-                tools, schema, 12, 180, "wt-token", false, null, null, null);
+                tools, schema, 12, 180, "wt-token", false, null, null, null, null, null, null);
 
         var a = repo.findByName(tenantId, name).orElseThrow();
         assertThat(a.name()).isEqualTo(name);
@@ -45,9 +45,9 @@ class AgentRepositoryTest extends PostgresTestBase {
         tenants.insert(tenantId, "tn-" + tenantId, "h");
         var id = UUID.randomUUID();
         var tools = JsonNodeFactory.instance.arrayNode();
-        repo.insert(id, tenantId, "a", "p1", "purpose", tools, null, 5, 60, "t", false, null, null, null);
+        repo.insert(id, tenantId, "a", "p1", "purpose", tools, null, 5, 60, "t", false, null, null, null, null, null, null);
 
-        repo.replace(id, "p2", "purpose2", tools, null, 6, 90, "t", false, null, null, null);
+        repo.replace(id, "p2", "purpose2", tools, null, 6, 90, "t", false, null, null, null, null, null, null);
 
         var a = repo.findById(id).orElseThrow();
         assertThat(a.systemPrompt()).isEqualTo("p2");
@@ -59,9 +59,9 @@ class AgentRepositoryTest extends PostgresTestBase {
         var tenantId = UUID.randomUUID();
         tenants.insert(tenantId, "tn-" + tenantId, "h");
         var tools = JsonNodeFactory.instance.arrayNode();
-        repo.insert(UUID.randomUUID(), tenantId, "dup", "p", "purpose", tools, null, 5, 60, "t", false, null, null, null);
+        repo.insert(UUID.randomUUID(), tenantId, "dup", "p", "purpose", tools, null, 5, 60, "t", false, null, null, null, null, null, null);
         try {
-            repo.insert(UUID.randomUUID(), tenantId, "dup", "p", "purpose", tools, null, 5, 60, "t", false, null, null, null);
+            repo.insert(UUID.randomUUID(), tenantId, "dup", "p", "purpose", tools, null, 5, 60, "t", false, null, null, null, null, null, null);
             org.junit.jupiter.api.Assertions.fail("expected unique violation");
         } catch (org.springframework.dao.DataIntegrityViolationException expected) { }
     }
@@ -70,8 +70,8 @@ class AgentRepositoryTest extends PostgresTestBase {
         var tenantId = UUID.randomUUID();
         tenants.insert(tenantId, "tn-" + tenantId, "h");
         var tools = JsonNodeFactory.instance.arrayNode();
-        repo.insert(UUID.randomUUID(), tenantId, "a", "p", "purpose", tools, null, 5, 60, "t", false, null, null, null);
-        repo.insert(UUID.randomUUID(), tenantId, "b", "p", "purpose", tools, null, 5, 60, "t", false, null, null, null);
+        repo.insert(UUID.randomUUID(), tenantId, "a", "p", "purpose", tools, null, 5, 60, "t", false, null, null, null, null, null, null);
+        repo.insert(UUID.randomUUID(), tenantId, "b", "p", "purpose", tools, null, 5, 60, "t", false, null, null, null, null, null, null);
         assertThat(repo.findByTenant(tenantId)).extracting(Agent::name).containsExactlyInAnyOrder("a", "b");
     }
 
@@ -81,13 +81,13 @@ class AgentRepositoryTest extends PostgresTestBase {
         tenants.insert(tenantId, "tn-" + tenantId, "h");
 
         repo.insert(UUID.randomUUID(), tenantId, "unscheduled", "p", "summarize_cell",
-                mapper.createArrayNode(), null, 3, 30, "wt", false, null, null, null);
+                mapper.createArrayNode(), null, 3, 30, "wt", false, null, null, null, null, null, null);
         var schedId = UUID.randomUUID();
         repo.insert(schedId, tenantId, "scheduled", "p", "summarize_cell",
-                mapper.createArrayNode(), null, 3, 30, "wt", false, null, null, null);
+                mapper.createArrayNode(), null, 3, 30, "wt", false, null, null, null, null, null, null);
         var pausedSchedId = UUID.randomUUID();
         repo.insert(pausedSchedId, tenantId, "paused-scheduled", "p", "summarize_cell",
-                mapper.createArrayNode(), null, 3, 30, "wt", true, null, null, null);
+                mapper.createArrayNode(), null, 3, 30, "wt", true, null, null, null, null, null, null);
         // Set schedule via direct SQL — repository doesn't expose it yet at this point
         jdbc.sql("UPDATE vistierie.agents SET schedule='0 * * * * *' WHERE id IN (?, ?)")
                 .params(schedId, pausedSchedId).update();
@@ -104,7 +104,7 @@ class AgentRepositoryTest extends PostgresTestBase {
         tenants.insert(tenantId, "tn-" + tenantId, "h");
         var id = UUID.randomUUID();
         repo.insert(id, tenantId, "a", "p", "summarize_cell",
-                mapper.createArrayNode(), null, 3, 30, "wt", false, null, null, null);
+                mapper.createArrayNode(), null, 3, 30, "wt", false, null, null, null, null, null, null);
 
         var ts = Instant.parse("2026-05-08T12:34:56Z");
         repo.updateLastTick(id, ts);
@@ -120,7 +120,7 @@ class AgentRepositoryTest extends PostgresTestBase {
         var id = UUID.randomUUID();
         repo.insert(id, tenantId, "cw-agent", "p", "summarize_cell",
                 mapper.createArrayNode(), null, 3, 30, "wt", false, null,
-                "https://example.invalid/cb", "secret-cb-token");
+                "https://example.invalid/cb", "secret-cb-token", null, null, null);
 
         var a = repo.findById(id).orElseThrow();
         assertThat(a.completionWebhook()).isEqualTo("https://example.invalid/cb");
@@ -129,7 +129,7 @@ class AgentRepositoryTest extends PostgresTestBase {
         // Verify the fields survive a replace as well
         repo.replace(id, "p2", "summarize_cell", mapper.createArrayNode(), null,
                 3, 30, "wt", false, null,
-                "https://example.invalid/cb2", "secret-cb-token-2");
+                "https://example.invalid/cb2", "secret-cb-token-2", null, null, null);
 
         var updated = repo.findById(id).orElseThrow();
         assertThat(updated.completionWebhook()).isEqualTo("https://example.invalid/cb2");
