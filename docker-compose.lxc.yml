@@ -1,0 +1,15 @@
+# Override for LXC hosts (Proxmox/PVE) where the kernel denies Unix-domain
+# socket creation inside unprivileged containers. Postgres fails at pg_ctl
+# socket init; the JDK NIO UnixDispatcher fails at <clinit>.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.lxc.yml up -d
+#
+# Do NOT use on standard VM/bare-metal Docker hosts — privileged: true is
+# a security risk and unnecessary there.
+
+services:
+  db:
+    privileged: true
+  vistierie:
+    privileged: true
