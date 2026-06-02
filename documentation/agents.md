@@ -255,3 +255,64 @@ curl -X POST http://localhost:8090/agents/summarize-cell/batch \
 #   "items_total": 3, "anthropic_batch_id": "msgbatch_..."
 # }
 ```
+
+## Streaming Bee (window-bounded event-driven agent)
+
+A **Streaming Bee** is an ordinary agent with three additional fields set. It stays active during
+a time window, polls a consumer-hosted event-source webhook on a fixed cadence, and spawns one
+child run per returned event. No new entity type — just nullable fields.
+
+### Required fields
+
+| Field | Type | Description |
+|---|---|---|
+| `event_source_url` | String | Consumer-hosted webhook Vistierie POSTs each poll |
+| `session_duration_seconds` | Integer | Window length in seconds from the session-open cron boundary. **Non-null marks the agent as a Streaming Bee.** |
+| `schedule` | String (6-field cron) | Reused as session-open trigger. Required when `session_duration_seconds` is set. |
+
+### Optional fields
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `poll_interval_seconds` | Integer | 60 | Poll cadence within the window (rounded up to scheduler tick ~30 s) |
+| `completion_webhook` / `completion_webhook_token` | String | — | Fired per child run on completion |
+| `webhook_token` | String (required) | — | Bearer token for **both** the event-source POST and tool webhooks |
+
+### Validation
+
+If `session_duration_seconds` is set:
+- `event_source_url` must be non-blank
+- `schedule` must be non-blank and valid
+- `session_duration_seconds` must be > 0
+
+### Session lifecycle
+
+Managed by `StreamingSessionCoordinator`, called from each `AgentScheduler.tick()`:
+
+1. **OPEN** — cron boundary reached + no open session → insert `streaming_sessions` row
+   (`status='open'`, `closes_at = now + session_duration_seconds`).
+2. **POLL** — open session + `now - last_poll_at >= poll_interval_seconds` + `now < closes_at`
+   → kill-check → POST event-source → per event: budget-check + spawn child run.
+3. **CLOSE** — `now >= closes_at` → `status='closed'`.
+4. **Restart/resume** — on app restart, open sessions with `closes_at` in the future resume polling automatically on the next tick.
+
+Streaming agents are **skipped from the ordinary cron-run path** — they never produce `trigger=cron` runs.
+
+### Child runs
+
+Each event spawns a run with:
+- `trigger = "session_event"`
+- `payload = <event object>` (opaque consumer JSON)
+- `session_id` — nullable UUID linking to the `streaming_sessions` row
+- Full pipeline reuse: agent snapshot, system prompt, tools, output-schema validation, tier routing, completion webhook
+
+### Cost / kill / budget
+
+The event-source poll makes no LLM calls — idle polling is nearly free.
+Before each child-run spawn, the existing kill-switch and budget enforcer are checked.
+Each child run is accounted normally in `llm_calls`.
+
+### Observability
+
+- `GET /agents/{name}/sessions` — most recent 50 sessions (tenant-scoped)
+- Child runs: `GET /runs/{id}` and `GET /runs/{id}/events` (existing endpoints)

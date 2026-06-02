@@ -674,3 +674,57 @@ No authentication required. Safe to call from load-balancer health checks.
 
 Readiness probe. Returns `200 OK` once the database connection is verified.
 Returns `503` if the DB is unreachable. No authentication required.
+
+---
+
+## GET /agents/{name}/sessions
+
+Returns the 50 most recent streaming sessions for the named agent, newest first.
+Tenant-scoped (authenticated via the standard `Authorization: Bearer <token>` header).
+
+**Response 200:**
+```json
+[
+  {
+    "id": "<uuid>",
+    "opened_at": "2026-06-02T09:30:00Z",
+    "closes_at": "2026-06-02T18:00:00Z",
+    "last_poll_at": "2026-06-02T14:33:00Z",
+    "status": "open"
+  }
+]
+```
+
+**Response 404:** agent not found in tenant.
+
+Status values: `open` | `closed`.
+
+---
+
+## Event-source webhook contract (Vistierie → consumer)
+
+Vistierie POSTs this request to `event_source_url` each poll cycle:
+
+```
+POST {event_source_url}
+Authorization: Bearer {webhook_token}
+Content-Type: application/json
+
+{
+  "session_id": "<uuid>",
+  "agent":      "<agent name>",
+  "since":      "<ISO-8601 timestamp of last poll | null>",
+  "now":        "<ISO-8601 current timestamp>"
+}
+```
+
+Expected response:
+```json
+{ "events": [ { "<arbitrary consumer JSON>" } ] }
+```
+
+- Empty `events` (`[]`) → nothing spawned; the poll round-trip is the only cost.
+- Each event object becomes the `payload` of one child run. Vistierie treats it as opaque.
+- The consumer owns deduplication, throttling, and "is this worth a token" logic.
+- On 5xx: Vistierie retries once after 1 s; on persistent failure it logs and skips the poll (tick survives).
+- On 4xx: Vistierie logs and skips (no retry).
