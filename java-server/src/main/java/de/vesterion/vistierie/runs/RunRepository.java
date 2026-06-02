@@ -20,21 +20,35 @@ public class RunRepository {
         this.jdbc = jdbc; this.mapper = mapper;
     }
 
+    /** Insert without session_id (backward-compatible overload). */
     public void insert(String id, UUID tenantId, UUID agentId,
                        JsonNode agentSnapshot, int agentVersion,
                        String parentRunId, String trigger, String status,
                        JsonNode payload,
                        String completionWebhook, String completionWebhookToken) {
+        insert(id, tenantId, agentId, agentSnapshot, agentVersion,
+                parentRunId, trigger, status, payload,
+                completionWebhook, completionWebhookToken, null);
+    }
+
+    /** Full insert with optional session_id. */
+    public void insert(String id, UUID tenantId, UUID agentId,
+                       JsonNode agentSnapshot, int agentVersion,
+                       String parentRunId, String trigger, String status,
+                       JsonNode payload,
+                       String completionWebhook, String completionWebhookToken,
+                       UUID sessionId) {
         jdbc.sql("""
                 INSERT INTO vistierie.runs
                   (id, tenant_id, agent_id, agent_snapshot, agent_version,
                    parent_run_id, trigger, status, payload,
-                   messages_snapshot, completion_webhook, completion_webhook_token)
-                VALUES (?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?::jsonb, '[]'::jsonb, ?, ?)
+                   messages_snapshot, completion_webhook, completion_webhook_token,
+                   session_id)
+                VALUES (?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?::jsonb, '[]'::jsonb, ?, ?, ?)
                 """).params(id, tenantId, agentId,
                     json(agentSnapshot), agentVersion,
                     parentRunId, trigger, status, json(payload),
-                    completionWebhook, completionWebhookToken).update();
+                    completionWebhook, completionWebhookToken, sessionId).update();
     }
 
     public void markRunning(String id) {
@@ -93,11 +107,11 @@ public class RunRepository {
             SELECT id, tenant_id, agent_id, agent_snapshot, agent_version,
                    parent_run_id, trigger, status, payload, messages_snapshot,
                    output, summary, error, completion_webhook, completion_webhook_token,
-                   started_at, finished_at, anthropic_batch_id
+                   started_at, finished_at, anthropic_batch_id, session_id
             FROM vistierie.runs
             """;
 
-    public java.util.List<Run> findOpenBatchParents() {
+    public List<Run> findOpenBatchParents() {
         return jdbc.sql(SELECT_BASE
                 + " WHERE anthropic_batch_id IS NOT NULL AND status IN ('queued','running') ORDER BY started_at NULLS LAST")
                 .query(this::map).list();
@@ -127,7 +141,8 @@ public class RunRepository {
                 rs.getString("completion_webhook_token"),
                 rs.getTimestamp("started_at") == null ? null : rs.getTimestamp("started_at").toInstant(),
                 rs.getTimestamp("finished_at") == null ? null : rs.getTimestamp("finished_at").toInstant(),
-                rs.getString("anthropic_batch_id")
+                rs.getString("anthropic_batch_id"),
+                rs.getObject("session_id", UUID.class)
         );
     }
 

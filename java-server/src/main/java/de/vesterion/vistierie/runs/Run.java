@@ -23,5 +23,6 @@ public record Run(
         String completionWebhookToken,
         Instant startedAt,
         Instant finishedAt,
-        String anthropicBatchId
+        String anthropicBatchId,
+        UUID sessionId
 ) {}
