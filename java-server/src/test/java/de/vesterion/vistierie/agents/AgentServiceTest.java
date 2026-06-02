@@ -5,6 +5,7 @@ import de.vesterion.vistierie.agents.dto.PatchAgentRequest;
 import de.vesterion.vistierie.agents.dto.ToolDef;
 import de.vesterion.vistierie.agents.dto.UpdateAgentRequest;
 import de.vesterion.vistierie.budget.BudgetEnforcer;
+import de.vesterion.vistierie.streaming.StreamingSessionRepository;
 import de.vesterion.vistierie.tenants.Tenant;
 import de.vesterion.vistierie.tenants.TenantRepository;
 import org.junit.jupiter.api.Test;
@@ -33,9 +34,10 @@ class AgentServiceTest {
     private final AgentRepository repo = mock(AgentRepository.class);
     private final TenantRepository tenants = mock(TenantRepository.class);
     private final BudgetEnforcer budgets = mock(BudgetEnforcer.class);
+    private final StreamingSessionRepository sessionRepo = mock(StreamingSessionRepository.class);
     private final ObjectMapper mapper = new ObjectMapper();
     private final AgentDefinitionValidator validator = new AgentDefinitionValidator(new JsonSchemas());
-    private final AgentService svc = new AgentService(repo, tenants, budgets, validator, mapper);
+    private final AgentService svc = new AgentService(repo, tenants, budgets, validator, mapper, sessionRepo);
 
     private final UUID tenantId = UUID.randomUUID();
     private final String tenantName = "tn-" + tenantId;
