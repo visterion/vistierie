@@ -78,12 +78,16 @@ public class AgentScheduler {
 
             // Streaming agents are handled by the coordinator, not the regular cron path.
             if (a.sessionDurationSeconds() != null) {
-                if (cronFired) {
-                    streamingCoordinator.handleTick(a, true);
-                    agents.updateLastTick(a.id(), now);
-                } else {
-                    // Poll check even when cron hasn't fired (existing open session may need polling)
-                    streamingCoordinator.handleTick(a, false);
+                try {
+                    if (cronFired) {
+                        streamingCoordinator.handleTick(a, true);
+                        agents.updateLastTick(a.id(), now);
+                    } else {
+                        // Poll check even when cron hasn't fired (existing open session may need polling)
+                        streamingCoordinator.handleTick(a, false);
+                    }
+                } catch (Exception e) {
+                    log.warn("agent {} streaming tick failed: {}", a.id(), e.getMessage());
                 }
                 continue;
             }
