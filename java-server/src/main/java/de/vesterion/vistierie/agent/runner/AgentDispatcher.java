@@ -26,10 +26,25 @@ public class AgentDispatcher {
         this.mapper = mapper;
     }
 
-    /** Synchronously creates the run row and queues async execution. Returns the new run id. */
+    /**
+     * Backward-compatible trigger without sessionId.
+     * Synchronously creates the run row and queues async execution. Returns the new run id.
+     */
     public String trigger(UUID tenantId, Agent agent, String trigger,
                           JsonNode payload,
                           String completionWebhook, String completionWebhookToken) {
+        return trigger(tenantId, agent, trigger, payload,
+                completionWebhook, completionWebhookToken, null);
+    }
+
+    /**
+     * Full trigger with optional sessionId.
+     * Synchronously creates the run row and queues async execution. Returns the new run id.
+     */
+    public String trigger(UUID tenantId, Agent agent, String trigger,
+                          JsonNode payload,
+                          String completionWebhook, String completionWebhookToken,
+                          UUID sessionId) {
         var runId = UUID.randomUUID().toString().replace("-", "").toUpperCase();
         var snap = mapper.createObjectNode();
         snap.put("name", agent.name());
@@ -41,7 +56,8 @@ public class AgentDispatcher {
         snap.put("max_run_seconds", agent.maxRunSeconds());
         snap.put("webhook_token", agent.webhookToken());
         runs.create(runId, tenantId, agent.id(), snap, agent.version(),
-                null, trigger, payload, completionWebhook, completionWebhookToken);
+                null, trigger, payload, completionWebhook, completionWebhookToken,
+                sessionId);
         executeAsync(runId);
         return runId;
     }

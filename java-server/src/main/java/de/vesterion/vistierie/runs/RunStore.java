@@ -22,13 +22,26 @@ public class RunStore {
         this.webhook = webhook;
     }
 
+    /** Backward-compatible overload without sessionId. */
     public void create(String runId, UUID tenantId, UUID agentId,
                        JsonNode agentSnapshot, int agentVersion,
                        String parentRunId, String trigger,
-                       JsonNode payload, String completionWebhook, String completionWebhookToken) {
+                       JsonNode payload, String completionWebhook,
+                       String completionWebhookToken) {
+        create(runId, tenantId, agentId, agentSnapshot, agentVersion,
+                parentRunId, trigger, payload, completionWebhook,
+                completionWebhookToken, null);
+    }
+
+    /** Full create with optional sessionId. */
+    public void create(String runId, UUID tenantId, UUID agentId,
+                       JsonNode agentSnapshot, int agentVersion,
+                       String parentRunId, String trigger,
+                       JsonNode payload, String completionWebhook,
+                       String completionWebhookToken, UUID sessionId) {
         repo.insert(runId, tenantId, agentId, agentSnapshot, agentVersion,
                 parentRunId, trigger, "queued", payload,
-                completionWebhook, completionWebhookToken);
+                completionWebhook, completionWebhookToken, sessionId);
     }
 
     public void markRunning(String runId) {

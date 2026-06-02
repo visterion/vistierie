@@ -97,6 +97,7 @@ class RunStoreTest {
                 null,
                 Instant.parse("2026-05-16T10:00:00Z"),
                 null,
+                null,
                 null);
         when(repo.findById("R1")).thenReturn(Optional.of(run));
         assertThat(store.get("R1")).isSameAs(run);
