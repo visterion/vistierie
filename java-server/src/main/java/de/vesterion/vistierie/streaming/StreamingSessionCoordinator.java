@@ -112,10 +112,12 @@ public class StreamingSessionCoordinator {
                 lastPoll,
                 now);
 
+        // Resolve tenant name once — reused for every per-event budget check below
+        var tenantName = tenants.findById(agent.tenantId()).orElseThrow().name();
+
         // Spawn a child run per event
         for (JsonNode event : events) {
             try {
-                var tenantName = tenants.findById(agent.tenantId()).orElseThrow().name();
                 budgets.checkOrThrow(agent.tenantId(), tenantName, agent.id(), agent.name());
             } catch (BudgetException e) {
                 log.warn("streaming-bee: run spawn skipped for agent {} session {}: budget gate ({})",
