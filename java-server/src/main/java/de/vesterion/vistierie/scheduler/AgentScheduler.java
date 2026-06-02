@@ -8,6 +8,7 @@ import de.vesterion.vistierie.budget.BudgetException;
 import de.vesterion.vistierie.kill.KillSwitchService;
 import de.vesterion.vistierie.runs.RunEventRecorder;
 import de.vesterion.vistierie.runs.RunRepository;
+import de.vesterion.vistierie.streaming.StreamingSessionCoordinator;
 import de.vesterion.vistierie.tenants.TenantRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,11 +36,13 @@ public class AgentScheduler {
     private final Clock clock;
     private final ObjectMapper mapper;
     private final TenantRepository tenants;
+    private final StreamingSessionCoordinator streamingCoordinator;
 
     public AgentScheduler(AgentRepository agents, RunRepository runs,
                           AgentDispatcher dispatcher, BudgetEnforcer budgets, KillSwitchService kill,
                           RunEventRecorder events, Clock clock, ObjectMapper mapper,
-                          TenantRepository tenants) {
+                          TenantRepository tenants,
+                          StreamingSessionCoordinator streamingCoordinator) {
         this.agents = agents;
         this.runs = runs;
         this.dispatcher = dispatcher;
@@ -49,6 +52,7 @@ public class AgentScheduler {
         this.clock = clock;
         this.mapper = mapper;
         this.tenants = tenants;
+        this.streamingCoordinator = streamingCoordinator;
     }
 
     @Scheduled(fixedDelayString = "${vistierie.agents.scheduler.tick-millis:30000}")
@@ -70,7 +74,22 @@ public class AgentScheduler {
             // even if the agent was created hours before the scheduler last ran.
             var prev = a.lastTickAt() != null ? a.lastTickAt() : a.createdAt();
             var next = expr.next(ZonedDateTime.ofInstant(prev, ZoneOffset.UTC));
-            if (next == null || next.toInstant().isAfter(now)) continue;
+            boolean cronFired = next != null && !next.toInstant().isAfter(now);
+
+            // Streaming agents are handled by the coordinator, not the regular cron path.
+            if (a.sessionDurationSeconds() != null) {
+                if (cronFired) {
+                    streamingCoordinator.handleTick(a, true);
+                    agents.updateLastTick(a.id(), now);
+                } else {
+                    // Poll check even when cron hasn't fired (existing open session may need polling)
+                    streamingCoordinator.handleTick(a, false);
+                }
+                continue;
+            }
+
+            // Regular (non-streaming) agent cron path
+            if (!cronFired) continue;
 
             // Tenant kill check
             try { kill.check(a.tenantId()); }
