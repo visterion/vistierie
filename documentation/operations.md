@@ -1,5 +1,41 @@
 # Operations
 
+## Deployment with Docker Compose
+
+The repository ships a `docker-compose.yml` that runs Postgres and the Vistierie
+service on a private network. It joins the external `hivemem-net` so co-located
+consumers can reach it without exposing a public port.
+
+Required environment variables (compose fails fast if unset):
+
+```bash
+export VISTIERIE_DB_PASSWORD=...        # Postgres password
+export VISTIERIE_ADMIN_TOKEN_HASH=...   # bcrypt hash of the admin bearer token
+export ANTHROPIC_API_KEY=...            # at least one provider key
+# optional: OPENAI_API_KEY, XAI_API_KEY, VISTIERIE_IMAGE, VISTIERIE_PORT
+
+docker compose up -d
+```
+
+The image defaults to `ghcr.io/visterion/vistierie:main`; pin a release tag via
+`VISTIERIE_IMAGE=ghcr.io/visterion/vistierie:v1.2.1` for reproducible deploys.
+
+### LXC / Proxmox hosts
+
+On unprivileged LXC containers (Proxmox/PVE) the kernel denies Unix-domain
+socket creation, which breaks Postgres `pg_ctl` socket init and the JDK NIO
+`UnixDispatcher`. Layer the `docker-compose.lxc.yml` override, which marks both
+services `privileged: true`:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.lxc.yml up -d
+```
+
+Do **not** use this override on standard VM or bare-metal Docker hosts — it
+grants unnecessary privileges.
+
+---
+
 ## Seeding a tenant
 
 Create a tenant and capture its one-time token:

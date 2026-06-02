@@ -1,0 +1,47 @@
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: vistierie-db
+    environment:
+      POSTGRES_DB: vistierie
+      POSTGRES_USER: vistierie
+      POSTGRES_PASSWORD: ${VISTIERIE_DB_PASSWORD:?VISTIERIE_DB_PASSWORD required}
+    volumes:
+      - vistierie-pgdata:/var/lib/postgresql/data
+    networks:
+      - vistierie-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "vistierie"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  vistierie:
+    image: ${VISTIERIE_IMAGE:-ghcr.io/visterion/vistierie:main}
+    container_name: vistierie
+    ports:
+      - "${VISTIERIE_PORT:-8090}:8090"
+    environment:
+      VISTIERIE_DB_URL: jdbc:postgresql://db:5432/vistierie
+      VISTIERIE_DB_USER: vistierie
+      VISTIERIE_DB_PASSWORD: ${VISTIERIE_DB_PASSWORD:?VISTIERIE_DB_PASSWORD required}
+      VISTIERIE_ADMIN_TOKEN_HASH: ${VISTIERIE_ADMIN_TOKEN_HASH:?VISTIERIE_ADMIN_TOKEN_HASH required}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY required}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      XAI_API_KEY: ${XAI_API_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - vistierie-net
+      - hivemem-net
+    restart: unless-stopped
+
+networks:
+  vistierie-net:
+  hivemem-net:
+    external: true
+
+volumes:
+  vistierie-pgdata:
