@@ -1,6 +1,7 @@
 package de.vesterion.vistierie.agents;
 
 import de.vesterion.vistierie.agents.dto.*;
+import de.vesterion.vistierie.agents.dto.StreamingSessionDto;
 import de.vesterion.vistierie.auth.RequestContext;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -44,6 +45,11 @@ public class AgentController {
     public ResponseEntity<Void> delete(@PathVariable String name) {
         svc.delete(RequestContext.requireTenantId(), name);
         return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/{name}/sessions")
+    public List<StreamingSessionDto> listSessions(@PathVariable String name) {
+        return svc.listSessions(RequestContext.requireTenantId(), name);
     }
 
     @ExceptionHandler(AgentService.NotFound.class)

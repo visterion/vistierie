@@ -2,6 +2,7 @@ package de.vesterion.vistierie.agents;
 
 import de.vesterion.vistierie.agents.dto.*;
 import de.vesterion.vistierie.budget.BudgetEnforcer;
+import de.vesterion.vistierie.streaming.StreamingSessionRepository;
 import de.vesterion.vistierie.tenants.TenantRepository;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
@@ -18,14 +19,17 @@ public class AgentService {
     private final BudgetEnforcer budgets;
     private final AgentDefinitionValidator validator;
     private final ObjectMapper mapper;
+    private final StreamingSessionRepository sessionRepo;
 
     public AgentService(AgentRepository repo, TenantRepository tenants, BudgetEnforcer budgets,
-                        AgentDefinitionValidator validator, ObjectMapper mapper) {
+                        AgentDefinitionValidator validator, ObjectMapper mapper,
+                        StreamingSessionRepository sessionRepo) {
         this.repo = repo;
         this.tenants = tenants;
         this.budgets = budgets;
         this.validator = validator;
         this.mapper = mapper;
+        this.sessionRepo = sessionRepo;
     }
 
     public AgentDetail create(UUID tenantId, CreateAgentRequest req) {
@@ -152,6 +156,14 @@ public class AgentService {
                     a.completionWebhook(), a.completionWebhookToken(),
                     a.eventSourceUrl(), a.sessionDurationSeconds(), a.pollIntervalSeconds());
         } catch (Exception e) { throw new RuntimeException(e); }
+    }
+
+    public List<StreamingSessionDto> listSessions(UUID tenantId, String name) {
+        var a = repo.findByName(tenantId, name).orElseThrow(() -> new NotFound(name));
+        return sessionRepo.listByAgent(a.id(), 50).stream()
+                .map(s -> new StreamingSessionDto(s.id(), s.openedAt(), s.closesAt(),
+                        s.lastPollAt(), s.status()))
+                .toList();
     }
 
     public static class NotFound extends RuntimeException { public NotFound(String n) { super("agent not found: " + n); } }
