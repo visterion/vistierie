@@ -154,6 +154,40 @@ class BedrockProviderTest {
     }
 
     @Test
+    void visionMultiBuildsImageBlocksPerImage() {
+        when(client.converse(any(ConverseRequest.class))).thenReturn(
+            ConverseResponse.builder()
+                .output(ConverseOutput.builder()
+                    .message(Message.builder()
+                        .role(ConversationRole.ASSISTANT)
+                        .content(ContentBlock.fromText("three charts"))
+                        .build())
+                    .build())
+                .stopReason(StopReason.END_TURN)
+                .usage(TokenUsage.builder().inputTokens(9).outputTokens(3).build())
+                .build()
+        );
+
+        String base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+        var images = List.of(
+                new LlmProvider.ImageInput("image/png", base64),
+                new LlmProvider.ImageInput("image/png", base64),
+                new LlmProvider.ImageInput("image/png", base64));
+        var captor = ArgumentCaptor.forClass(ConverseRequest.class);
+
+        var res = provider.visionMulti("amazon.nova-pro-v1:0", 1024, images, "compare them");
+
+        org.mockito.Mockito.verify(client).converse(captor.capture());
+        Message userMsg = captor.getValue().messages().get(0);
+        assertThat(userMsg.content()).hasSize(4);
+        assertThat(userMsg.content().stream()
+                .filter(b -> b.type() == ContentBlock.Type.IMAGE).count()).isEqualTo(3);
+        assertThat(userMsg.content().get(3).type()).isEqualTo(ContentBlock.Type.TEXT);
+        assertThat(userMsg.content().get(3).text()).isEqualTo("compare them");
+        assertThat(res.text()).isEqualTo("three charts");
+    }
+
+    @Test
     void throttlingMaps429() {
         when(client.converse(any(ConverseRequest.class))).thenThrow(
             ThrottlingException.builder().message("slow down").build());
