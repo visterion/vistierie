@@ -76,6 +76,28 @@ public class BedrockProvider implements LlmProvider {
         return call(request, model);
     }
 
+    @Override public ProviderResponse visionMulti(String model, int maxTokens,
+                                                  java.util.List<ImageInput> images, String prompt) {
+        var blocks = new java.util.ArrayList<ContentBlock>();
+        for (ImageInput img : images) {
+            String format = img.mediaType().startsWith("image/")
+                    ? img.mediaType().substring("image/".length()) : img.mediaType();
+            blocks.add(ContentBlock.fromImage(ImageBlock.builder()
+                    .format(ImageFormat.fromValue(format))
+                    .source(ImageSource.builder()
+                            .bytes(SdkBytes.fromByteArray(java.util.Base64.getDecoder().decode(img.base64())))
+                            .build())
+                    .build()));
+        }
+        blocks.add(ContentBlock.fromText(prompt));
+        var request = ConverseRequest.builder()
+                .modelId(model)
+                .messages(Message.builder().role(ConversationRole.USER).content(blocks).build())
+                .inferenceConfig(InferenceConfiguration.builder().maxTokens(maxTokens).build())
+                .build();
+        return call(request, model);
+    }
+
     private ProviderResponse call(ConverseRequest request, String modelId) {
         try {
             return parseResponse(client.converse(request), modelId);
