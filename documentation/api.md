@@ -10,7 +10,7 @@ resolve to a concrete tenant-local agent so tenant and per-agent hard budgets
 can be enforced consistently.
 
 Two surfaces:
-- **Synchronous LLM gateway**: `POST /llm/complete`, `POST /llm/vision`.
+- **Synchronous LLM gateway**: `POST /llm/complete`, `POST /llm/vision`, `POST /llm/vision-multi`.
 - **Agent framework**: `POST /agents`, `POST /agents/{name}/run`, `GET /runs/...`.
   See [agents.md](agents.md) for the agent and tool model.
 
@@ -204,6 +204,72 @@ curl -s -X POST http://localhost:8090/llm/vision \
       \"data\": \"$IMAGE_B64\"
     },
     \"prompt\": \"Describe the contents of this image.\"
+  }" | jq .
+```
+
+---
+
+## `POST /llm/vision-multi`
+
+Run a vision completion over **multiple images plus a single prompt** in one model call,
+against the tenant's routed model. Mirrors `/llm/vision` but takes an `images` array instead
+of a single `image`. The gateway carries no domain logic — all N images and the prompt are
+forwarded to the provider as one user message (N native image blocks + one text block).
+
+### Request
+
+```json
+{
+  "agent_name": "vision-reader",
+  "purpose":    "vision_attachment",
+  "realm":      "personal",
+  "images": [
+    { "type": "base64", "media_type": "image/png",  "data": "<base64-encoded bytes>" },
+    { "type": "base64", "media_type": "image/jpeg", "data": "<base64-encoded bytes>" }
+  ],
+  "prompt":     "Compare these two pages.",
+  "max_tokens": 1024,
+  "model":      "claude-sonnet-4-6"
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `agent_name` | string | yes | Existing agent name in the calling tenant; required for budget enforcement and audit attribution |
+| `purpose` | string | yes | Routing key |
+| `realm` | string | no | Informational label |
+| `images` | array | yes | Non-empty list of image objects (each `@NotNull`) |
+| `images[].type` | string | no | Transport hint, e.g. `"base64"` |
+| `images[].media_type` | string | yes | MIME type, e.g. `image/png`, `image/jpeg`, `image/webp` |
+| `images[].data` | string | yes | Base64-encoded image bytes |
+| `prompt` | string | yes | User prompt describing what to extract or analyse |
+| `max_tokens` | integer | no | Cap on output tokens |
+| `model` | string | no | Override resolved model (honoured only when `allow-override: true`) |
+
+An empty `images` array or a missing `prompt` returns `400 Bad Request` (bean validation).
+
+### Response `200 OK`
+
+Identical shape to `/llm/complete` and `/llm/vision`: same `text`, `stop_reason`, `usage`,
+`provider`, `model`, `cost_micros`, `llm_call_id` fields.
+
+### curl example
+
+```bash
+IMG1=$(base64 -w0 /path/to/page1.png)
+IMG2=$(base64 -w0 /path/to/page2.png)
+
+curl -s -X POST http://localhost:8090/llm/vision-multi \
+  -H "Authorization: Bearer $TENANT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"agent_name\": \"vision-reader\",
+    \"purpose\": \"vision_attachment\",
+    \"images\": [
+      { \"type\": \"base64\", \"media_type\": \"image/png\", \"data\": \"$IMG1\" },
+      { \"type\": \"base64\", \"media_type\": \"image/png\", \"data\": \"$IMG2\" }
+    ],
+    \"prompt\": \"Compare these two pages.\"
   }" | jq .
 ```
 
