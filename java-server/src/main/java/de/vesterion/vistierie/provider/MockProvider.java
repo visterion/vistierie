@@ -17,6 +17,11 @@ public class MockProvider implements LlmProvider {
         return new ProviderResponse("[mock vision] " + prompt, "end_turn",
                 new Usage(120, 10, 0, 0), model);
     }
+    @Override public ProviderResponse visionMulti(String model, int maxTokens,
+                                                  java.util.List<ImageInput> images, String prompt) {
+        return new ProviderResponse("[mock vision-multi " + images.size() + "] " + prompt, "end_turn",
+                new de.vesterion.vistierie.pricing.Usage(120, 10, 0, 0), model);
+    }
     private static String summarize(ProviderRequest req) {
         return req.messages().isEmpty() ? "" :
                 String.valueOf(req.messages().get(req.messages().size() - 1).get("content"));
