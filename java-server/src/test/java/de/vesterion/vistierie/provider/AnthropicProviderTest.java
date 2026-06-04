@@ -81,6 +81,28 @@ class AnthropicProviderTest {
                 .withHeader("anthropic-version", equalTo("2023-06-01")));
     }
 
+    @Test void visionMultiAddsImageBlockPerImage() {
+        stubFor(post(urlEqualTo("/v1/messages")).willReturn(okJson("""
+                {"id":"m","type":"message","role":"assistant","model":"claude-haiku-4-5",
+                 "content":[{"type":"text","text":"two charts"}],"stop_reason":"end_turn",
+                 "usage":{"input_tokens":6,"output_tokens":2,
+                          "cache_creation_input_tokens":0,"cache_read_input_tokens":0}}
+                """)));
+
+        var images = List.of(
+                new LlmProvider.ImageInput("image/png", "AAAA"),
+                new LlmProvider.ImageInput("image/jpeg", "BBBB"));
+        var res = provider.visionMulti("claude-haiku-4-5", 256, images, "describe both");
+
+        assertThat(res.text()).isEqualTo("two charts");
+        verify(postRequestedFor(urlEqualTo("/v1/messages"))
+                .withRequestBody(containing("\"data\":\"AAAA\""))
+                .withRequestBody(containing("\"media_type\":\"image/jpeg\""))
+                .withRequestBody(containing("\"data\":\"BBBB\""))
+                .withRequestBody(containing("\"text\":\"describe both\""))
+                .withHeader("x-api-key", equalTo("test-key")));
+    }
+
     @Test void providerErrorMaps() {
         stubFor(post(urlEqualTo("/v1/messages")).willReturn(aResponse().withStatus(529)
                 .withBody("{\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\"}}")));
