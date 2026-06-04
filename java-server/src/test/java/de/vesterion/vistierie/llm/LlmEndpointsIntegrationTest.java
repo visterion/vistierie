@@ -293,6 +293,24 @@ class LlmEndpointsIntegrationTest extends PostgresTestBase {
                 .andExpect(status().isBadRequest());
     }
 
+    @Test void visionMultiRejectsBlankPrompt() throws Exception {
+        var token = "tok-vmb-" + UUID.randomUUID();
+        var tenantId = resetHivememTenant(token);
+        seedRouting(tenantId);
+        tenantBudgets.patch(tenantId, new BudgetPatchRequest(10_000L, 100_000L, 80, 90));
+
+        mvc.perform(post("/llm/vision-multi")
+                .header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {"agent_name":"visionary","purpose":"vision_attachment",
+                         "images":[
+                           {"type":"base64","media_type":"image/png","data":"AAAA"}],
+                         "prompt":"","max_tokens":256}
+                        """))
+                .andExpect(status().isBadRequest());
+    }
+
     @Test void completeRejectsMissingAgentName() throws Exception {
         var token = "tok-missing-" + UUID.randomUUID();
         var tenantId = resetHivememTenant(token);
