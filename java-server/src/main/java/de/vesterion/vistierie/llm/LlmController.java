@@ -6,6 +6,7 @@ import de.vesterion.vistierie.auth.AuthExceptions;
 import de.vesterion.vistierie.kill.KillSwitchService;
 import de.vesterion.vistierie.llm.dto.CompleteRequest;
 import de.vesterion.vistierie.llm.dto.LlmResponse;
+import de.vesterion.vistierie.llm.dto.MultiVisionRequest;
 import de.vesterion.vistierie.llm.dto.VisionRequest;
 import de.vesterion.vistierie.provider.LlmProvider;
 import jakarta.servlet.http.HttpServletResponse;
@@ -37,6 +38,13 @@ public class LlmController {
     @PostMapping("/vision")
     public LlmResponse vision(@Valid @RequestBody VisionRequest req, HttpServletResponse response) {
         var result = svc.vision(req);
+        headers.write(response, result.budget());
+        return result.response();
+    }
+
+    @PostMapping("/vision-multi")
+    public LlmResponse visionMulti(@Valid @RequestBody MultiVisionRequest req, HttpServletResponse response) {
+        var result = svc.visionMulti(req);
         headers.write(response, result.budget());
         return result.response();
     }

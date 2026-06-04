@@ -233,6 +233,66 @@ class LlmEndpointsIntegrationTest extends PostgresTestBase {
                 .withRequestBody(containing("\"type\":\"image\"")));
     }
 
+    @Test void visionMultiEndpointRoutesAndRecords() throws Exception {
+        var token = "tok-vm-" + UUID.randomUUID();
+        var existing = tenants.findByName("hivemem").orElse(null);
+        if (existing != null) {
+            jdbc.sql("DELETE FROM vistierie.routing_rules WHERE tenant_id = ?").param(existing.id()).update();
+            jdbc.sql("DELETE FROM vistierie.llm_calls WHERE tenant_id = ?").param(existing.id()).update();
+            jdbc.sql("DELETE FROM vistierie.tenants WHERE id = ?").param(existing.id()).update();
+        }
+        var vmId = UUID.randomUUID();
+        tenants.insert(vmId, "hivemem", enc.encode(token));
+        seedRouting(vmId);
+        var agentId = seedAgent(vmId, "visionary");
+        tenantBudgets.patch(vmId, new BudgetPatchRequest(10_000L, 100_000L, 80, 90));
+        agentBudgets.patch(agentId, new BudgetPatchRequest(5_000L, 50_000L, 80, 90));
+
+        stubFor(com.github.tomakehurst.wiremock.client.WireMock.post(urlEqualTo("/v1/messages")).willReturn(okJson("""
+                {"id":"m","type":"message","role":"assistant","model":"claude-haiku-4-5",
+                 "content":[{"type":"text","text":"two squares"}],"stop_reason":"end_turn",
+                 "usage":{"input_tokens":60,"output_tokens":4,
+                          "cache_creation_input_tokens":0,"cache_read_input_tokens":0}}
+                """)));
+
+        mvc.perform(post("/llm/vision-multi")
+                .header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {"agent_name":"visionary","purpose":"vision_attachment",
+                         "images":[
+                           {"type":"base64","media_type":"image/png","data":"AAAA"},
+                           {"type":"base64","media_type":"image/png","data":"BBBB"}],
+                         "prompt":"describe","max_tokens":256}
+                        """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.text").value("two squares"));
+
+        verify(postRequestedFor(urlEqualTo("/v1/messages"))
+                .withRequestBody(containing("\"data\":\"AAAA\""))
+                .withRequestBody(containing("\"data\":\"BBBB\"")));
+
+        var rows = jdbc.sql("SELECT endpoint, status FROM vistierie.llm_calls").query().listOfRows();
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0)).containsEntry("endpoint", "vision-multi").containsEntry("status", "ok");
+    }
+
+    @Test void visionMultiRejectsEmptyImages() throws Exception {
+        var token = "tok-vme-" + UUID.randomUUID();
+        var tenantId = resetHivememTenant(token);
+        seedRouting(tenantId);
+        tenantBudgets.patch(tenantId, new BudgetPatchRequest(10_000L, 100_000L, 80, 90));
+
+        mvc.perform(post("/llm/vision-multi")
+                .header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {"agent_name":"visionary","purpose":"vision_attachment",
+                         "images":[],"prompt":"describe","max_tokens":256}
+                        """))
+                .andExpect(status().isBadRequest());
+    }
+
     @Test void completeRejectsMissingAgentName() throws Exception {
         var token = "tok-missing-" + UUID.randomUUID();
         var tenantId = resetHivememTenant(token);

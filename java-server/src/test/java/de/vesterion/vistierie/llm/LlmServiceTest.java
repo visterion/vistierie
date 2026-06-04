@@ -7,6 +7,7 @@ import de.vesterion.vistierie.budget.BudgetEnforcer;
 import de.vesterion.vistierie.auth.RequestContext;
 import de.vesterion.vistierie.kill.KillSwitchService;
 import de.vesterion.vistierie.llm.dto.CompleteRequest;
+import de.vesterion.vistierie.llm.dto.MultiVisionRequest;
 import de.vesterion.vistierie.llm.dto.VisionRequest;
 import de.vesterion.vistierie.pricing.PriceTable;
 import de.vesterion.vistierie.pricing.Usage;
@@ -168,6 +169,63 @@ class LlmServiceTest {
         verify(recorder).insertWithBody(captor.capture(), any(), eq(null));
         assertThat(captor.getValue().status()).isEqualTo("rate_limited");
         assertThat(captor.getValue().errorCode()).isEqualTo("rate_limit_error");
+    }
+
+    private MultiVisionRequest multiVisionReq() {
+        return new MultiVisionRequest("writer", "test_purpose", "test_realm",
+                List.of(new MultiVisionRequest.Image("base64", "image/png", "AAAA"),
+                        new MultiVisionRequest.Image("base64", "image/png", "BBBB")),
+                "describe", null, null);
+    }
+
+    @Test void visionMultiOkPathPassesAllImages() {
+        when(routing.resolve(any(), any(), any(), any()))
+                .thenReturn(new RoutingDecision("anthropic", "claude-haiku-4-5", false));
+        when(providers.get("anthropic")).thenReturn(provider);
+        var imgCaptor = ArgumentCaptor.forClass(List.class);
+        when(provider.visionMulti(eq("claude-haiku-4-5"), eq(1024), imgCaptor.capture(), eq("describe")))
+                .thenReturn(new ProviderResponse("two cats", "end_turn",
+                        new Usage(8, 4, 0, 0), "claude-haiku-4-5"));
+
+        var res = svc.visionMulti(multiVisionReq());
+
+        assertThat(res.response().text()).isEqualTo("two cats");
+        assertThat(imgCaptor.getValue()).hasSize(2);
+        var captor = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
+        verify(recorder).insertWithBody(captor.capture(), any(), any());
+        assertThat(captor.getValue().endpoint()).isEqualTo("vision-multi");
+        assertThat(captor.getValue().status()).isEqualTo("ok");
+        assertThat(captor.getValue().agentId()).isEqualTo(agentId);
+    }
+
+    @Test void visionMultiBlockedByKillSwitch() {
+        org.mockito.Mockito.doThrow(new KillSwitchService.KilledException("x", Instant.now()))
+                .when(kill).check(eq(tenantId));
+
+        assertThatThrownBy(() -> svc.visionMulti(multiVisionReq()))
+                .isInstanceOf(KillSwitchService.KilledException.class);
+
+        var captor = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
+        verify(recorder).insert(captor.capture());
+        assertThat(captor.getValue().endpoint()).isEqualTo("vision-multi");
+        assertThat(captor.getValue().status()).isEqualTo("killed");
+        verify(provider, never()).visionMulti(any(), org.mockito.ArgumentMatchers.anyInt(),
+                any(), any());
+    }
+
+    @Test void visionMultiProvider5xx() {
+        when(routing.resolve(any(), any(), any(), any()))
+                .thenReturn(new RoutingDecision("anthropic", "claude-haiku-4-5", false));
+        when(providers.get("anthropic")).thenReturn(provider);
+        when(provider.visionMulti(any(), org.mockito.ArgumentMatchers.anyInt(), any(), any()))
+                .thenThrow(new LlmProvider.ProviderException(500, "internal", "boom"));
+
+        assertThatThrownBy(() -> svc.visionMulti(multiVisionReq()))
+                .isInstanceOf(LlmProvider.ProviderException.class);
+
+        var captor = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
+        verify(recorder).insertWithBody(captor.capture(), any(), eq(null));
+        assertThat(captor.getValue().status()).isEqualTo("error");
     }
 
     @Test void visionOkPath() {
