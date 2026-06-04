@@ -59,6 +59,21 @@ public class OpenAiCompatibleProvider implements LlmProvider {
         return call(body);
     }
 
+    @Override public ProviderResponse visionMulti(String model, int maxTokens,
+                                                  java.util.List<ImageInput> images, String prompt) {
+        var content = new ArrayList<Map<String, Object>>();
+        for (ImageInput img : images) {
+            content.add(Map.of("type", "image_url",
+                    "image_url", Map.of("url", "data:" + img.mediaType() + ";base64," + img.base64())));
+        }
+        content.add(Map.of("type", "text", "text", prompt));
+        var body = new LinkedHashMap<String, Object>();
+        body.put("model", model);
+        body.put("max_completion_tokens", maxTokens);
+        body.put("messages", List.of(Map.of("role", "user", "content", content)));
+        return call(body);
+    }
+
     private List<Map<String, Object>> buildMessages(String system,
                                                     List<Map<String, Object>> userMessages) {
         var out = new ArrayList<Map<String, Object>>();
