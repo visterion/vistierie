@@ -75,6 +75,20 @@ public class AnthropicProvider implements LlmProvider {
         return call(body);
     }
 
+    @Override public ProviderResponse visionMulti(String model, int maxTokens,
+                                                  java.util.List<ImageInput> images, String prompt) {
+        var content = new java.util.ArrayList<Object>();
+        for (ImageInput img : images) {
+            content.add(Map.of("type", "image",
+                    "source", Map.of("type", "base64", "media_type", img.mediaType(), "data", img.base64())));
+        }
+        content.add(Map.of("type", "text", "text", prompt));
+        var body = Map.<String, Object>of(
+                "model", model, "max_tokens", maxTokens,
+                "messages", List.of(Map.of("role", "user", "content", content)));
+        return call(body);
+    }
+
     @Override
     public BatchSubmission submitBatch(java.util.List<BatchItem> items) {
         var requests = items.stream().map(item -> {
