@@ -10,7 +10,7 @@ Each provider is identified by a string name (e.g. `"anthropic"`, `"openai"`, `"
 **Name:** `anthropic`
 
 Direct integration with the Anthropic Messages API. Supports text completion, vision,
-tool use, and batch processing.
+multi-image vision (`/llm/vision-multi`), tool use, and batch processing.
 
 **Configuration:**
 
@@ -29,7 +29,8 @@ tool use, and batch processing.
 **Names:** `openai`, `xai`, or any name defined under `vistierie.providers.*`
 
 Generic adapter for any API that speaks the OpenAI `/v1/chat/completions` wire format.
-Supports text completion, vision, and tool use. No batch support.
+Supports text completion, vision, multi-image vision (`/llm/vision-multi`), and tool use.
+No batch support.
 
 **Configuration** (one block per provider):
 
@@ -55,7 +56,13 @@ Providers with an empty `api-key` are silently skipped.
 
 Routes calls to Amazon Bedrock via the Converse API. Supports all models available
 in Bedrock: Anthropic Claude, Amazon Nova, Titan, Mistral, and others.
-Supports text completion, vision, and tool use. No batch support.
+Supports text completion, vision, multi-image vision (`/llm/vision-multi`), and tool use.
+No batch support.
+
+> **Multi-image limit:** Bedrock's Converse API caps a single request at roughly 20 images.
+> Vistierie does not enforce a hard cap — requests above the provider limit are rejected by
+> Bedrock and surface as a `ProviderException` (same handling as `/llm/vision`). Callers that
+> need more images batch them into multiple `/llm/vision-multi` requests.
 
 **Authentication:** Standard AWS credential chain — environment variables
 (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`), shared
