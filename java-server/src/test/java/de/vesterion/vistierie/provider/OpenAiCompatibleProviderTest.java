@@ -157,6 +157,26 @@ class OpenAiCompatibleProviderTest {
                 .withRequestBody(containing("\"text\":\"describe\"")));
     }
 
+    @Test void visionMultiSendsImageUrlBlockPerImage() {
+        stubFor(post(urlEqualTo("/chat/completions")).willReturn(okJson("""
+                {"id":"x","model":"gpt-4o","choices":[{"index":0,"finish_reason":"stop",
+                  "message":{"role":"assistant","content":"two charts"}}],
+                 "usage":{"prompt_tokens":4,"completion_tokens":2,"total_tokens":6}}
+                """)));
+
+        var images = List.of(
+                new LlmProvider.ImageInput("image/png", "AAAA"),
+                new LlmProvider.ImageInput("image/jpeg", "BBBB"));
+        var res = provider.visionMulti("gpt-4o", 256, images, "describe both");
+
+        assertThat(res.text()).isEqualTo("two charts");
+        verify(postRequestedFor(urlEqualTo("/chat/completions"))
+                .withRequestBody(containing("\"type\":\"image_url\""))
+                .withRequestBody(containing("\"url\":\"data:image/png;base64,AAAA\""))
+                .withRequestBody(containing("\"url\":\"data:image/jpeg;base64,BBBB\""))
+                .withRequestBody(containing("\"text\":\"describe both\"")));
+    }
+
     @Test void errorResponseMapsToProviderException() {
         stubFor(post(urlEqualTo("/chat/completions")).willReturn(aResponse()
                 .withStatus(429)
