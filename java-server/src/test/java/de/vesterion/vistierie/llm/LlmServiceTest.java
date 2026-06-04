@@ -191,6 +191,13 @@ class LlmServiceTest {
 
         assertThat(res.response().text()).isEqualTo("two cats");
         assertThat(imgCaptor.getValue()).hasSize(2);
+        @SuppressWarnings("unchecked")
+        java.util.List<de.vesterion.vistierie.provider.LlmProvider.ImageInput> captured =
+                (java.util.List<de.vesterion.vistierie.provider.LlmProvider.ImageInput>) imgCaptor.getValue();
+        assertThat(captured.get(0).base64()).isEqualTo("AAAA");
+        assertThat(captured.get(1).base64()).isEqualTo("BBBB");
+        assertThat(captured.get(0).mediaType()).isEqualTo("image/png");
+        assertThat(captured.get(1).mediaType()).isEqualTo("image/png");
         var captor = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
         verify(recorder).insertWithBody(captor.capture(), any(), any());
         assertThat(captor.getValue().endpoint()).isEqualTo("vision-multi");
@@ -226,6 +233,23 @@ class LlmServiceTest {
         var captor = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
         verify(recorder).insertWithBody(captor.capture(), any(), eq(null));
         assertThat(captor.getValue().status()).isEqualTo("error");
+    }
+
+    @Test void visionMultiProvider4xxRecordedAsRateLimited() {
+        when(routing.resolve(any(), any(), any(), any()))
+                .thenReturn(new RoutingDecision("anthropic", "claude-haiku-4-5", false));
+        when(providers.get("anthropic")).thenReturn(provider);
+        when(provider.visionMulti(any(), org.mockito.ArgumentMatchers.anyInt(), any(), any()))
+                .thenThrow(new LlmProvider.ProviderException(429, "rate_limit_error", "slow down"));
+
+        assertThatThrownBy(() -> svc.visionMulti(multiVisionReq()))
+                .isInstanceOf(LlmProvider.ProviderException.class);
+
+        var captor = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
+        verify(recorder).insertWithBody(captor.capture(), any(), eq(null));
+        assertThat(captor.getValue().status()).isEqualTo("rate_limited");
+        assertThat(captor.getValue().endpoint()).isEqualTo("vision-multi");
+        assertThat(captor.getValue().errorCode()).isEqualTo("rate_limit_error");
     }
 
     @Test void visionOkPath() {
