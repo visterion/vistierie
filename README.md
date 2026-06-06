@@ -219,11 +219,36 @@ Every run shares one execution path; only the trigger differs.
 - **Cron**: agents with a `schedule` field fire on the next boundary.
   A 30-second tick is kill-switch-aware and skips if the previous run
   is still open. Idempotency is the consumer's job.
+- **Streaming**: an agent with `session_duration_seconds` set becomes a
+  **Streaming Bee**. On its `schedule` boundary it opens a time-boxed
+  session, polls a consumer-hosted `event_source_url` every
+  `poll_interval_seconds`, and spawns one child run
+  (`trigger=session_event`) per returned event until the window closes.
+  Idle polling makes no LLM calls; inspect sessions with
+  `GET /agents/{name}/sessions`.
 
 For tasks that tolerate < 1 h latency, `POST /agents/{name}/batch`
 routes through Anthropic's Message Batches API at 50 % cost (up to
 10 000 items per batch). Batch mode requires the Anthropic provider;
 Bedrock and other providers are not supported for batch runs.
+
+---
+
+## Synchronous LLM gateway
+
+Not everything needs an agent. For a one-shot request/response call,
+hit the gateway directly, the same tier routing, per-call audit, EUR-micros
+cost accounting, and tenant kill switch all still apply:
+
+- `POST /llm/complete` — text completion against the tenant's routed model.
+- `POST /llm/vision` — single-image understanding (one `image` + a `prompt`).
+- `POST /llm/vision-multi` — N images plus one prompt forwarded as a single
+  model call (N native image blocks + one text block).
+
+Each response carries the same `text`, `stop_reason`, `usage`,
+`cost_micros`, and `llm_call_id` fields and writes a `vistierie.llm_calls`
+row, just like an agent run. Vision requests route through whichever
+provider the operator wired up for the call's `<tenant, realm, purpose>`.
 
 ---
 
