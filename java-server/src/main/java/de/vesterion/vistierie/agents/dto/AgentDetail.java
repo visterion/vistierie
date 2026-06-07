@@ -18,5 +18,6 @@ public record AgentDetail(
         String completion_webhook_token,
         String event_source_url,
         Integer session_duration_seconds,
-        Integer poll_interval_seconds
+        Integer poll_interval_seconds,
+        java.time.Instant next_run_at
 ) {}

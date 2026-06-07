@@ -12,8 +12,10 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
+import java.time.Instant;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -136,6 +138,42 @@ class AgentControllerTest extends PostgresTestBase {
                 .content("{\"schedule\":\"\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.schedule").doesNotExist());
+    }
+
+    @Test
+    void nextRunAtPresentForScheduledAgent() throws Exception {
+        var body = """
+                { "name":"sched-next","system_prompt":"p","model_purpose":"summarize_cell",
+                  "tools":[],"webhook_token":"wt","schedule":"0 0 4 * * 1-5" }
+                """;
+        mvc.perform(post("/agents").header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated());
+
+        var result = mvc.perform(get("/agents/sched-next").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.next_run_at").exists())
+                .andReturn();
+
+        var nextRunAtStr = com.jayway.jsonpath.JsonPath
+                .read(result.getResponse().getContentAsString(), "$.next_run_at").toString();
+        var nextRunAt = Instant.parse(nextRunAtStr);
+        assertThat(nextRunAt).isAfter(Instant.now().minusSeconds(1));
+    }
+
+    @Test
+    void nextRunAtNullForUnscheduledAgent() throws Exception {
+        var body = """
+                { "name":"unsched-next","system_prompt":"p","model_purpose":"summarize_cell",
+                  "tools":[],"webhook_token":"wt" }
+                """;
+        mvc.perform(post("/agents").header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated());
+
+        mvc.perform(get("/agents/unsched-next").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.next_run_at").doesNotExist());
     }
 
     @Test void deleteBlockedWhenReferenced() throws Exception {

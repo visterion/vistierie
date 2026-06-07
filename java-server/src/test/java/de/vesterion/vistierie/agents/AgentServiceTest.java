@@ -37,7 +37,7 @@ class AgentServiceTest {
     private final StreamingSessionRepository sessionRepo = mock(StreamingSessionRepository.class);
     private final ObjectMapper mapper = new ObjectMapper();
     private final AgentDefinitionValidator validator = new AgentDefinitionValidator(new JsonSchemas());
-    private final AgentService svc = new AgentService(repo, tenants, budgets, validator, mapper, sessionRepo);
+    private final AgentService svc = new AgentService(repo, tenants, budgets, validator, mapper, sessionRepo, java.time.Clock.systemUTC());
 
     private final UUID tenantId = UUID.randomUUID();
     private final String tenantName = "tn-" + tenantId;
