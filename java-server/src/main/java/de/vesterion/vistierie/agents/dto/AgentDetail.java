@@ -19,5 +19,5 @@ public record AgentDetail(
         String event_source_url,
         Integer session_duration_seconds,
         Integer poll_interval_seconds,
-        java.time.Instant next_run_at
+        Instant next_run_at
 ) {}
