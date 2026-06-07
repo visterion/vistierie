@@ -2,12 +2,14 @@ package de.vesterion.vistierie.agents;
 
 import de.vesterion.vistierie.agents.dto.*;
 import de.vesterion.vistierie.budget.BudgetEnforcer;
+import de.vesterion.vistierie.scheduler.CronSchedules;
 import de.vesterion.vistierie.streaming.StreamingSessionRepository;
 import de.vesterion.vistierie.tenants.TenantRepository;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import java.time.Clock;
 import java.util.List;
 import java.util.UUID;
 
@@ -20,16 +22,18 @@ public class AgentService {
     private final AgentDefinitionValidator validator;
     private final ObjectMapper mapper;
     private final StreamingSessionRepository sessionRepo;
+    private final Clock clock;
 
     public AgentService(AgentRepository repo, TenantRepository tenants, BudgetEnforcer budgets,
                         AgentDefinitionValidator validator, ObjectMapper mapper,
-                        StreamingSessionRepository sessionRepo) {
+                        StreamingSessionRepository sessionRepo, Clock clock) {
         this.repo = repo;
         this.tenants = tenants;
         this.budgets = budgets;
         this.validator = validator;
         this.mapper = mapper;
         this.sessionRepo = sessionRepo;
+        this.clock = clock;
     }
 
     public AgentDetail create(UUID tenantId, CreateAgentRequest req) {
@@ -154,7 +158,8 @@ public class AgentService {
                     a.createdAt(), a.updatedAt(),
                     a.schedule(), a.lastTickAt(),
                     a.completionWebhook(), a.completionWebhookToken(),
-                    a.eventSourceUrl(), a.sessionDurationSeconds(), a.pollIntervalSeconds());
+                    a.eventSourceUrl(), a.sessionDurationSeconds(), a.pollIntervalSeconds(),
+                    CronSchedules.nextRunAt(a.schedule(), clock.instant()));
         } catch (Exception e) { throw new RuntimeException(e); }
     }
 
