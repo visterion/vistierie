@@ -13,6 +13,8 @@ import de.vesterion.vistierie.routing.RoutingResolver;
 import de.vesterion.vistierie.runs.Run;
 import de.vesterion.vistierie.runs.RunStore;
 import de.vesterion.vistierie.tenants.TenantRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -28,6 +30,8 @@ import java.util.concurrent.ExecutorService;
 
 @Component
 public class AgentRunner {
+
+    private static final Logger log = LoggerFactory.getLogger(AgentRunner.class);
 
     private final AgentRepository agents;
     private final RunStore runs;
@@ -95,6 +99,16 @@ public class AgentRunner {
     }
 
     public void execute(String runId) {
+        try {
+            executeInternal(runId);
+        } catch (Exception e) {
+            log.warn("run {} aborted with uncaught exception: {}", runId, e.toString());
+            String detail = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            runs.markTerminal(runId, "failed", null, "internal_error: " + detail, null);
+        }
+    }
+
+    private void executeInternal(String runId) {
         runs.markRunning(runId);
         Run run = runs.get(runId);
         var snap = run.agentSnapshot();
