@@ -175,6 +175,15 @@ public class AgentRunner {
 
             // tool_use turn
             List<ToolUseParser.Block> blocks = parser.parse(pRes.contentBlocks());
+            if (blocks.isEmpty()) {
+                // Reached only when stop_reason != end_turn (end_turn returns above) yet the turn
+                // produced no tool_use block — e.g. max_tokens truncated mid-text. Appending an
+                // empty tool_results message would make the next provider call fail with
+                // "content field empty". Fail cleanly instead.
+                runs.markTerminal(runId, "failed", null,
+                        "no_tool_use: stop_reason=" + pRes.stopReason(), null);
+                return;
+            }
             runs.recordEvent(runId, "info", "tool_dispatched",
                     mapper.valueToTree(Map.of("count", blocks.size())));
 

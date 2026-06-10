@@ -75,4 +75,32 @@ class AgentRunnerLifecycleTest extends PostgresTestBase {
         assertThat(r.status()).isEqualTo("failed");
         assertThat(r.error()).contains("internal_error").contains("bedrock boom");
     }
+
+    @Test void maxTokensWithNoToolUseFailsCleanly() throws Exception {
+        var ids = newAgent();
+        stub.script(StubLlmScripts.Turn.maxTokensText("Die Daten sind eingetroffen! Ich analysiere nun"));
+
+        var runId = runner.startRunSync(ids.tenantId(), ids.agentId(), "manual",
+                mapper.readTree("{\"q\":\"hi\"}"), null, null, null);
+
+        Run r = runStore.get(runId);
+        assertThat(r.status()).isEqualTo("failed");
+        assertThat(r.error()).contains("no_tool_use").contains("max_tokens");
+    }
+
+    @Test void turnWithToolUseIsNotTreatedAsNoToolUse() throws Exception {
+        var ids = newAgent();
+        // A tool_use turn calling a tool the agent does not declare → tool_error,
+        // proving a turn WITH a tool_use block does not hit the no_tool_use guard.
+        stub.script(StubLlmScripts.Turn.toolUses(
+                StubLlmScripts.Turn.toolUse("not_declared", Map.of())));
+
+        var runId = runner.startRunSync(ids.tenantId(), ids.agentId(), "manual",
+                mapper.readTree("{\"q\":\"hi\"}"), null, null, null);
+
+        Run r = runStore.get(runId);
+        assertThat(r.status()).isEqualTo("failed");
+        assertThat(r.error()).startsWith("tool_error");
+        assertThat(r.error()).doesNotContain("no_tool_use");
+    }
 }
