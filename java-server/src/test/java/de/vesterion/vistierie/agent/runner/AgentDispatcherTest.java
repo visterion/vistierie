@@ -12,8 +12,6 @@ import java.time.Instant;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
@@ -23,9 +21,9 @@ class AgentDispatcherTest {
 
     private final AgentRepository agents = mock(AgentRepository.class);
     private final RunStore runs = mock(RunStore.class);
-    private final AgentRunner runner = mock(AgentRunner.class);
+    private final AsyncRunExecutor asyncExecutor = mock(AsyncRunExecutor.class);
     private final ObjectMapper mapper = new ObjectMapper();
-    private final AgentDispatcher dispatcher = new AgentDispatcher(agents, runs, runner, mapper);
+    private final AgentDispatcher dispatcher = new AgentDispatcher(agents, runs, asyncExecutor, mapper);
 
     private Agent agent(UUID id, UUID tenantId, String name) {
         return new Agent(id, tenantId, name, "sys", "purpose",
@@ -55,7 +53,7 @@ class AgentDispatcherTest {
                 snapCaptor.capture(), eq(3),
                 eq(null), eq("manual"),
                 eq(payload), eq("https://done"), eq("wt"), isNull());
-        verify(runner).execute(runId);
+        verify(asyncExecutor).execute(runId);
 
         var snap = snapCaptor.getValue();
         assertThat(snap.get("name").asString()).isEqualTo("summ");
@@ -65,10 +63,5 @@ class AgentDispatcherTest {
         assertThat(snap.get("max_run_seconds").asInt()).isEqualTo(1800);
         assertThat(snap.get("webhook_token").asString()).isEqualTo("tok");
         assertThat(snap.has("tools")).isTrue();
-    }
-
-    @Test void executeAsyncDelegatesToRunner() {
-        dispatcher.executeAsync("RUN42");
-        verify(runner).execute("RUN42");
     }
 }

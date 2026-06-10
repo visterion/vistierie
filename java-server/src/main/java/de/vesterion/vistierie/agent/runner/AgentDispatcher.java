@@ -3,7 +3,6 @@ package de.vesterion.vistierie.agent.runner;
 import de.vesterion.vistierie.agents.Agent;
 import de.vesterion.vistierie.agents.AgentRepository;
 import de.vesterion.vistierie.runs.RunStore;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -15,14 +14,14 @@ public class AgentDispatcher {
 
     private final AgentRepository agents;
     private final RunStore runs;
-    private final AgentRunner runner;
+    private final AsyncRunExecutor asyncExecutor;
     private final ObjectMapper mapper;
 
     public AgentDispatcher(AgentRepository agents, RunStore runs,
-                           AgentRunner runner, ObjectMapper mapper) {
+                           AsyncRunExecutor asyncExecutor, ObjectMapper mapper) {
         this.agents = agents;
         this.runs = runs;
-        this.runner = runner;
+        this.asyncExecutor = asyncExecutor;
         this.mapper = mapper;
     }
 
@@ -58,12 +57,7 @@ public class AgentDispatcher {
         runs.create(runId, tenantId, agent.id(), snap, agent.version(),
                 null, trigger, payload, completionWebhook, completionWebhookToken,
                 sessionId);
-        executeAsync(runId);
+        asyncExecutor.execute(runId);
         return runId;
-    }
-
-    @Async("agentExecutor")
-    public void executeAsync(String runId) {
-        runner.execute(runId);
     }
 }
