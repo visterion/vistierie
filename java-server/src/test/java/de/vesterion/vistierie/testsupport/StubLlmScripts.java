@@ -12,6 +12,8 @@ public final class StubLlmScripts {
     public static class Turn {
         public static ScriptedTurn text(String t) { return new ScriptedTurn("end_turn", t, List.of()); }
         public static ScriptedTurn endTurn(String t) { return new ScriptedTurn("end_turn", t, List.of()); }
+        /** A turn truncated by the token limit: stop_reason=max_tokens, only a text block, no tool_use. */
+        public static ScriptedTurn maxTokensText(String t) { return new ScriptedTurn("max_tokens", t, List.of()); }
         public static ScriptedTurn toolUses(ScriptedToolUse... tus) {
             return new ScriptedTurn("tool_use", null, List.of(tus));
         }

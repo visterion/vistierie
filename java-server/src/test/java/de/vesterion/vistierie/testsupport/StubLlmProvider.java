@@ -17,6 +17,11 @@ public class StubLlmProvider implements LlmProvider {
     private final ConcurrentLinkedQueue<StubLlmScripts.ScriptedTurn> defaultScript = new ConcurrentLinkedQueue<>();
     private final Map<String, ConcurrentLinkedQueue<StubLlmScripts.ScriptedTurn>> agentScripts = new ConcurrentHashMap<>();
     private final ObjectMapper mapper = new ObjectMapper();
+    private final java.util.concurrent.atomic.AtomicReference<RuntimeException> failNext =
+            new java.util.concurrent.atomic.AtomicReference<>();
+
+    /** Test helper — the next complete() call throws this exception, then clears. */
+    public void failNextComplete(RuntimeException e) { this.failNext.set(e); }
 
     private final java.util.concurrent.atomic.AtomicInteger batchCounter =
             new java.util.concurrent.atomic.AtomicInteger(0);
@@ -54,6 +59,7 @@ public class StubLlmProvider implements LlmProvider {
     }
 
     public void resetAll() {
+        failNext.set(null);
         defaultScript.clear();
         agentScripts.clear();
         submittedBatches.clear();
@@ -64,6 +70,8 @@ public class StubLlmProvider implements LlmProvider {
     @Override public String name() { return "anthropic"; }
 
     @Override public ProviderResponse complete(ProviderRequest req) {
+        RuntimeException pending = failNext.getAndSet(null);
+        if (pending != null) throw pending;
         var hint = req.metadata() != null ? (String) req.metadata().get("agent_name") : null;
         var queue = (hint != null && agentScripts.containsKey(hint)) ? agentScripts.get(hint) : defaultScript;
         var turn = queue.poll();
@@ -72,11 +80,13 @@ public class StubLlmProvider implements LlmProvider {
             return new ProviderResponse("", "end_turn", new Usage(1, 1, 0, 0), req.model(),
                     mapper.createArrayNode());
         }
-        if ("end_turn".equals(turn.stopReason())) {
+        if (turn.toolUses().isEmpty()) {
+            // Text-only turn (end_turn, or a truncated max_tokens turn). Emit one text block
+            // and report the SCRIPTED stop reason verbatim.
+            String text = turn.text() == null ? "" : turn.text();
             ArrayNode content = mapper.createArrayNode();
-            content.add(mapper.createObjectNode().put("type", "text").put("text", turn.text() == null ? "" : turn.text()));
-            return new ProviderResponse(turn.text() == null ? "" : turn.text(),
-                    "end_turn", new Usage(10, 5, 0, 0), req.model(), content);
+            content.add(mapper.createObjectNode().put("type", "text").put("text", text));
+            return new ProviderResponse(text, turn.stopReason(), new Usage(10, 5, 0, 0), req.model(), content);
         }
         // tool_use turn
         ArrayNode content = mapper.createArrayNode();
@@ -88,7 +98,7 @@ public class StubLlmProvider implements LlmProvider {
             node.set("input", mapper.valueToTree(tu.input()));
             content.add(node);
         }
-        return new ProviderResponse("", "tool_use", new Usage(15, 8, 0, 0), req.model(), content);
+        return new ProviderResponse("", turn.stopReason(), new Usage(15, 8, 0, 0), req.model(), content);
     }
 
     @Override public ProviderResponse vision(String model, int maxTokens, String mediaType, String base64, String prompt) {
