@@ -266,6 +266,12 @@ docker run --rm -p 8090:8090 \
   ghcr.io/visterion/vistierie:main
 ```
 
+Generate `VISTIERIE_ADMIN_TOKEN_HASH` first — see
+[generating the admin token hash](documentation/operations.md#generating-the-admin-token-hash).
+On Linux, `host.docker.internal` is not resolved by default; add
+`--add-host=host.docker.internal:host-gateway` to the `docker run` line (or
+point `VISTIERIE_DB_URL` at the Postgres host directly).
+
 To use **AWS Bedrock** instead of (or alongside) direct provider APIs:
 
 ```bash
