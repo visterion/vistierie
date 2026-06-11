@@ -88,3 +88,38 @@ vistierie:
 - `amazon.nova-pro-v1:0`
 - `amazon.titan-text-premier-v1:0`
 - `mistral.mistral-large-2402-v1:0`
+
+---
+
+## Mock mode
+
+Setting `vistierie.mock-llm=true` (env `VISTIERIE_MOCK_LLM`) disables the real
+Anthropic provider and registers a stub **under the name `anthropic`**. The stub
+returns canned `[mock] …` / `[mock vision] …` responses with fixed token usage
+and never reaches a real API — used for integration testing without cost or
+network. Routing rules that resolve to `anthropic` are served by the stub; the
+`bedrock`, `openai`, and `xai` providers are unaffected (they remain real if
+configured). See [configuration.md](configuration.md#feature-flags).
+
+---
+
+## Adding a provider
+
+**OpenAI-compatible endpoint — no code.** Any API speaking the OpenAI
+`/v1/chat/completions` wire format is added purely by config: declare a new block
+under `vistierie.providers.<name>` (see above) and point a routing rule at
+`<name>`. This covers most self-hosted and third-party gateways.
+
+**A genuinely new provider type — implement the interface.** Add a Spring
+`@Component` that implements `de.vesterion.vistierie.provider.LlmProvider`:
+
+- `name()` — the routing string the provider is selected by.
+- `complete(ProviderRequest)` and `vision(...)` — required.
+- `visionMulti(...)`, `submitBatch(...)`, `getBatch(...)`, `streamResults(...)` —
+  optional; the interface defaults throw `UnsupportedOperationException`, so a
+  provider that doesn't support them still compiles.
+
+`ProviderRegistry` auto-collects every `LlmProvider` bean by `name()` at startup,
+so no manual registration is needed — just point a routing rule at the new name.
+Throw `LlmProvider.ProviderException(statusCode, errorCode, msg)` for upstream
+errors so they surface consistently in the audit trail.
