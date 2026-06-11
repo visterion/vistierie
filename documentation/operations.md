@@ -1,5 +1,41 @@
 # Operations
 
+## Generating the admin token hash
+
+Vistierie authenticates admin calls against a single bearer token, but it stores
+only the **bcrypt hash** of that token in `VISTIERIE_ADMIN_TOKEN_HASH` — the
+plaintext never lives in config. Generate the hash once before the first deploy
+(Docker Compose fails fast if the variable is unset).
+
+First pick a strong token and keep the plaintext in your secret manager — it is
+what consumers send as `Authorization: Bearer <token>`:
+
+```bash
+ADMIN_TOKEN=$(openssl rand -hex 32)
+echo "$ADMIN_TOKEN"   # store this; you cannot recover it from the hash
+```
+
+Then hash it. Vistierie uses Spring Security's `BCryptPasswordEncoder`, which
+accepts the `$2a$` / `$2b$` / `$2y$` variants, so any standard bcrypt tool works.
+
+With `htpasswd` (from `apache2-utils` / `httpd-tools`):
+
+```bash
+htpasswd -bnBC 12 "" "$ADMIN_TOKEN" | tr -d ':\n'
+# → $2y$12$....   use this value as VISTIERIE_ADMIN_TOKEN_HASH
+```
+
+No local tooling? Run `htpasswd` from a throwaway container instead:
+
+```bash
+docker run --rm httpd:2.4-alpine htpasswd -bnBC 12 "" "$ADMIN_TOKEN" | tr -d ':\n'
+```
+
+Set the result as `VISTIERIE_ADMIN_TOKEN_HASH`. Rotating the admin token means
+regenerating the hash and restarting the service.
+
+---
+
 ## Deployment with Docker Compose
 
 The repository ships a `docker-compose.yml` that runs Postgres and the Vistierie
