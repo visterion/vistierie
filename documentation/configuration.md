@@ -63,6 +63,32 @@ Credentials use the standard AWS credential chain. No API key property.
 
 ---
 
+## Agents & Scheduler
+
+These tune the agent runtime, the cron scheduler, batch polling, and completion
+webhooks. All are optional — the defaults are production-sane. Set via
+`application.yaml` or the matching relaxed-binding env var (e.g.
+`VISTIERIE_AGENTS_SCHEDULER_TICK_MILLIS`).
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `vistierie.agents.scheduler.tick-millis` | `30000` | How often the scheduler polls for due cron agents, in ms |
+| `vistierie.agents.subagent.max-depth` | `5` | Maximum recursion depth for subagent dispatch (context-shielding guard) |
+| `vistierie.agents.tool-default-timeout-seconds` | `30` | Default per-tool HTTP timeout when a tool definition omits its own |
+| `vistierie.agents.completion-webhook.retry-base-millis` | `5000` | Base backoff between completion-webhook delivery retries, in ms |
+| `vistierie.agents.batch.max-items` | `10000` | Maximum items accepted in a single batch submission |
+| `vistierie.agents.batch.poll-millis` | `60000` | How often an in-flight batch's status is polled, in ms |
+
+---
+
+## Pricing
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `vistierie.pricing.cost-multiplier` | `1.0` | Global multiplier applied to every computed `cost_micros` (e.g. an FX buffer or markup over raw provider pricing) |
+
+---
+
 ## Budgeting
 
 Hard budgets do not use static application properties. They are runtime data
