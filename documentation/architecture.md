@@ -148,7 +148,7 @@ Schema overview (all tables under `vistierie`):
 
 - `tenants`          : registered tenants, bcrypt token hash, kill-switch state
 - `llm_calls`        : per-call audit (tokens, cost, provider, model, agent link, run link)
-- `agents`           : tenant-scoped agent definitions
+- `agents`           : tenant-scoped agent definitions (incl. per-agent `max_tokens` output cap, nullable → runtime default)
 - `runs`             : agent run lifecycle
 - `run_events`       : append-only event timeline per run
 - `routing_rules`    : operator-managed routing policy (per tenant, realm, purpose)

@@ -49,6 +49,7 @@ public class AgentService {
                 toolsJson, req.output_schema(),
                 req.max_turns() == null ? 25 : req.max_turns(),
                 req.max_run_seconds() == null ? 1800 : req.max_run_seconds(),
+                req.max_tokens(),
                 req.webhook_token(), false, req.schedule(),
                 req.completion_webhook(), req.completion_webhook_token(),
                 req.event_source_url(), req.session_duration_seconds(),
@@ -69,6 +70,7 @@ public class AgentService {
                 toolsJson, req.output_schema(),
                 req.max_turns() == null ? 25 : req.max_turns(),
                 req.max_run_seconds() == null ? 1800 : req.max_run_seconds(),
+                req.max_tokens(),
                 req.webhook_token(), a.paused(), req.schedule(),
                 req.completion_webhook(), req.completion_webhook_token(),
                 req.event_source_url(), req.session_duration_seconds(),
@@ -84,6 +86,7 @@ public class AgentService {
         var newOutSchema = req.output_schema() != null ? req.output_schema() : a.outputSchema();
         int newMaxTurns = req.max_turns() != null ? req.max_turns() : a.maxTurns();
         int newMaxSeconds = req.max_run_seconds() != null ? req.max_run_seconds() : a.maxRunSeconds();
+        Integer newMaxTokens = req.max_tokens() != null ? req.max_tokens() : a.maxTokens();
         var newToken = req.webhook_token() != null ? req.webhook_token() : a.webhookToken();
         boolean newPaused = req.paused() != null ? req.paused() : a.paused();
         String newSchedule;
@@ -124,7 +127,7 @@ public class AgentService {
                 ? (req.completion_webhook_token().isBlank() ? null : req.completion_webhook_token())
                 : a.completionWebhookToken();
         repo.replace(a.id(), newSysPrompt, newPurpose, newTools, newOutSchema,
-                newMaxTurns, newMaxSeconds, newToken, newPaused, newSchedule,
+                newMaxTurns, newMaxSeconds, newMaxTokens, newToken, newPaused, newSchedule,
                 newCompletionWebhook, newCompletionWebhookToken,
                 newEventSourceUrl, newSessionDuration, newPollInterval);
         return toDetail(repo.findById(a.id()).orElseThrow());
@@ -154,7 +157,7 @@ public class AgentService {
                     .constructCollectionType(List.class, ToolDef.class));
             return new AgentDetail(a.id().toString(), a.name(),
                     a.systemPrompt(), a.modelPurpose(), tools, a.outputSchema(),
-                    a.maxTurns(), a.maxRunSeconds(), a.paused(), a.version(),
+                    a.maxTurns(), a.maxRunSeconds(), a.maxTokens(), a.paused(), a.version(),
                     a.createdAt(), a.updatedAt(),
                     a.schedule(), a.lastTickAt(),
                     a.completionWebhook(), a.completionWebhookToken(),

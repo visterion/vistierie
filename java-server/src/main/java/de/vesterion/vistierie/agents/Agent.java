@@ -15,6 +15,7 @@ public record Agent(
         JsonNode outputSchema,
         int maxTurns,
         int maxRunSeconds,
+        Integer maxTokens,
         String webhookToken,
         boolean paused,
         int version,
@@ -27,4 +28,15 @@ public record Agent(
         String eventSourceUrl,
         Integer sessionDurationSeconds,
         Integer pollIntervalSeconds
-) {}
+) {
+    /** Convenience constructor leaving {@code maxTokens} unset (runtime default applies). */
+    public Agent(UUID id, UUID tenantId, String name, String systemPrompt, String modelPurpose,
+                 JsonNode tools, JsonNode outputSchema, int maxTurns, int maxRunSeconds,
+                 String webhookToken, boolean paused, int version, Instant createdAt, Instant updatedAt,
+                 String schedule, Instant lastTickAt, String completionWebhook, String completionWebhookToken,
+                 String eventSourceUrl, Integer sessionDurationSeconds, Integer pollIntervalSeconds) {
+        this(id, tenantId, name, systemPrompt, modelPurpose, tools, outputSchema, maxTurns, maxRunSeconds,
+                null, webhookToken, paused, version, createdAt, updatedAt, schedule, lastTickAt,
+                completionWebhook, completionWebhookToken, eventSourceUrl, sessionDurationSeconds, pollIntervalSeconds);
+    }
+}

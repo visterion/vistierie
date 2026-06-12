@@ -151,6 +151,24 @@ For parent–child trees (Queen + Bees), call the same endpoint on each
 
 ---
 
+## Run limits
+
+Each agent definition carries three limits that bound a single run:
+
+| Field | Default | Bounds |
+|---|---|---|
+| `max_turns` | 25 | Number of provider round-trips (tool-call loops) before the run stops. |
+| `max_run_seconds` | 1800 | Wall-clock budget for the whole run. |
+| `max_tokens` | 8192 | Per-turn output-token cap sent to the provider. |
+
+`max_tokens` is captured into the run's `agent_snapshot`; when unset on the
+agent it falls back to the runtime default (`AgentRunner.DEFAULT_MAX_TOKENS`).
+If a turn is truncated at this cap before the model emits its tool call, the
+run fails terminally with `no_tool_use: stop_reason=max_tokens` — raise
+`max_tokens` for agents whose reasoning or structured output runs long.
+
+---
+
 ## Scheduling (cron)
 
 Agents may declare a `schedule` field in their definition. When set,

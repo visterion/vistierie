@@ -23,6 +23,12 @@ public class StubLlmProvider implements LlmProvider {
     /** Test helper — the next complete() call throws this exception, then clears. */
     public void failNextComplete(RuntimeException e) { this.failNext.set(e); }
 
+    private final java.util.concurrent.atomic.AtomicReference<ProviderRequest> lastRequest =
+            new java.util.concurrent.atomic.AtomicReference<>();
+
+    /** Test helper — the {@link ProviderRequest} from the most recent complete() call. */
+    public ProviderRequest lastRequest() { return lastRequest.get(); }
+
     private final java.util.concurrent.atomic.AtomicInteger batchCounter =
             new java.util.concurrent.atomic.AtomicInteger(0);
     private final java.util.Map<String, java.util.List<de.vesterion.vistierie.provider.BatchItem>> submittedBatches =
@@ -60,6 +66,7 @@ public class StubLlmProvider implements LlmProvider {
 
     public void resetAll() {
         failNext.set(null);
+        lastRequest.set(null);
         defaultScript.clear();
         agentScripts.clear();
         submittedBatches.clear();
@@ -70,6 +77,7 @@ public class StubLlmProvider implements LlmProvider {
     @Override public String name() { return "anthropic"; }
 
     @Override public ProviderResponse complete(ProviderRequest req) {
+        lastRequest.set(req);
         RuntimeException pending = failNext.getAndSet(null);
         if (pending != null) throw pending;
         var hint = req.metadata() != null ? (String) req.metadata().get("agent_name") : null;

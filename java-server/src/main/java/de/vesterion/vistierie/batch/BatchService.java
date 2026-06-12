@@ -93,6 +93,7 @@ public class BatchService {
         snap.set("output_schema", agent.outputSchema());
         snap.put("max_turns", agent.maxTurns());
         snap.put("max_run_seconds", agent.maxRunSeconds());
+        if (agent.maxTokens() != null) snap.put("max_tokens", agent.maxTokens().intValue());
         snap.put("webhook_token", agent.webhookToken());
 
         // 1) Parent run

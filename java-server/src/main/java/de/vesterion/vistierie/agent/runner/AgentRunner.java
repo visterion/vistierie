@@ -33,6 +33,9 @@ public class AgentRunner {
 
     private static final Logger log = LoggerFactory.getLogger(AgentRunner.class);
 
+    /** Per-turn output-token cap applied when an agent does not set its own {@code max_tokens}. */
+    static final int DEFAULT_MAX_TOKENS = 8192;
+
     private final AgentRepository agents;
     private final RunStore runs;
     private final RoutingResolver routing;
@@ -90,6 +93,7 @@ public class AgentRunner {
         snap.set("output_schema", agent.outputSchema());
         snap.put("max_turns", agent.maxTurns());
         snap.put("max_run_seconds", agent.maxRunSeconds());
+        if (agent.maxTokens() != null) snap.put("max_tokens", agent.maxTokens().intValue());
         snap.put("webhook_token", agent.webhookToken());
         JsonNode snapshot = snap;
         runs.create(runId, tenantId, agentId, snapshot, agent.version(),
@@ -113,6 +117,7 @@ public class AgentRunner {
         Run run = runs.get(runId);
         var snap = run.agentSnapshot();
         int maxTurns = snap.path("max_turns").asInt(25);
+        int maxTokens = snap.path("max_tokens").asInt(DEFAULT_MAX_TOKENS);
         var tenantName = tenants.findById(run.tenantId()).orElseThrow().name();
         var systemPrompt = snap.path("system_prompt").asText();
         var modelPurpose = snap.path("model_purpose").asText();
@@ -145,7 +150,7 @@ public class AgentRunner {
             List<Map<String, Object>> toolsList = toToolsList(snap.path("tools"));
 
             var providerReq = new ProviderRequest(decision.model(),
-                    1024, null, systemPrompt, toMessagesList(messages),
+                    maxTokens, null, systemPrompt, toMessagesList(messages),
                     toolsList, null, Map.of("agent_name", snap.path("name").asText()));
 
             var pRes = provider.complete(providerReq);

@@ -10,6 +10,7 @@ public record AgentDetail(
         String system_prompt, String model_purpose,
         List<ToolDef> tools, JsonNode output_schema,
         int max_turns, int max_run_seconds,
+        Integer max_tokens,
         boolean paused, int version,
         Instant created_at, Instant updated_at,
         String schedule,
