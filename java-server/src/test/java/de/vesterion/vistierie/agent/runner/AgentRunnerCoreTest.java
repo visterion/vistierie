@@ -70,4 +70,36 @@ class AgentRunnerCoreTest extends PostgresTestBase {
         assertThat(r.status()).isEqualTo("done");
         assertThat(r.output().path("x").asText()).isEqualTo("yes");
     }
+
+    @Test void appliesDefaultMaxTokensWhenAgentUnset() throws Exception {
+        var tenantId = UUID.randomUUID();
+        tenants.insert(tenantId, "tn-" + tenantId, "h");
+        registerRouting(tenantId);
+        var agentId = UUID.randomUUID();
+        agents.insert(agentId, tenantId, "a", "you are a", "summarize_cell",
+                JsonNodeFactory.instance.arrayNode(), null, 5, 60, "wt", false, null, null, null, null, null, null);
+        tenantBudgets.patch(tenantId, new BudgetPatchRequest(10_000L, 100_000L, 80, 90));
+        agentBudgets.patch(agentId, new BudgetPatchRequest(5_000L, 50_000L, 80, 90));
+        stub.script(StubLlmScripts.Turn.endTurn("done"));
+
+        runner.startRunSync(tenantId, agentId, "manual", mapper.readTree("{}"), null, null, null);
+
+        assertThat(stub.lastRequest().maxTokens()).isEqualTo(AgentRunner.DEFAULT_MAX_TOKENS);
+    }
+
+    @Test void appliesPerAgentMaxTokens() throws Exception {
+        var tenantId = UUID.randomUUID();
+        tenants.insert(tenantId, "tn-" + tenantId, "h");
+        registerRouting(tenantId);
+        var agentId = UUID.randomUUID();
+        agents.insert(agentId, tenantId, "a", "you are a", "summarize_cell",
+                JsonNodeFactory.instance.arrayNode(), null, 5, 60, 4096, "wt", false, null, null, null, null, null, null);
+        tenantBudgets.patch(tenantId, new BudgetPatchRequest(10_000L, 100_000L, 80, 90));
+        agentBudgets.patch(agentId, new BudgetPatchRequest(5_000L, 50_000L, 80, 90));
+        stub.script(StubLlmScripts.Turn.endTurn("done"));
+
+        runner.startRunSync(tenantId, agentId, "manual", mapper.readTree("{}"), null, null, null);
+
+        assertThat(stub.lastRequest().maxTokens()).isEqualTo(4096);
+    }
 }

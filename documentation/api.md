@@ -471,9 +471,16 @@ Body:
   "output_schema": { "type": "object", "properties": {"finding":{"type":"string"}}, "required": ["finding"] },
   "max_turns": 10,
   "max_run_seconds": 60,
+  "max_tokens": 8192,
   "webhook_token": "secret-from-tenant"
 }
 ```
+
+`max_tokens` is the per-turn output-token cap passed to the provider. It is
+optional — when omitted (`null`), the runtime default of **8192** applies. Set
+it higher for agents that emit large structured output (e.g. multi-page
+extraction) or lower to bound cost; truncation before a tool call surfaces as a
+`failed` run with `no_tool_use: stop_reason=max_tokens`.
 
 Returns `201 Created` with the persisted agent (including `id`, `version`,
 timestamps). Validation errors return `400` with the failing field.

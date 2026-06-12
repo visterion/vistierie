@@ -74,7 +74,7 @@ class AgentServiceTest {
             return null;
         }).when(repo).insert(any(), eq(tenantId), eq("agent-a"),
                 eq("sys"), eq("purpose"), any(), any(),
-                eq(25), eq(1800), eq("tok"), eq(false), eq(null), eq(null), eq(null),
+                eq(25), eq(1800), any(), eq("tok"), eq(false), eq(null), eq(null), eq(null),
                 eq(null), eq(null), eq(null));
         when(repo.findById(any())).thenAnswer(inv -> Optional.of(existing(inv.getArgument(0), "agent-a")));
 
@@ -89,7 +89,7 @@ class AgentServiceTest {
         assertThatThrownBy(() -> svc.create(tenantId, req))
                 .isInstanceOf(AgentDefinitionValidator.InvalidDefinitionException.class);
         verify(repo, never()).insert(any(), any(), any(), any(), any(), any(), any(),
-                anyInt(), anyInt(), any(), anyBoolean(), any(), any(), any(),
+                anyInt(), anyInt(), any(), any(), anyBoolean(), any(), any(), any(),
                 any(), any(), any());
     }
 
@@ -115,7 +115,7 @@ class AgentServiceTest {
         svc.replace(tenantId, "agent-c", req);
 
         verify(repo).replace(eq(id), eq("new-sys"), eq("new-p"), any(), eq(null),
-                eq(50), eq(600), eq("new-tok"), eq(true), eq(null), eq(null), eq(null),
+                eq(50), eq(600), any(), eq("new-tok"), eq(true), eq(null), eq(null), eq(null),
                 eq(null), eq(null), eq(null));
     }
 
@@ -138,7 +138,7 @@ class AgentServiceTest {
         svc.patch(tenantId, "agent-d", patch);
 
         verify(repo).replace(eq(id), eq("keep-sys"), eq("keep-p"), any(), eq(null),
-                eq(7), eq(70), eq("keep-tok"), eq(true), eq("0 0 0 * * *"), eq(null), eq(null),
+                eq(7), eq(70), any(), eq("keep-tok"), eq(true), eq("0 0 0 * * *"), eq(null), eq(null),
                 eq(null), eq(null), eq(null));
     }
 
@@ -157,7 +157,7 @@ class AgentServiceTest {
         assertThatThrownBy(() -> svc.patch(tenantId, "agent-budget", patch))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("budget");
-        verify(repo, never()).replace(any(), any(), any(), any(), any(), anyInt(), anyInt(), any(), anyBoolean(), any(), any(), any(), any(), any(), any());
+        verify(repo, never()).replace(any(), any(), any(), any(), any(), anyInt(), anyInt(), any(), any(), anyBoolean(), any(), any(), any(), any(), any(), any());
     }
 
     @Test void patchEmptyScheduleClearsIt() {
@@ -172,7 +172,7 @@ class AgentServiceTest {
         svc.patch(tenantId, "agent-e", patch);
 
         verify(repo).replace(eq(id), any(), any(), any(), any(),
-                anyInt(), anyInt(), any(), anyBoolean(), eq(null), any(), any(),
+                anyInt(), anyInt(), any(), any(), anyBoolean(), eq(null), any(), any(),
                 any(), any(), any());
     }
 
@@ -252,7 +252,7 @@ class AgentServiceTest {
         var captor = ArgumentCaptor.forClass(JsonNode.class);
         org.mockito.Mockito.doAnswer(inv -> null)
                 .when(repo).insert(any(), eq(tenantId), eq("agent-h"), any(), any(),
-                        captor.capture(), any(), anyInt(), anyInt(), any(), anyBoolean(), any(), any(), any(),
+                        captor.capture(), any(), anyInt(), anyInt(), any(), any(), anyBoolean(), any(), any(), any(),
                         any(), any(), any());
 
         when(repo.findById(any())).thenAnswer(inv -> {

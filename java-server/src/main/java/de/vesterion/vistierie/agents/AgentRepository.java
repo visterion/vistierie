@@ -22,6 +22,7 @@ public class AgentRepository {
         this.mapper = mapper;
     }
 
+    /** Backward-compatible overload: leaves {@code max_tokens} unset (runtime default applies). */
     public void insert(UUID id, UUID tenantId, String name,
                        String systemPrompt, String modelPurpose,
                        JsonNode tools, JsonNode outputSchema,
@@ -31,26 +32,56 @@ public class AgentRepository {
                        String completionWebhook, String completionWebhookToken,
                        String eventSourceUrl, Integer sessionDurationSeconds,
                        Integer pollIntervalSeconds) {
+        insert(id, tenantId, name, systemPrompt, modelPurpose, tools, outputSchema,
+                maxTurns, maxRunSeconds, null, webhookToken, paused, schedule,
+                completionWebhook, completionWebhookToken,
+                eventSourceUrl, sessionDurationSeconds, pollIntervalSeconds);
+    }
+
+    public void insert(UUID id, UUID tenantId, String name,
+                       String systemPrompt, String modelPurpose,
+                       JsonNode tools, JsonNode outputSchema,
+                       int maxTurns, int maxRunSeconds, Integer maxTokens,
+                       String webhookToken, boolean paused,
+                       String schedule,
+                       String completionWebhook, String completionWebhookToken,
+                       String eventSourceUrl, Integer sessionDurationSeconds,
+                       Integer pollIntervalSeconds) {
         jdbc.sql("""
                 INSERT INTO vistierie.agents
                   (id, tenant_id, name, system_prompt, model_purpose,
-                   tools, output_schema, max_turns, max_run_seconds,
+                   tools, output_schema, max_turns, max_run_seconds, max_tokens,
                    webhook_token, paused, schedule,
                    completion_webhook, completion_webhook_token,
                    event_source_url, session_duration_seconds, poll_interval_seconds)
-                VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """)
                 .params(id, tenantId, name, systemPrompt, modelPurpose,
                         toJsonString(tools), toJsonString(outputSchema),
-                        maxTurns, maxRunSeconds, webhookToken, paused, schedule,
+                        maxTurns, maxRunSeconds, maxTokens, webhookToken, paused, schedule,
                         completionWebhook, completionWebhookToken,
                         eventSourceUrl, sessionDurationSeconds, pollIntervalSeconds)
                 .update();
     }
 
+    /** Backward-compatible overload: leaves {@code max_tokens} unset (runtime default applies). */
     public void replace(UUID id, String systemPrompt, String modelPurpose,
                         JsonNode tools, JsonNode outputSchema,
                         int maxTurns, int maxRunSeconds,
+                        String webhookToken, boolean paused,
+                        String schedule,
+                        String completionWebhook, String completionWebhookToken,
+                        String eventSourceUrl, Integer sessionDurationSeconds,
+                        Integer pollIntervalSeconds) {
+        replace(id, systemPrompt, modelPurpose, tools, outputSchema,
+                maxTurns, maxRunSeconds, null, webhookToken, paused, schedule,
+                completionWebhook, completionWebhookToken,
+                eventSourceUrl, sessionDurationSeconds, pollIntervalSeconds);
+    }
+
+    public void replace(UUID id, String systemPrompt, String modelPurpose,
+                        JsonNode tools, JsonNode outputSchema,
+                        int maxTurns, int maxRunSeconds, Integer maxTokens,
                         String webhookToken, boolean paused,
                         String schedule,
                         String completionWebhook, String completionWebhookToken,
@@ -60,7 +91,7 @@ public class AgentRepository {
                 UPDATE vistierie.agents
                 SET system_prompt = ?, model_purpose = ?,
                     tools = ?::jsonb, output_schema = ?::jsonb,
-                    max_turns = ?, max_run_seconds = ?,
+                    max_turns = ?, max_run_seconds = ?, max_tokens = ?,
                     webhook_token = ?, paused = ?,
                     schedule = ?,
                     completion_webhook = ?, completion_webhook_token = ?,
@@ -71,7 +102,7 @@ public class AgentRepository {
                 """)
                 .params(systemPrompt, modelPurpose,
                         toJsonString(tools), toJsonString(outputSchema),
-                        maxTurns, maxRunSeconds, webhookToken, paused, schedule,
+                        maxTurns, maxRunSeconds, maxTokens, webhookToken, paused, schedule,
                         completionWebhook, completionWebhookToken,
                         eventSourceUrl, sessionDurationSeconds, pollIntervalSeconds, id)
                 .update();
@@ -132,7 +163,7 @@ public class AgentRepository {
 
     private static final String SELECT_BASE = """
             SELECT id, tenant_id, name, system_prompt, model_purpose,
-                   tools, output_schema, max_turns, max_run_seconds,
+                   tools, output_schema, max_turns, max_run_seconds, max_tokens,
                    webhook_token, paused, version, created_at, updated_at,
                    schedule, last_tick_at,
                    completion_webhook, completion_webhook_token,
@@ -142,6 +173,7 @@ public class AgentRepository {
 
     private Agent map(java.sql.ResultSet rs, int n) throws SQLException {
         var lastTick = rs.getTimestamp("last_tick_at");
+        Integer maxTokens = (Integer) rs.getObject("max_tokens");
         Integer sessionDuration = (Integer) rs.getObject("session_duration_seconds");
         Integer pollInterval = (Integer) rs.getObject("poll_interval_seconds");
         return new Agent(
@@ -154,6 +186,7 @@ public class AgentRepository {
                 parseJson(rs.getString("output_schema")),
                 rs.getInt("max_turns"),
                 rs.getInt("max_run_seconds"),
+                maxTokens,
                 rs.getString("webhook_token"),
                 rs.getBoolean("paused"),
                 rs.getInt("version"),
