@@ -13,6 +13,8 @@ import de.vesterion.vistierie.routing.RoutingResolver;
 import de.vesterion.vistierie.runs.Run;
 import de.vesterion.vistierie.runs.RunStore;
 import de.vesterion.vistierie.tenants.TenantRepository;
+import de.vesterion.vistierie.transcript.RunToolCall;
+import de.vesterion.vistierie.transcript.RunToolCallRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -51,6 +53,7 @@ public class AgentRunner {
     private final RecursionGuard recursionGuard;
     private final ExecutorService subagentExecutor;
     private final ObjectMapper mapper;
+    private final RunToolCallRepository toolCalls;
 
     public AgentRunner(AgentRepository agents, RunStore runs,
                        RoutingResolver routing, ProviderRegistry providers,
@@ -61,7 +64,8 @@ public class AgentRunner {
                        ToolDispatcher toolDispatcher,
                        RecursionGuard recursionGuard,
                        ExecutorService subagentExecutor,
-                       ObjectMapper mapper) {
+                       ObjectMapper mapper,
+                       RunToolCallRepository toolCalls) {
         this.agents = agents;
         this.runs = runs;
         this.routing = routing;
@@ -77,6 +81,7 @@ public class AgentRunner {
         this.recursionGuard = recursionGuard;
         this.subagentExecutor = subagentExecutor;
         this.mapper = mapper;
+        this.toolCalls = toolCalls;
     }
 
     /** Synchronous run starter — used in tests; production path enqueues. */
@@ -155,8 +160,9 @@ public class AgentRunner {
 
             var pRes = provider.complete(providerReq);
             var cost = prices.costMicros(decision.model(), pRes.usage());
+            String callId = newUlid();
             recorder.insertWithBody(new LlmCallRecorder.Row(
-                    newUlid(), run.tenantId(), run.agentId(), modelPurpose, null,
+                    callId, run.tenantId(), run.agentId(), modelPurpose, null,
                     providerName, decision.model(), "complete",
                     pRes.usage().inputTokens(), pRes.usage().outputTokens(),
                     pRes.usage().cacheCreationInputTokens(), pRes.usage().cacheReadInputTokens(),
@@ -191,6 +197,9 @@ public class AgentRunner {
             }
             runs.recordEvent(runId, "info", "tool_dispatched",
                     mapper.valueToTree(Map.of("count", blocks.size())));
+
+            java.util.Map<String, ToolUseParser.Block> blockById = new java.util.HashMap<>();
+            for (var bk : blocks) blockById.put(bk.id(), bk);
 
             Map<String, JsonNode> toolDefByName = new HashMap<>();
             for (JsonNode t : snap.path("tools")) toolDefByName.put(t.path("name").asText(), t);
@@ -280,6 +289,21 @@ public class AgentRunner {
                 runs.recordEvent(runId, res.isError() ? "error" : "info",
                         res.isError() ? "tool_failed" : "tool_returned",
                         mapper.valueToTree(Map.of("tool_use_id", res.toolUseId())));
+
+                var blk = blockById.get(res.toolUseId());
+                var bdef = blk == null ? null : toolDefByName.get(blk.name());
+                String toolType = bdef == null ? "unknown"
+                        : ("subagent".equals(bdef.path("type").asText()) ? "subagent" : "http");
+                toolCalls.insert(new RunToolCall(
+                        newUlid(), runId, run.tenantId(), callId, turn,
+                        res.toolUseId(),
+                        blk == null ? "?" : blk.name(),
+                        toolType,
+                        blk == null ? null : blk.input(),
+                        res.content(),
+                        res.isError(),
+                        res.isError() ? res.content().path("error").asText(null) : null,
+                        null));
             }
 
             if (anyError) {
