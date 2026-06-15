@@ -21,13 +21,19 @@ public class LlmCallBodyRepository {
     }
 
     public void insert(String callId, JsonNode requestJson, String responseText, Instant createdAt) {
+        insert(callId, requestJson, responseText, null, createdAt);
+    }
+
+    public void insert(String callId, JsonNode requestJson, String responseText,
+                       JsonNode responseContentJson, Instant createdAt) {
         try {
             String requestStr = json.writeValueAsString(requestJson);
+            String contentStr = responseContentJson == null ? null : json.writeValueAsString(responseContentJson);
             jdbc.sql("""
                     INSERT INTO vistierie.llm_call_bodies
-                      (call_id, request_json, response_text, created_at)
-                    VALUES (?, CAST(? AS jsonb), ?, ?)
-                    """).params(callId, requestStr, responseText, Timestamp.from(createdAt))
+                      (call_id, request_json, response_text, response_content_json, created_at)
+                    VALUES (?, CAST(? AS jsonb), ?, CAST(? AS jsonb), ?)
+                    """).params(callId, requestStr, responseText, contentStr, Timestamp.from(createdAt))
                     .update();
         } catch (Exception e) {
             throw new RuntimeException("body insert failed", e);
@@ -36,15 +42,18 @@ public class LlmCallBodyRepository {
 
     public Optional<LlmCallBody> findByCallId(String callId) {
         return jdbc.sql("""
-                SELECT call_id, request_json, response_text, created_at
+                SELECT call_id, request_json, response_text, response_content_json, created_at
                 FROM vistierie.llm_call_bodies WHERE call_id = ?
                 """).param(callId).query((rs, rn) -> {
                     try {
-                        var node = json.readTree(rs.getString("request_json"));
+                        var reqNode = json.readTree(rs.getString("request_json"));
+                        var contentStr = rs.getString("response_content_json");
+                        var contentNode = contentStr == null ? null : json.readTree(contentStr);
                         return new LlmCallBody(
                                 rs.getString("call_id"),
-                                node,
+                                reqNode,
                                 rs.getString("response_text"),
+                                contentNode,
                                 rs.getTimestamp("created_at").toInstant());
                     } catch (Exception e) {
                         throw new RuntimeException("body parse failed", e);
