@@ -153,9 +153,11 @@ Schema overview (all tables under `vistierie`):
 - `run_events`       : append-only event timeline per run
 - `routing_rules`    : operator-managed routing policy (per tenant, realm, purpose)
 - `routing_rules_audit`: append-only history of admin writes to routing_rules
-- `llm_call_bodies`  : full request JSON (vision blobs redacted to sha256 stub) and response text per LLM call; cleaned by BodyRetentionJob
+- `llm_call_bodies`  : full request JSON (vision blobs redacted to sha256 stub), response text, and (V11) full response content blocks per LLM call; cleaned by BodyRetentionJob
 - `tenant_budgets`   : operator-managed hard tenant caps and optional warn thresholds
 - `agent_budgets`    : operator-managed hard per-agent caps and optional warn thresholds
+- `run_tool_calls`   : (V11) one row per tool invocation per run — captures input/output, tool type, and failure detail
+- `run_search_doc`   : (V11) per-run full-text search document (`tsvector`, `simple` config); built on run completion
 
 ---
 
@@ -203,3 +205,88 @@ Budget gates also apply beyond manual runs:
 Long-polls and completion webhooks are in-process (no Redis, no DB queue);
 a Vistierie restart drops open polls and re-fires pending webhooks based on
 the persisted run state.
+
+---
+
+## Run-transcript observability (V11)
+
+Migration: `V11__run_transcript.sql`.
+
+### Scope boundary
+
+Vistierie **captures and exposes** run transcripts (write-path + read API +
+full-text search). It performs **no analysis** — that is the consumer's
+responsibility. Historical read-back only; no live streaming.
+
+### Data model additions
+
+#### `llm_call_bodies.response_content_json` (new column)
+
+```
+llm_call_bodies
+  ...existing columns...
+  response_content_json  JSONB   -- full response content blocks (text + tool_use) per LLM call
+```
+
+Stores the raw content block array returned by the provider (e.g. Anthropic's
+`content` array containing `text` and `tool_use` blocks). `NULL` for calls
+made before V11 or when capture fails. Exposed via `GET /runs/{id}/transcript?view=full`.
+
+#### `run_tool_calls` (new table)
+
+One row per tool invocation per run, written by `ToolCallCaptureService`
+immediately after each tool dispatch.
+
+```
+run_tool_calls
+  id            UUID PK
+  run_id        TEXT FK → runs.id
+  tenant_id     UUID FK → tenants.id
+  llm_call_id   TEXT FK → llm_calls.id (nullable)
+  turn_index    INTEGER       -- zero-based turn within the run
+  tool_use_id   TEXT          -- Anthropic tool_use block id (e.g. "toolu_01A…")
+  tool_name     TEXT
+  tool_type     TEXT          -- "http" | "subagent" | "unknown"
+  input_json    JSONB
+  output_json   JSONB
+  is_error      BOOLEAN
+  error_detail  TEXT          -- populated on hard failures (4xx/5xx/timeout)
+  created_at    TIMESTAMPTZ
+```
+
+**Failure visibility:**
+- **Hard failures** (HTTP 4xx / 5xx / timeout): `is_error = true`,
+  `error_detail` contains the error message.
+- **Graceful-empty outputs** (e.g. HTTP 200 returning an empty payload because
+  a downstream API key is missing): `is_error = false`, `output_json` faithfully
+  captures the empty payload. The *reason* must be surfaced by the consumer's
+  tool — Vistierie cannot see inside it.
+
+Capture is **best-effort**: a capture failure never fails a run.
+
+#### `run_search_doc` (new table)
+
+Per-run full-text search document, built on run completion by `RunStore.markTerminal`.
+
+```
+run_search_doc
+  run_id      TEXT PK FK → runs.id
+  tenant_id   UUID FK → tenants.id
+  doc         TSVECTOR      -- Postgres tsvector, 'simple' config
+  updated_at  TIMESTAMPTZ
+```
+
+The `doc` vector indexes agent name, status, run output, tool names, tool
+input/output text, and response text. Used by `GET /runs/search` and
+`GET /admin/runs/search` (ranked hits with snippets).
+
+### Read API
+
+See [api.md](api.md) for the full endpoint reference:
+
+- `GET /runs/{id}/transcript?view=digest|compact|full` — turn-by-turn transcript,
+  three verbosity levels; `compact` is the default.
+- `GET /runs/{id}/tool-calls/{toolUseId}` — single tool call, untruncated.
+- `GET /admin/runs/{id}/transcript` — admin variant, cross-tenant.
+- `GET /runs/search` and `GET /admin/runs/search` — ranked full-text search,
+  snippet-only results.
