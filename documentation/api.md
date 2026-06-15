@@ -964,8 +964,8 @@ retrieve the full content of a matched run.
 ### `GET /admin/runs/search`
 
 Admin-scoped variant of run search. Accepts all the same parameters as
-`GET /runs/search` plus an optional `tenant` filter to narrow results to one
-tenant. Returns the same response shape.
+`GET /runs/search` plus a **required** `tenant` parameter. Results are scoped
+to exactly that single tenant. Returns the same response shape.
 
 **Auth:** admin token required.
 
