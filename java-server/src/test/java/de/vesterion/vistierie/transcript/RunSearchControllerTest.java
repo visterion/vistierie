@@ -101,7 +101,7 @@ class RunSearchControllerTest extends PostgresTestBase {
     @Test void searchIsTenantScoped() throws Exception {
         runWithFailingTool();
         var other = "tok-" + UUID.randomUUID();
-        tenants.insert(UUID.randomUUID(), "other", enc.encode(other));
+        tenants.insert(UUID.randomUUID(), "other-" + UUID.randomUUID(), enc.encode(other));
         mvc.perform(get("/runs/search?q=tool_error").header("Authorization", "Bearer " + other))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items.length()").value(0));
