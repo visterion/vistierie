@@ -736,6 +736,241 @@ If the body has been deleted by retention, `request_json` and `response_text` ar
 
 ---
 
+## Run transcripts & search
+
+Vistierie captures every LLM turn and tool invocation for a run and exposes
+them through a read-only transcript API. Capture is **best-effort** — a capture
+failure never fails a run. No analysis is performed; that is the consumer's
+responsibility.
+
+### `GET /runs/{id}/transcript`
+
+Returns the turn-by-turn transcript for one run. Tenant-scoped: returns `404`
+if the run does not belong to the caller's tenant.
+
+**Query parameters:**
+
+| Param | Default | Description |
+|---|---|---|
+| `view` | `compact` | `digest` \| `compact` \| `full` |
+| `turns_from` | – | First turn index to include (inclusive). `full` view only. |
+| `turns_to` | – | Last turn index to include (inclusive). `full` view only. |
+
+#### `view=digest`
+
+Cheapest view — summary only, no turn detail.
+
+```json
+{
+  "run_id":      "01HZ...",
+  "agent":       "bee",
+  "status":      "done",
+  "model":       "claude-sonnet-4-6",
+  "turn_count":  4,
+  "token_total": 3210,
+  "tools": [
+    { "name": "fetch_price", "count": 3, "error_count": 0 },
+    { "name": "edgar_search", "count": 1, "error_count": 1 }
+  ],
+  "final_output": "{ \"finding\": \"…\" }",
+  "error": null
+}
+```
+
+#### `view=compact` (default)
+
+Each turn contains the response text and tool I/O. The cumulative
+`llm_input_messages` are **omitted**. Tool `input` and `output` and response
+text longer than 2 000 characters are replaced with a truncation marker:
+
+```json
+{ "truncated": true, "full_chars": 8192, "preview": "…first 120 chars…" }
+```
+
+```json
+{
+  "run_id": "01HZ...",
+  "agent":  "bee",
+  "status": "done",
+  "model":  "claude-sonnet-4-6",
+  "turns": [
+    {
+      "index": 0,
+      "response_text": "I will call fetch_price to check the last close.",
+      "tool_calls": [
+        {
+          "tool_use_id":  "toolu_01A...",
+          "tool_name":    "fetch_price",
+          "tool_type":    "http",
+          "input":        { "ticker": "AAPL" },
+          "output":       { "close": 213.55 },
+          "is_error":     false,
+          "error_detail": null
+        }
+      ]
+    }
+  ],
+  "final_output": "{ \"finding\": \"…\" }",
+  "error": null
+}
+```
+
+#### `view=full`
+
+Like `compact` but also includes the cumulative `llm_input_messages` per turn
+and the raw response content blocks. Large runs can be paged with
+`turns_from`/`turns_to` (inclusive turn indices).
+
+```json
+{
+  "run_id": "01HZ...",
+  "agent":  "bee",
+  "status": "done",
+  "model":  "claude-sonnet-4-6",
+  "turns": [
+    {
+      "index": 0,
+      "llm_input_messages": [ { "role": "user", "content": "…" } ],
+      "response_content_blocks": [
+        { "type": "text", "text": "I will call fetch_price…" },
+        { "type": "tool_use", "id": "toolu_01A...", "name": "fetch_price", "input": { "ticker": "AAPL" } }
+      ],
+      "response_text": "I will call fetch_price to check the last close.",
+      "tool_calls": [
+        {
+          "tool_use_id":  "toolu_01A...",
+          "tool_name":    "fetch_price",
+          "tool_type":    "http",
+          "input":        { "ticker": "AAPL" },
+          "output":       { "close": 213.55 },
+          "is_error":     false,
+          "error_detail": null
+        }
+      ]
+    }
+  ],
+  "final_output": "{ \"finding\": \"…\" }",
+  "error": null
+}
+```
+
+**Failure visibility:** hard tool failures (4xx / 5xx / timeout) set
+`is_error: true` and populate `error_detail`. Graceful-empty outputs — e.g. an
+HTTP 200 that returns an empty payload because a downstream API key is missing
+— are captured faithfully as an empty `output`; the *reason* must be surfaced
+by the consumer's tool, as Vistierie cannot see inside it.
+
+**Error codes:**
+
+| HTTP | Meaning |
+|---|---|
+| 400 | Unknown `view` value, or `turns_from`/`turns_to` used with non-`full` view |
+| 401 | Missing or invalid bearer token |
+| 404 | Run not found in calling tenant |
+
+---
+
+### `GET /runs/{id}/tool-calls/{toolUseId}`
+
+Single-tool-call drill-down. Returns the row **untruncated** — useful when the
+compact view shows a truncation marker and you need the full payload.
+Tenant-scoped: `404` if the run does not belong to the calling tenant.
+
+**Response `200 OK`:**
+
+```json
+{
+  "id":           "550e8400-...",
+  "run_id":       "01HZ...",
+  "tenant_id":    "550e8400-...",
+  "llm_call_id":  "01HZ...",
+  "turn_index":   0,
+  "tool_use_id":  "toolu_01A...",
+  "tool_name":    "fetch_price",
+  "tool_type":    "http",
+  "input":        { "ticker": "AAPL" },
+  "output":       { "close": 213.55 },
+  "is_error":     false,
+  "error_detail": null,
+  "created_at":   "2026-06-15T08:00:01Z"
+}
+```
+
+| HTTP | Meaning |
+|---|---|
+| 401 | Missing or invalid bearer token |
+| 404 | Run not found in tenant, or `toolUseId` not found on that run |
+
+---
+
+### `GET /admin/runs/{id}/transcript`
+
+Admin-scoped variant of the transcript endpoint. Accepts the same
+`view`, `turns_from`, and `turns_to` parameters and returns the same
+response shapes. Works across all tenants.
+
+**Auth:** admin token required.
+
+---
+
+### `GET /runs/search`
+
+Full-text search over the calling tenant's runs. Returns ranked hits with
+snippets — **not** full transcripts. Use `GET /runs/{id}/transcript` to
+retrieve the full content of a matched run.
+
+`limit` is clamped to 100.
+
+**Query parameters:**
+
+| Param | Default | Description |
+|---|---|---|
+| `q` | – | Full-text query string |
+| `agent` | – | Filter by agent name |
+| `status` | – | Filter by run status (`done`, `failed`, …) |
+| `has_error` | – | `true` \| `false` — filter by whether any tool call has `is_error=true` |
+| `from` | – | ISO-8601 lower bound on `started_at` |
+| `to` | – | ISO-8601 upper bound on `started_at` |
+| `limit` | `20` | Max results (clamped to 100) |
+| `offset` | `0` | Pagination offset |
+
+**Response `200 OK`:**
+
+```json
+{
+  "items": [
+    {
+      "runId":     "01HZ...",
+      "agent":     "bee",
+      "status":    "done",
+      "hasError":  false,
+      "startedAt": "2026-06-15T07:55:00Z",
+      "rank":      0.9753,
+      "snippet":   "…fetch_price returned 213.55 for AAPL, below the 52-week low threshold…"
+    }
+  ],
+  "limit":  20,
+  "offset": 0
+}
+```
+
+| HTTP | Meaning |
+|---|---|
+| 400 | Invalid parameter value |
+| 401 | Missing or invalid bearer token |
+
+---
+
+### `GET /admin/runs/search`
+
+Admin-scoped variant of run search. Accepts all the same parameters as
+`GET /runs/search` plus an optional `tenant` filter to narrow results to one
+tenant. Returns the same response shape.
+
+**Auth:** admin token required.
+
+---
+
 ## `GET /healthz`
 
 Liveness probe. Returns `200 OK` with body `OK` as long as the JVM is running.
