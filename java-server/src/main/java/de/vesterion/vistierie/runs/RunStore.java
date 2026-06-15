@@ -1,6 +1,7 @@
 package de.vesterion.vistierie.runs;
 
 import de.vesterion.vistierie.agent.webhooks.CompletionWebhookDispatcher;
+import de.vesterion.vistierie.transcript.RunSearchIndexer;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 
@@ -13,13 +14,15 @@ public class RunStore {
     private final RunEventRecorder events;
     private final LongPollService longPoll;
     private final CompletionWebhookDispatcher webhook;
+    private final RunSearchIndexer searchIndexer;
 
     public RunStore(RunRepository repo, RunEventRecorder events, LongPollService longPoll,
-                    CompletionWebhookDispatcher webhook) {
+                    CompletionWebhookDispatcher webhook, RunSearchIndexer searchIndexer) {
         this.repo = repo;
         this.events = events;
         this.longPoll = longPoll;
         this.webhook = webhook;
+        this.searchIndexer = searchIndexer;
     }
 
     /** Backward-compatible overload without sessionId. */
@@ -63,6 +66,7 @@ public class RunStore {
                 status.equals("done") ? "turn_finished" : "error", null);
         longPoll.notifyTerminal(runId);
         webhook.fire(runId);
+        searchIndexer.index(runId);
     }
 
     public Run get(String runId) {

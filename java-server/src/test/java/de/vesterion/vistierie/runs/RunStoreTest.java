@@ -1,6 +1,7 @@
 package de.vesterion.vistierie.runs;
 
 import de.vesterion.vistierie.agent.webhooks.CompletionWebhookDispatcher;
+import de.vesterion.vistierie.transcript.RunSearchIndexer;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
@@ -25,7 +26,8 @@ class RunStoreTest {
     private final RunEventRecorder events = mock(RunEventRecorder.class);
     private final LongPollService longPoll = mock(LongPollService.class);
     private final CompletionWebhookDispatcher webhook = mock(CompletionWebhookDispatcher.class);
-    private final RunStore store = new RunStore(repo, events, longPoll, webhook);
+    private final RunSearchIndexer searchIndexer = mock(RunSearchIndexer.class);
+    private final RunStore store = new RunStore(repo, events, longPoll, webhook, searchIndexer);
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Test void createDelegatesAsQueued() {
