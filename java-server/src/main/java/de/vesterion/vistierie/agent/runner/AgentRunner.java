@@ -198,7 +198,7 @@ public class AgentRunner {
             runs.recordEvent(runId, "info", "tool_dispatched",
                     mapper.valueToTree(Map.of("count", blocks.size())));
 
-            java.util.Map<String, ToolUseParser.Block> blockById = new java.util.HashMap<>();
+            Map<String, ToolUseParser.Block> blockById = new HashMap<>();
             for (var bk : blocks) blockById.put(bk.id(), bk);
 
             Map<String, JsonNode> toolDefByName = new HashMap<>();
@@ -290,20 +290,24 @@ public class AgentRunner {
                         res.isError() ? "tool_failed" : "tool_returned",
                         mapper.valueToTree(Map.of("tool_use_id", res.toolUseId())));
 
-                var blk = blockById.get(res.toolUseId());
-                var bdef = blk == null ? null : toolDefByName.get(blk.name());
-                String toolType = bdef == null ? "unknown"
-                        : ("subagent".equals(bdef.path("type").asText()) ? "subagent" : "http");
-                toolCalls.insert(new RunToolCall(
-                        newUlid(), runId, run.tenantId(), callId, turn,
-                        res.toolUseId(),
-                        blk == null ? "?" : blk.name(),
-                        toolType,
-                        blk == null ? null : blk.input(),
-                        res.content(),
-                        res.isError(),
-                        res.isError() ? res.content().path("error").asText(null) : null,
-                        null));
+                try {
+                    var blk = blockById.get(res.toolUseId());
+                    var bdef = blk == null ? null : toolDefByName.get(blk.name());
+                    String toolType = bdef == null ? "unknown"
+                            : ("subagent".equals(bdef.path("type").asText()) ? "subagent" : "http");
+                    toolCalls.insert(new RunToolCall(
+                            newUlid(), runId, run.tenantId(), callId, turn,
+                            res.toolUseId(),
+                            blk == null ? "?" : blk.name(),
+                            toolType,
+                            blk == null ? null : blk.input(),
+                            res.content(),
+                            res.isError(),
+                            res.isError() ? res.content().path("error").asText(null) : null,
+                            null));
+                } catch (Exception e) {
+                    log.warn("tool-call transcript capture failed for run {} tool_use {}: {}", runId, res.toolUseId(), e.toString());
+                }
             }
 
             if (anyError) {
