@@ -39,7 +39,8 @@ public class LlmCallRecorder {
         var redacted = redactor.redact(req);
         var node = json.valueToTree(redacted);
         String responseText = res == null ? null : res.text();
-        bodyRepo.insert(row.id(), node, responseText, Instant.now());
+        var contentBlocks = res == null ? null : res.contentBlocks();
+        bodyRepo.insert(row.id(), node, responseText, contentBlocks, Instant.now());
     }
 
     public void insert(Row r) {

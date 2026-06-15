@@ -57,6 +57,27 @@ class LlmCallBodyRepositoryTest extends PostgresTestBase {
     }
 
     @Test
+    void persistsAndReadsResponseContentJson() {
+        var req = json.readTree("{\"messages\":[]}");
+        var content = json.readTree("[{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"x\",\"input\":{}}]");
+
+        repo.insert(callId, req, "the text", content, Instant.now());
+
+        var body = repo.findByCallId(callId).orElseThrow();
+        assertThat(body.responseText()).isEqualTo("the text");
+        assertThat(body.responseContentJson()).isNotNull();
+        assertThat(body.responseContentJson().get(0).path("name").asText()).isEqualTo("x");
+    }
+
+    @Test
+    void fourArgInsertLeavesContentNull() {
+        var req = json.readTree("{\"messages\":[]}");
+        repo.insert(callId, req, "t", Instant.now());
+        var body = repo.findByCallId(callId).orElseThrow();
+        assertThat(body.responseContentJson()).isNull();
+    }
+
+    @Test
     void deleteOlderThanRemovesOldOnly() {
         var oldId = UUID.randomUUID().toString();
         jdbc.sql("""
