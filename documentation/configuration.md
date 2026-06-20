@@ -40,7 +40,7 @@ Defined under `vistierie.providers.<name>`:
 |-------------|-------------|
 | `base-url` | Required. Base URL for the OpenAI-compatible endpoint |
 | `api-key` | Required. Bearer token. Provider is skipped if blank |
-| `timeout-seconds` | Optional. HTTP timeout, default 60 |
+| `timeout-seconds` | Accepted in config but **not currently applied** to the HTTP client (no-op). |
 
 ---
 
@@ -50,6 +50,7 @@ Defined under `vistierie.providers.<name>`:
 |----------|---------|---------|-------------|
 | `vistierie.bedrock.enabled` | `BEDROCK_ENABLED` | `false` | Set to `true` to enable |
 | `vistierie.bedrock.region` | `AWS_REGION` | SDK default | AWS region for Bedrock calls |
+| `vistierie.bedrock.read-timeout-seconds` | — | `180` | HTTP socket (read) timeout in seconds for Bedrock Converse calls. The SDK default (~30s) is too short for long reasoning responses; tune this up for long-running calls. |
 
 Credentials use the standard AWS credential chain. No API key property.
 

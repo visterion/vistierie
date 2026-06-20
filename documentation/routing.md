@@ -7,7 +7,7 @@ visibility through their own audit trail (`llm_calls.provider`,
 
 ## Resolution algorithm
 
-For each `/llm/complete` and `/llm/vision` call, the resolver:
+For each `/llm/complete`, `/llm/vision`, and `/llm/vision-multi` call, the resolver:
 
 1. Loads all rules for the call's tenant, sorted by `priority` ASC.
    (In-memory cache, invalidated on every admin write via a version counter.)
