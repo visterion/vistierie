@@ -234,6 +234,17 @@ Bedrock and other providers are not supported for batch runs.
 
 ---
 
+## Inspect & search runs
+
+Every completed run is captured as a provider-neutral transcript —
+`GET /runs/{id}/transcript?view=digest|compact|full` — with per-tool-call
+drill-down via `GET /runs/{id}/tool-calls/{toolUseId}`, and indexed into a
+Postgres full-text document. Search a tenant's runs with
+`GET /runs/search?q=...` (filters: `agent`, `status`, `has_error`, `from`,
+`to`); operators search any tenant via `GET /admin/runs/search?tenant=...`.
+
+---
+
 ## Synchronous LLM gateway
 
 Not everything needs an agent. For a one-shot request/response call,
@@ -289,6 +300,9 @@ docker run --rm -p 8090:8090 \
 After startup, point a routing rule at `"provider": "bedrock"` with an inference
 profile ID such as `eu.anthropic.claude-sonnet-4-6`. The SDK reads
 `AWS_BEARER_TOKEN_BEDROCK` natively for ABSK API key authentication.
+
+Long Bedrock calls that exceed the default 180s socket read timeout can be tuned
+via `vistierie.bedrock.read-timeout-seconds` (see configuration.md).
 
 For local development:
 

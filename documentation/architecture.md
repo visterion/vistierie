@@ -3,8 +3,9 @@
 ## Scope (v1.0)
 
 - **Gateway:** tenants, auth, kill-switch, routing, synchronous
-  `POST /llm/complete` and `POST /llm/vision`, Anthropic / OpenAI / xAI
-  providers, per-call audit log with token-accurate EUR-micros cost, and
+  `POST /llm/complete` and `POST /llm/vision`, Anthropic / OpenAI-compatible
+  (OpenAI, xAI, …) / Bedrock providers, per-call audit log with
+  token-accurate EUR-micros cost, and
   hard tenant/agent budgets on every billable path.
 - **Agent framework:** tenant-scoped agent registration, asynchronous
   run execution with parallel HTTP tools and recursive subagents (with
@@ -20,7 +21,11 @@
 
 ## Data model
 
-Two tables in the `vistierie` schema (see `V1__baseline.sql`):
+The `vistierie` schema holds the following tables, created across migrations
+V1–V11. The 13 application tables are: `tenants`, `llm_calls`, `agents`,
+`runs`, `run_events`, `routing_rules`, `routing_rules_audit`,
+`llm_call_bodies`, `tenant_budgets`, `agent_budgets`, `streaming_sessions`,
+`run_tool_calls`, `run_search_doc`. (Plus Flyway's `flyway_schema_history`.)
 
 ```
 tenants
@@ -49,6 +54,8 @@ llm_calls
   duration_ms                  INTEGER
   status                       TEXT      -- "ok" | error code
   error_code                   TEXT
+  run_id                       TEXT FK → runs.id (nullable, ON DELETE SET NULL)  -- V2
+  batch_id                     TEXT      -- nullable, V4
   created_at                   TIMESTAMPTZ
 
 tenant_budgets
@@ -68,6 +75,77 @@ agent_budgets
   monthly_warn_percent         INTEGER
   created_at                   TIMESTAMPTZ
   updated_at                   TIMESTAMPTZ
+
+agents
+  id                        UUID PK
+  tenant_id                 UUID FK → tenants.id (ON DELETE CASCADE)
+  name                      TEXT
+  system_prompt             TEXT
+  model_purpose             TEXT
+  tools                     JSONB
+  output_schema             JSONB         -- nullable
+  max_turns                 INTEGER       -- default 25
+  max_run_seconds           INTEGER       -- default 1800
+  webhook_token             TEXT
+  paused                    BOOLEAN       -- default false
+  version                   INTEGER       -- default 1
+  schedule                  TEXT          -- V3
+  last_tick_at              TIMESTAMPTZ   -- V3
+  completion_webhook        TEXT          -- V8
+  completion_webhook_token  TEXT          -- V8
+  event_source_url          TEXT          -- V9
+  session_duration_seconds  INTEGER       -- V9
+  poll_interval_seconds     INTEGER       -- V9
+  max_tokens                INTEGER       -- V10, nullable → runtime default 8192
+  created_at                TIMESTAMPTZ
+  updated_at                TIMESTAMPTZ
+  UNIQUE (tenant_id, name)
+
+runs
+  id                        TEXT PK   -- ULID
+  tenant_id                 UUID FK → tenants.id (ON DELETE CASCADE)
+  agent_id                  UUID FK → agents.id (ON DELETE CASCADE)
+  agent_snapshot            JSONB
+  agent_version             INTEGER
+  parent_run_id             TEXT FK → runs.id (ON DELETE SET NULL)
+  trigger                   TEXT
+  status                    TEXT
+  payload                   JSONB
+  messages_snapshot         JSONB         -- default '[]'
+  output                    JSONB
+  summary                   TEXT
+  error                     TEXT
+  completion_webhook        TEXT
+  completion_webhook_token  TEXT
+  anthropic_batch_id        TEXT          -- V4
+  session_id                UUID          -- V9, nullable
+  started_at                TIMESTAMPTZ
+  finished_at               TIMESTAMPTZ
+
+run_events
+  id        BIGSERIAL PK
+  run_id    TEXT FK → runs.id (ON DELETE CASCADE)
+  ts        TIMESTAMPTZ
+  level     TEXT
+  type      TEXT
+  payload   JSONB
+
+llm_call_bodies
+  call_id                TEXT PK FK → llm_calls.id (ON DELETE CASCADE)
+  request_json           JSONB
+  response_text          TEXT          -- nullable
+  created_at             TIMESTAMPTZ
+  response_content_json  JSONB         -- V11, nullable
+
+streaming_sessions
+  id            UUID PK
+  tenant_id     UUID
+  agent_id      UUID FK → agents.id
+  opened_at     TIMESTAMPTZ
+  closes_at     TIMESTAMPTZ
+  last_poll_at  TIMESTAMPTZ   -- nullable
+  status        TEXT
+  created_at    TIMESTAMPTZ
 ```
 
 ---
@@ -122,13 +200,13 @@ Tables added in `V5__routing_rules.sql`:
 
 ```
 routing_rules
-  id              BIGSERIAL PK
+  id              UUID PK
   tenant_id       UUID FK → tenants.id
   realm           TEXT      -- NULL = match any realm
   purpose         TEXT      -- NULL = match any purpose
   provider        TEXT
   model           TEXT
-  priority        INTEGER   -- lower wins; 1000 = tenant default
+  priority        INTEGER   -- lower wins; default 100, CHECK BETWEEN 0 AND 10000
   allow_override  BOOLEAN
   locked          BOOLEAN   -- when true, ignores allow_override
   created_at      TIMESTAMPTZ
@@ -136,12 +214,13 @@ routing_rules
 
 routing_rules_audit
   id              BIGSERIAL PK
-  rule_id         BIGINT FK → routing_rules.id (nullable, survives deletes)
+  rule_id         UUID      -- bare UUID, no FK (survives deletes)
   tenant_id       UUID
-  action          TEXT      -- "create" | "update" | "delete"
-  changed_by      TEXT
-  payload         JSONB     -- full snapshot of the rule at write time
-  created_at      TIMESTAMPTZ
+  action          TEXT      -- CHECK IN ('create', 'update', 'delete')
+  before_json     JSONB
+  after_json      JSONB
+  set_by          TEXT
+  at              TIMESTAMPTZ   -- default now()
 ```
 
 Schema overview (all tables under `vistierie`):
@@ -239,7 +318,7 @@ immediately after each tool dispatch.
 
 ```
 run_tool_calls
-  id            UUID PK
+  id            TEXT PK   -- ULID (newUlid())
   run_id        TEXT FK → runs.id
   tenant_id     UUID FK → tenants.id
   llm_call_id   TEXT FK → llm_calls.id (nullable)
@@ -270,14 +349,20 @@ Per-run full-text search document, built on run completion by `RunStore.markTerm
 
 ```
 run_search_doc
-  run_id      TEXT PK FK → runs.id
-  tenant_id   UUID FK → tenants.id
-  doc         TSVECTOR      -- Postgres tsvector, 'simple' config
-  updated_at  TIMESTAMPTZ
+  run_id      TEXT PK FK → runs.id (ON DELETE CASCADE)
+  tenant_id   UUID FK → tenants.id (ON DELETE CASCADE)
+  agent_id    UUID          -- nullable, no FK
+  agent_name  TEXT
+  status      TEXT NOT NULL
+  has_error   BOOLEAN NOT NULL  -- default false
+  started_at  TIMESTAMPTZ NOT NULL
+  body        TEXT NOT NULL
+  tsv         tsvector      -- to_tsvector('simple', body), GIN-indexed
+  excerpt     TEXT          -- left(body, 500)
 ```
 
-The `doc` vector indexes agent name, status, run output, tool names, tool
-input/output text, and response text. Used by `GET /runs/search` and
+The `body` text (and its `tsv` vector) indexes agent name, status, run output,
+tool names, tool input/output text, and response text. Used by `GET /runs/search` and
 `GET /admin/runs/search` (ranked hits with snippets).
 
 ### Read API

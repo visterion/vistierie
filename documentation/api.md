@@ -772,7 +772,7 @@ Cheapest view — summary only, no turn detail.
     { "name": "fetch_price", "count": 3, "error_count": 0 },
     { "name": "edgar_search", "count": 1, "error_count": 1 }
   ],
-  "final_output": "{ \"finding\": \"…\" }",
+  "final_output": { "finding": "…" },
   "error": null
 }
 ```
@@ -780,28 +780,41 @@ Cheapest view — summary only, no turn detail.
 #### `view=compact` (default)
 
 Each turn contains the response text and tool I/O. The cumulative
-`llm_input_messages` are **omitted**. Tool `input` and `output` and response
-text longer than 2 000 characters are replaced with a truncation marker:
+`llm_input_messages` are **omitted**. Tool `input` and `output` longer than
+2 000 characters are replaced with a truncation marker whose `preview` holds the
+first 2 000 characters of the serialized value:
 
 ```json
-{ "truncated": true, "full_chars": 8192, "preview": "…first 120 chars…" }
+{ "truncated": true, "full_chars": 8192, "preview": "…first 2 000 chars…" }
 ```
+
+The per-turn response `text` is **not** marker-wrapped: when it exceeds 2 000
+characters it is sliced to the first 2 000 characters with a `…` ellipsis
+appended.
 
 ```json
 {
-  "run_id": "01HZ...",
-  "agent":  "bee",
-  "status": "done",
-  "model":  "claude-sonnet-4-6",
+  "run_id":      "01HZ...",
+  "agent":       "bee",
+  "status":      "done",
+  "model":       "claude-sonnet-4-6",
+  "turn_count":  4,
+  "started_at":  "2026-06-15T07:55:00Z",
+  "finished_at": "2026-06-15T07:55:14Z",
   "turns": [
     {
       "index": 0,
-      "response_text": "I will call fetch_price to check the last close.",
+      "text": "I will call fetch_price to check the last close.",
+      "stop_reason": "tool_use",
+      "tool_use": [
+        { "tool_use_id": "toolu_01A...", "name": "fetch_price", "input": { "ticker": "AAPL" } }
+      ],
+      "tokens": { "input": 128, "output": 64, "cacheCreate": 0, "cacheRead": 0 },
       "tool_calls": [
         {
           "tool_use_id":  "toolu_01A...",
-          "tool_name":    "fetch_price",
-          "tool_type":    "http",
+          "name":         "fetch_price",
+          "type":         "http",
           "input":        { "ticker": "AAPL" },
           "output":       { "close": 213.55 },
           "is_error":     false,
@@ -810,7 +823,7 @@ text longer than 2 000 characters are replaced with a truncation marker:
       ]
     }
   ],
-  "final_output": "{ \"finding\": \"…\" }",
+  "final_output": { "finding": "…" },
   "error": null
 }
 ```
@@ -823,24 +836,32 @@ and the raw response content blocks. Large runs can be paged with
 
 ```json
 {
-  "run_id": "01HZ...",
-  "agent":  "bee",
-  "status": "done",
-  "model":  "claude-sonnet-4-6",
+  "run_id":      "01HZ...",
+  "agent":       "bee",
+  "status":      "done",
+  "model":       "claude-sonnet-4-6",
+  "turn_count":  4,
+  "started_at":  "2026-06-15T07:55:00Z",
+  "finished_at": "2026-06-15T07:55:14Z",
   "turns": [
     {
       "index": 0,
       "llm_input_messages": [ { "role": "user", "content": "…" } ],
-      "response_content_blocks": [
+      "raw_response_content": [
         { "type": "text", "text": "I will call fetch_price…" },
         { "type": "tool_use", "id": "toolu_01A...", "name": "fetch_price", "input": { "ticker": "AAPL" } }
       ],
-      "response_text": "I will call fetch_price to check the last close.",
+      "text": "I will call fetch_price to check the last close.",
+      "stop_reason": "tool_use",
+      "tool_use": [
+        { "tool_use_id": "toolu_01A...", "name": "fetch_price", "input": { "ticker": "AAPL" } }
+      ],
+      "tokens": { "input": 128, "output": 64, "cacheCreate": 0, "cacheRead": 0 },
       "tool_calls": [
         {
           "tool_use_id":  "toolu_01A...",
-          "tool_name":    "fetch_price",
-          "tool_type":    "http",
+          "name":         "fetch_price",
+          "type":         "http",
           "input":        { "ticker": "AAPL" },
           "output":       { "close": 213.55 },
           "is_error":     false,
@@ -849,7 +870,7 @@ and the raw response content blocks. Large runs can be paged with
       ]
     }
   ],
-  "final_output": "{ \"finding\": \"…\" }",
+  "final_output": { "finding": "…" },
   "error": null
 }
 ```
@@ -864,7 +885,6 @@ by the consumer's tool, as Vistierie cannot see inside it.
 
 | HTTP | Meaning |
 |---|---|
-| 400 | Unknown `view` value, or `turns_from`/`turns_to` used with non-`full` view |
 | 401 | Missing or invalid bearer token |
 | 404 | Run not found in calling tenant |
 
@@ -880,19 +900,13 @@ Tenant-scoped: `404` if the run does not belong to the calling tenant.
 
 ```json
 {
-  "id":           "550e8400-...",
-  "run_id":       "01HZ...",
-  "tenant_id":    "550e8400-...",
-  "llm_call_id":  "01HZ...",
-  "turn_index":   0,
   "tool_use_id":  "toolu_01A...",
-  "tool_name":    "fetch_price",
-  "tool_type":    "http",
+  "name":         "fetch_price",
+  "type":         "http",
   "input":        { "ticker": "AAPL" },
   "output":       { "close": 213.55 },
   "is_error":     false,
-  "error_detail": null,
-  "created_at":   "2026-06-15T08:00:01Z"
+  "error_detail": null
 }
 ```
 
@@ -973,15 +987,17 @@ to exactly that single tenant. Returns the same response shape.
 
 ## `GET /healthz`
 
-Liveness probe. Returns `200 OK` with body `OK` as long as the JVM is running.
-No authentication required. Safe to call from load-balancer health checks.
+Liveness probe. Returns `200 OK` with JSON body `{"status":"ok"}` as long as the
+JVM is running. No authentication required. Safe to call from load-balancer
+health checks.
 
 ---
 
 ## `GET /readyz`
 
-Readiness probe. Returns `200 OK` once the database connection is verified.
-Returns `503` if the DB is unreachable. No authentication required.
+Readiness probe. Returns `200 OK` with JSON body `{"status":"ready"}` once the
+database connection is verified. No authentication required. A database failure
+surfaces as a generic `500` (there is no explicit `503`).
 
 ---
 

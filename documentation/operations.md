@@ -258,7 +258,7 @@ LLM-specific series (tagged by `provider`, `model`, `endpoint`, `status`):
 
 | Metric | Type | Notes |
 |---|---|---|
-| `vistierie_llm_calls_total` | counter | One increment per `complete`/`vision` call |
+| `vistierie_llm_calls_total` | counter | One increment per `complete` / `vision` / `vision-multi` call |
 | `vistierie_llm_latency_seconds` | timer/histogram | Wall-clock latency from request to provider response |
 | `vistierie_llm_cost_micros_total` | counter | Cumulative cost in EUR-micros (skipped on error/killed) |
 
@@ -326,6 +326,13 @@ ORDER BY started_at;
 Or via the API: `GET /runs/{id}` returns `children_summary` (status counts);
 `GET /runs/{id}/events` lists `subagent_spawned` events with the
 `child_run_id` to drill into.
+
+### Run transcript & search storage
+
+Completed runs also populate `vistierie.run_search_doc` (a GIN `tsvector`
+index, searchable via `GET /runs/search`) and `vistierie.run_tool_calls`.
+Both are `ON DELETE CASCADE` from `runs`, so they grow and shrink with the
+run table — account for them in backups and capacity planning.
 
 ### Long-poll caveat
 

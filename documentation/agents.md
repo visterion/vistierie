@@ -149,6 +149,18 @@ For parent–child trees (Queen + Bees), call the same endpoint on each
 `child_run_id` extracted from the parent's events or from the
 `children_summary` field on `GET /runs/{id}`.
 
+**Transcript view.** `GET /runs/{id}/transcript?view=digest|compact|full`
+returns a provider-neutral rendering of the run (per-turn text, tool calls,
+outputs). `digest` is status+output+token totals only; `compact` truncates
+large fields; `full` includes raw request messages and response content
+blocks. Drill into one tool call with
+`GET /runs/{id}/tool-calls/{toolUseId}`.
+
+**Search.** `GET /runs/search?q=<text>` runs full-text search over the
+tenant's completed runs (filters: `agent`, `status` (repeatable),
+`has_error`, `from`, `to`, `limit` ≤ 100 default 20, `offset`). The search
+document is built on run completion.
+
 ---
 
 ## Run limits
@@ -187,6 +199,9 @@ Spring 6-field cron expressions: `sec min hour day-of-month month day-of-week`.
 | `* * * * * *` | every second (test-only) |
 
 Invalid expressions are rejected at registration time with HTTP 400.
+
+For scheduled agents, `GET /agents/{name}` returns a computed `next_run_at`
+field — the next cron fire time in UTC.
 
 ### Concurrency: skip-if-running
 

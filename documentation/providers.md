@@ -40,7 +40,7 @@ vistierie:
     openai:
       base-url: https://api.openai.com/v1
       api-key: ${OPENAI_API_KEY:}
-      timeout-seconds: 60
+      timeout-seconds: 60   # accepted but not currently applied to the HTTP client (no-op)
     xai:
       base-url: https://api.x.ai/v1
       api-key: ${XAI_API_KEY:}
@@ -67,7 +67,8 @@ No batch support.
 **Authentication:** Standard AWS credential chain — environment variables
 (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`), shared
 credentials file (`~/.aws/credentials`), EC2 instance profile, or ECS task role.
-No `api-key` property is used.
+No `api-key` property is used. Bedrock API-key (ABSK) auth is also supported via the
+`AWS_BEARER_TOKEN_BEDROCK` environment variable, read natively by the AWS SDK.
 
 **Configuration:**
 
@@ -75,12 +76,14 @@ No `api-key` property is used.
 |----------|---------|---------|----------|
 | `vistierie.bedrock.enabled` | `BEDROCK_ENABLED` | `false` | yes (to enable) |
 | `vistierie.bedrock.region` | `AWS_REGION` | SDK default | no |
+| `vistierie.bedrock.read-timeout-seconds` | — | `180` | no |
 
 ```yaml
 vistierie:
   bedrock:
     enabled: ${BEDROCK_ENABLED:false}
     region: ${AWS_REGION:}
+    read-timeout-seconds: 180
 ```
 
 **Supported model IDs:** Bedrock model ARNs/IDs, e.g.:
