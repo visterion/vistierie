@@ -116,6 +116,12 @@
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>bedrockruntime</artifactId>
         </dependency>
+        <!-- Sync HTTP client for the Bedrock client; declared at compile scope so
+             BedrockProviderConfig can set its socket (read) timeout. -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>apache5-client</artifactId>
+        </dependency>
     </dependencies>
     <build>
         <plugins>
