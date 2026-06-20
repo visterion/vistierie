@@ -17,6 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class BodyRetentionJobTest extends PostgresTestBase {
 
     @Autowired BodyRetentionJob job;
+    @Autowired AuditProperties props;
     @Autowired LlmCallBodyRepository bodies;
     @Autowired TenantRepository tenants;
     @Autowired JdbcClient jdbc;
@@ -46,13 +47,25 @@ class BodyRetentionJobTest extends PostgresTestBase {
 
     @Test
     void deletesOldKeepsRecent() {
+        // Pin an explicit 7-day window so the test exercises the deletion
+        // boundary independently of the shipped default.
+        var props7 = new AuditProperties();
+        props7.setBodyRetentionDays(7);
+        var job7 = new BodyRetentionJob(bodies, props7);
+
         var oldId   = seedCall(Instant.now().minus(10, ChronoUnit.DAYS));
         var freshId = seedCall(Instant.now().minus(1, ChronoUnit.DAYS));
 
-        job.cleanup();
+        job7.cleanup();
 
         assertThat(bodies.findByCallId(oldId)).isEmpty();
         assertThat(bodies.findByCallId(freshId)).isPresent();
+    }
+
+    @Test
+    void shippedDefaultRetentionIs30Days() {
+        // Dracul needs ~a month of bodies to analyse — lock the shipped default.
+        assertThat(props.getBodyRetentionDays()).isEqualTo(30);
     }
 
     @Test

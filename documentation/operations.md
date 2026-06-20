@@ -353,6 +353,60 @@ block indefinitely.
 
 ---
 
+## Data retention
+
+Vistierie has exactly **one** automated cleanup job, and it only touches the
+heavy payloads. Everything else is append-only by design ("audit before
+features") and is removed only structurally, via foreign-key cascade.
+
+### What ages out automatically
+
+`BodyRetentionJob` runs once every 24 h (first run ~1 h after startup) and
+deletes rows from `vistierie.llm_call_bodies` whose `created_at` is older than
+`vistierie.audit.body-retention-days` (**default 30**; `0` disables the job
+entirely). This prunes only the bulky `request_json` / `response_text` /
+`response_content_json` payloads. The corresponding `llm_calls` row — provider,
+model, token counts, EUR-micros cost — is **kept**, and the admin call detail
+then reports `body_evicted: true`.
+
+> The default is 30 days so a consumer that analyses raw transcripts after the
+> fact (e.g. Dracul reviewing its Strigoi/Daywalker calls) has a full month of
+> bodies available. Raise it further or set `0` if you need longer; lower it to
+> reclaim disk sooner.
+
+### What is kept permanently
+
+No time-based TTL exists for any of these — they grow unbounded until the row's
+owner is deleted:
+
+- `llm_calls` (metadata + cost) — intentionally permanent audit history
+- `runs`, `run_events`
+- `run_tool_calls`, `run_search_doc`
+- `streaming_sessions`
+- `routing_rules_audit`
+
+### Structural deletion (foreign-key cascade)
+
+Deletion is driven by *what* you remove, not *how old* it is:
+
+| Delete… | Effect |
+|---|---|
+| a **run** | `run_events`, `run_tool_calls`, `run_search_doc` cascade-delete; `llm_calls.run_id` → `NULL` (the call + cost is kept) |
+| an **agent** | its `runs` cascade (and their children); `llm_calls.agent_id` → `NULL` |
+| an **llm_call** | its body cascades; `run_tool_calls.llm_call_id` → `NULL` |
+| a **tenant** | agents, runs (+children), routing rules, budgets, `run_search_doc` cascade — **but `llm_calls.tenant_id` has no cascade** (`RESTRICT`): a tenant with any recorded LLM call cannot be deleted while those rows exist. This protects the cost/audit ledger. |
+
+### Capacity planning
+
+For high-frequency agents (e.g. a Streaming Bee polling every few minutes),
+`runs` / `run_events` / `run_tool_calls` / `run_search_doc` accumulate one set
+per run with no built-in pruning — the body-retention job is the only lever that
+reclaims space automatically. If you need to trim run history, delete old `runs`
+rows yourself (the cascade above handles the dependent tables); the `llm_calls`
+ledger and its cost totals stay intact via the `SET NULL` links.
+
+---
+
 ## Setting up a new tenant
 
 1. Operator calls `POST /admin/tenants` with the tenant name. A default
@@ -381,7 +435,7 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" \
 
 The response includes `request_json` (full system + messages) and `response_text`. Vision images are stored as `image_redacted` placeholders with sha256 + byte count, actual base64 bytes are not persisted.
 
-If `body_evicted: true`, the body has been deleted by retention. Default retention is 7 days. Increase via `vistierie.audit.body-retention-days` or set to `0` to keep forever.
+If `body_evicted: true`, the body has been deleted by retention. Default retention is 30 days. Change via `vistierie.audit.body-retention-days` or set to `0` to keep forever. See [Data retention](#data-retention) for the full picture of what ages out and what is kept permanently.
 
 ## Reviewing cost over time
 

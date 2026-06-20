@@ -12,7 +12,7 @@ import org.springframework.validation.annotation.Validated;
 public class AuditProperties {
 
     @Min(0) @Max(3650)
-    private int bodyRetentionDays = 7;
+    private int bodyRetentionDays = 30;
 
     public int getBodyRetentionDays() { return bodyRetentionDays; }
     public void setBodyRetentionDays(int v) { this.bodyRetentionDays = v; }

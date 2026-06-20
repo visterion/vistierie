@@ -60,7 +60,7 @@ Credentials use the standard AWS credential chain. No API key property.
 
 | Property | Default | Description |
 |----------|---------|-------------|
-| `vistierie.audit.body-retention-days` | `7` | How long LLM call bodies are retained before deletion |
+| `vistierie.audit.body-retention-days` | `30` | How long LLM call bodies (request/response payloads) are kept before the daily retention job deletes them. `0` keeps them forever. Only the bodies age out — the `llm_calls` metadata/cost row is retained regardless. |
 
 ---
 
