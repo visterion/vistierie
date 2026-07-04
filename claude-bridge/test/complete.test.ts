@@ -79,12 +79,32 @@ describe("complete", () => {
 
   it("throws BridgeError on error result", async () => {
     queryMock.mockReturnValue(sdkStream([
-      { type: "result", subtype: "error_during_execution", result: "Claude AI usage limit reached" },
+      { type: "result", subtype: "error_during_execution", errors: ["Claude AI usage limit reached"] },
     ]));
     await expect(complete({
       model: "claude-opus-4-8",
       messages: [{ role: "user", content: "hi" }],
     })).rejects.toMatchObject({ status: 429, code: "subscription_exhausted" });
+  });
+
+  it("maps auth error text from errors[] to auth_expired", async () => {
+    queryMock.mockReturnValue(sdkStream([
+      { type: "result", subtype: "error_during_execution", errors: ["OAuth token has expired"] },
+    ]));
+    await expect(complete({
+      model: "claude-opus-4-8",
+      messages: [{ role: "user", content: "hi" }],
+    })).rejects.toMatchObject({ status: 500, code: "auth_expired" });
+  });
+
+  it("falls back to the subtype when an error result has no error text", async () => {
+    queryMock.mockReturnValue(sdkStream([
+      { type: "result", subtype: "error_max_turns", errors: [] },
+    ]));
+    await expect(complete({
+      model: "claude-opus-4-8",
+      messages: [{ role: "user", content: "hi" }],
+    })).rejects.toMatchObject({ status: 500, code: "sdk_error", message: "error_max_turns" });
   });
 
   it("throws BridgeError when the stream ends without a result", async () => {
