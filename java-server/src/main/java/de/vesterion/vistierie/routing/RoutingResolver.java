@@ -51,11 +51,16 @@ public class RoutingResolver {
                         " realm=" + realm + " purpose=" + purpose));
 
         var effectiveOverride = match.effectiveAllowOverride();
-        var model = (requestedModel != null && effectiveOverride)
+        boolean overridden = requestedModel != null && effectiveOverride;
+        var model = overridden ? requestedModel : match.model();
+        // If the consumer overrode the model, keep that model on fallback too —
+        // the override expresses a model choice, the fallback only swaps the provider.
+        var fallbackModel = (overridden && match.fallbackProvider() != null)
                 ? requestedModel
-                : match.model();
+                : match.fallbackModel();
 
-        return new RoutingDecision(match.provider(), model, effectiveOverride);
+        return new RoutingDecision(match.provider(), model, effectiveOverride,
+                match.fallbackProvider(), fallbackModel);
     }
 
     private record CacheEntry(long version, List<RoutingRule> rules) {}

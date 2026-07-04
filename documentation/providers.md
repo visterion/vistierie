@@ -24,6 +24,46 @@ multi-image vision (`/llm/vision-multi`), tool use, and batch processing.
 
 ---
 
+## Claude Subscription (via claude-bridge)
+
+**Name:** `claude-subscription`
+
+Talks to the `claude-bridge` sidecar over plain HTTP (`POST /v1/complete`), which in
+turn calls the Claude Agent SDK authenticated with a Claude Max subscription token
+instead of a per-token API key. Supports text completion, vision, and multi-image
+vision (`/llm/vision-multi`). **No batch support** — batch traffic always stays on
+the `anthropic` (API-key) provider.
+
+Off by default. Enable it only once the `claude-bridge` sidecar (Task 6) is deployed
+and reachable at `base-url`.
+
+**Error semantics:**
+
+- Bridge returns HTTP `429` with `{"error":{"code":"subscription_exhausted",...}}`
+  when the Max subscription's quota is exhausted for the window. Vistierie surfaces
+  this as `ProviderException(429, "subscription_exhausted", ...)` — a routing rule's
+  fallback provider can catch this and retry on `anthropic`.
+- Any other bridge/SDK failure (e.g. `auth_expired`, transport errors, malformed
+  response) is surfaced as `ProviderException(502, <code>, ...)` so it behaves like
+  a normal upstream outage for routing/fallback purposes.
+
+**Configuration:**
+
+| Property | Env var | Default | Required |
+|----------|---------|---------|----------|
+| `vistierie.claude-subscription.enabled` | `CLAUDE_SUBSCRIPTION_ENABLED` | `false` | yes (to enable) |
+| `vistierie.claude-subscription.base-url` | `CLAUDE_BRIDGE_URL` | `http://claude-bridge:8091` | no |
+| `vistierie.claude-subscription.timeout-seconds` | — | `300` | no |
+
+**Typical pairing:** a routing rule targets `claude-subscription` as the primary
+provider with `anthropic` configured as its fallback, so subscription-quota
+exhaustion (`429`) or bridge/SDK failure (`502`) transparently falls back to the
+metered API-key provider rather than failing the request.
+
+**Supported model IDs:** Any Anthropic model string, e.g. `claude-opus-4-8`.
+
+---
+
 ## OpenAI-compatible
 
 **Names:** `openai`, `xai`, or any name defined under `vistierie.providers.*`

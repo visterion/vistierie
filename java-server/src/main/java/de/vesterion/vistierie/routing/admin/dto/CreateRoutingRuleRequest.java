@@ -8,6 +8,8 @@ public record CreateRoutingRuleRequest(
         String purpose,
         @NotBlank String provider,
         @NotBlank String model,
+        String fallback_provider,
+        String fallback_model,
         Integer priority,
         boolean allow_override,
         boolean locked

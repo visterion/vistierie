@@ -26,8 +26,9 @@ public class AdminRoutingRuleController {
     public RoutingRuleResponse create(@Valid @RequestBody CreateRoutingRuleRequest req) {
         try {
             var r = svc.create(req.tenant(), req.realm(), req.purpose(),
-                    req.provider(), req.model(), req.priority(),
-                    req.allow_override(), req.locked());
+                    req.provider(), req.model(),
+                    req.fallback_provider(), req.fallback_model(),
+                    req.priority(), req.allow_override(), req.locked());
             return RoutingRuleResponse.of(r);
         } catch (AdminRoutingRuleService.ConflictException e) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
@@ -62,8 +63,9 @@ public class AdminRoutingRuleController {
     public RoutingRuleResponse patch(@PathVariable UUID id,
                                      @RequestBody PatchRoutingRuleRequest req) {
         try {
-            var r = svc.patch(id, req.provider(), req.model(), req.priority(),
-                    req.allow_override(), req.locked());
+            var r = svc.patch(id, req.provider(), req.model(),
+                    req.fallback_provider(), req.fallback_model(), req.clear_fallback(),
+                    req.priority(), req.allow_override(), req.locked());
             return RoutingRuleResponse.of(r);
         } catch (AdminRoutingRuleService.BadInputException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());

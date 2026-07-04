@@ -11,9 +11,12 @@ import de.vesterion.vistierie.llm.dto.LlmResponse;
 import de.vesterion.vistierie.llm.dto.MultiVisionRequest;
 import de.vesterion.vistierie.llm.dto.VisionRequest;
 import de.vesterion.vistierie.pricing.PriceTable;
+import de.vesterion.vistierie.provider.ClaudeSubscriptionProvider;
 import de.vesterion.vistierie.provider.LlmProvider;
 import de.vesterion.vistierie.provider.ProviderRegistry;
 import de.vesterion.vistierie.provider.ProviderRequest;
+import de.vesterion.vistierie.provider.ProviderResponse;
+import de.vesterion.vistierie.routing.RoutingDecision;
 import de.vesterion.vistierie.routing.RoutingResolver;
 import org.springframework.stereotype.Service;
 
@@ -46,57 +49,38 @@ public class LlmService {
 
     public record InvocationResult(LlmResponse response, BudgetEnforcer.BudgetCheckResult budget) {}
 
+    /** Endpoint-specific provider invocation; model varies between primary and fallback attempt. */
+    private interface ProviderCall {
+        ProviderResponse run(LlmProvider provider, String model);
+    }
+
+    private record CallContext(UUID tenantId, UUID agentId, String purpose, String realm,
+                               String endpoint, BudgetEnforcer.BudgetCheckResult budget) {}
+
     public InvocationResult complete(CompleteRequest req) {
         var tenantId = RequestContext.requireTenantId();
         var tenant = RequestContext.requireTenantName();
         var agent = agents.findByName(tenantId, req.agent_name())
                 .orElseThrow(() -> BudgetException.agentNotFound(tenant, req.agent_name()));
         var budget = budgets.checkOrThrow(tenantId, tenant, agent.id(), agent.name());
-        var id = randomCallId();
 
         var killBlocked = isKilled(tenantId);
         if (killBlocked != null) {
-            recordKilled(id, tenantId, req.purpose(), req.realm(), "complete");
+            recordKilled(randomCallId(), tenantId, req.purpose(), req.realm(), "complete");
             metrics.record("n/a", "n/a", "complete", "killed", 0, 0);
             throw killBlocked;
         }
 
         var decision = routing.resolve(tenant, req.realm(), req.purpose(), req.model());
-        var provider = providers.get(decision.provider());
+        int maxTokens = req.max_tokens() == null ? 1024 : req.max_tokens();
+        var ctx = new CallContext(tenantId, agent.id(), req.purpose(), req.realm(), "complete", budget);
 
-        var pReq = new ProviderRequest(
-                decision.model(),
-                req.max_tokens() == null ? 1024 : req.max_tokens(),
-                req.temperature(),
-                req.system(),
-                req.messages(),
-                null, null, null);
+        java.util.function.Function<String, ProviderRequest> reqForModel = model ->
+                new ProviderRequest(model, maxTokens, req.temperature(), req.system(),
+                        req.messages(), null, null, null);
 
-        var start = System.nanoTime();
-        try {
-            var pRes = provider.complete(pReq);
-            var dur = (int) ((System.nanoTime() - start) / 1_000_000);
-            var cost = prices.costMicros(decision.model(), pRes.usage());
-            recorder.insertWithBody(new LlmCallRecorder.Row(
-                    id, tenantId, agent.id(), req.purpose(), req.realm(),
-                    decision.provider(), decision.model(), "complete",
-                    pRes.usage().inputTokens(), pRes.usage().outputTokens(),
-                    pRes.usage().cacheCreationInputTokens(), pRes.usage().cacheReadInputTokens(),
-                    cost, dur, "ok", null, null, null), pReq, pRes);
-            metrics.record(decision.provider(), decision.model(), "complete", "ok", dur, cost);
-            return new InvocationResult(new LlmResponse(pRes.text(), pRes.stopReason(), pRes.usage(),
-                    decision.provider(), decision.model(), cost, id), budget);
-        } catch (LlmProvider.ProviderException e) {
-            var dur = (int) ((System.nanoTime() - start) / 1_000_000);
-            var status = e.statusCode() >= 500 ? "error" : "rate_limited";
-            recorder.insertWithBody(new LlmCallRecorder.Row(
-                    id, tenantId, agent.id(), req.purpose(), req.realm(),
-                    decision.provider(), decision.model(), "complete",
-                    0, 0, 0, 0, 0, dur, status,
-                    e.errorCode(), null, null), pReq, null);
-            metrics.record(decision.provider(), decision.model(), "complete", status, dur, 0);
-            throw e;
-        }
+        return invoke(ctx, decision, reqForModel,
+                (provider, model) -> provider.complete(reqForModel.apply(model)));
     }
 
     public InvocationResult vision(VisionRequest req) {
@@ -105,58 +89,33 @@ public class LlmService {
         var agent = agents.findByName(tenantId, req.agent_name())
                 .orElseThrow(() -> BudgetException.agentNotFound(tenant, req.agent_name()));
         var budget = budgets.checkOrThrow(tenantId, tenant, agent.id(), agent.name());
-        var id = randomCallId();
 
         var killBlocked = isKilled(tenantId);
         if (killBlocked != null) {
-            recordKilled(id, tenantId, req.purpose(), req.realm(), "vision");
+            recordKilled(randomCallId(), tenantId, req.purpose(), req.realm(), "vision");
             metrics.record("n/a", "n/a", "vision", "killed", 0, 0);
             throw killBlocked;
         }
 
         var decision = routing.resolve(tenant, req.realm(), req.purpose(), req.model());
-        var provider = providers.get(decision.provider());
+        int maxTokens = req.max_tokens() == null ? 1024 : req.max_tokens();
+        var ctx = new CallContext(tenantId, agent.id(), req.purpose(), req.realm(), "vision", budget);
 
-        var pReq = new ProviderRequest(
-                decision.model(),
-                req.max_tokens() == null ? 1024 : req.max_tokens(),
-                null, null,
-                java.util.List.of(java.util.Map.of("role", "user", "content",
-                    java.util.List.of(
-                        java.util.Map.of("type", "image",
-                               "source", java.util.Map.of("type", "base64",
-                                                "media_type", req.image().media_type(),
-                                                "data", req.image().data())),
-                        java.util.Map.of("type", "text", "text", req.prompt())))),
-                null, null, null);
+        java.util.function.Function<String, ProviderRequest> reqForModel = model ->
+                new ProviderRequest(
+                        model, maxTokens, null, null,
+                        java.util.List.of(java.util.Map.of("role", "user", "content",
+                            java.util.List.of(
+                                java.util.Map.of("type", "image",
+                                       "source", java.util.Map.of("type", "base64",
+                                                        "media_type", req.image().media_type(),
+                                                        "data", req.image().data())),
+                                java.util.Map.of("type", "text", "text", req.prompt())))),
+                        null, null, null);
 
-        var start = System.nanoTime();
-        try {
-            var pRes = provider.vision(decision.model(),
-                    req.max_tokens() == null ? 1024 : req.max_tokens(),
-                    req.image().media_type(), req.image().data(), req.prompt());
-            var dur = (int) ((System.nanoTime() - start) / 1_000_000);
-            var cost = prices.costMicros(decision.model(), pRes.usage());
-            recorder.insertWithBody(new LlmCallRecorder.Row(
-                    id, tenantId, agent.id(), req.purpose(), req.realm(),
-                    decision.provider(), decision.model(), "vision",
-                    pRes.usage().inputTokens(), pRes.usage().outputTokens(),
-                    pRes.usage().cacheCreationInputTokens(), pRes.usage().cacheReadInputTokens(),
-                    cost, dur, "ok", null, null, null), pReq, pRes);
-            metrics.record(decision.provider(), decision.model(), "vision", "ok", dur, cost);
-            return new InvocationResult(new LlmResponse(pRes.text(), pRes.stopReason(), pRes.usage(),
-                    decision.provider(), decision.model(), cost, id), budget);
-        } catch (LlmProvider.ProviderException e) {
-            var dur = (int) ((System.nanoTime() - start) / 1_000_000);
-            var status = e.statusCode() >= 500 ? "error" : "rate_limited";
-            recorder.insertWithBody(new LlmCallRecorder.Row(
-                    id, tenantId, agent.id(), req.purpose(), req.realm(),
-                    decision.provider(), decision.model(), "vision",
-                    0, 0, 0, 0, 0, dur, status,
-                    e.errorCode(), null, null), pReq, null);
-            metrics.record(decision.provider(), decision.model(), "vision", status, dur, 0);
-            throw e;
-        }
+        return invoke(ctx, decision, reqForModel,
+                (provider, model) -> provider.vision(model, maxTokens,
+                        req.image().media_type(), req.image().data(), req.prompt()));
     }
 
     public InvocationResult visionMulti(MultiVisionRequest req) {
@@ -165,18 +124,17 @@ public class LlmService {
         var agent = agents.findByName(tenantId, req.agent_name())
                 .orElseThrow(() -> BudgetException.agentNotFound(tenant, req.agent_name()));
         var budget = budgets.checkOrThrow(tenantId, tenant, agent.id(), agent.name());
-        var id = randomCallId();
 
         var killBlocked = isKilled(tenantId);
         if (killBlocked != null) {
-            recordKilled(id, tenantId, req.purpose(), req.realm(), "vision-multi");
+            recordKilled(randomCallId(), tenantId, req.purpose(), req.realm(), "vision-multi");
             metrics.record("n/a", "n/a", "vision-multi", "killed", 0, 0);
             throw killBlocked;
         }
 
         var decision = routing.resolve(tenant, req.realm(), req.purpose(), req.model());
-        var provider = providers.get(decision.provider());
         int maxTokens = req.max_tokens() == null ? 1024 : req.max_tokens();
+        var ctx = new CallContext(tenantId, agent.id(), req.purpose(), req.realm(), "vision-multi", budget);
 
         var content = new java.util.ArrayList<Object>();
         var images = new java.util.ArrayList<LlmProvider.ImageInput>();
@@ -187,33 +145,92 @@ public class LlmService {
             images.add(new LlmProvider.ImageInput(img.media_type(), img.data()));
         }
         content.add(java.util.Map.of("type", "text", "text", req.prompt()));
-        var pReq = new ProviderRequest(decision.model(), maxTokens, null, null,
-                java.util.List.of(java.util.Map.of("role", "user", "content", content)),
-                null, null, null);
 
+        java.util.function.Function<String, ProviderRequest> reqForModel = model ->
+                new ProviderRequest(model, maxTokens, null, null,
+                        java.util.List.of(java.util.Map.of("role", "user", "content", content)),
+                        null, null, null);
+
+        return invoke(ctx, decision, reqForModel,
+                (provider, model) -> provider.visionMulti(model, maxTokens, images, req.prompt()));
+    }
+
+    private InvocationResult invoke(CallContext ctx, RoutingDecision decision,
+                                    java.util.function.Function<String, ProviderRequest> reqForModel,
+                                    ProviderCall call) {
+        try {
+            return attempt(ctx, decision.provider(), decision.model(), reqForModel, call);
+        } catch (RuntimeException e) {
+            if (decision.fallbackProvider() == null || !shouldFallback(e)) throw e;
+            metrics.recordFallback(decision.provider(), decision.fallbackProvider(), fallbackReason(e));
+            return attempt(ctx, decision.fallbackProvider(), decision.fallbackModel(), reqForModel, call);
+        }
+    }
+
+    /** One provider attempt with its own call id, audit row, and metrics. */
+    private InvocationResult attempt(CallContext ctx, String providerName, String model,
+                                     java.util.function.Function<String, ProviderRequest> reqForModel,
+                                     ProviderCall call) {
+        var provider = providers.get(providerName);
+        var pReq = reqForModel.apply(model);
+        var id = randomCallId();
         var start = System.nanoTime();
         try {
-            var pRes = provider.visionMulti(decision.model(), maxTokens, images, req.prompt());
+            var pRes = call.run(provider, model);
             var dur = (int) ((System.nanoTime() - start) / 1_000_000);
-            var cost = prices.costMicros(decision.model(), pRes.usage());
+            boolean subscription = ClaudeSubscriptionProvider.NAME.equals(providerName);
+            long cost = subscription ? 0L : prices.costMicros(model, pRes.usage());
+            Long shadow = subscription ? shadowCost(model, pRes.usage()) : null;
             recorder.insertWithBody(new LlmCallRecorder.Row(
-                    id, tenantId, agent.id(), req.purpose(), req.realm(),
-                    decision.provider(), decision.model(), "vision-multi",
+                    id, ctx.tenantId(), ctx.agentId(), ctx.purpose(), ctx.realm(),
+                    providerName, model, ctx.endpoint(),
                     pRes.usage().inputTokens(), pRes.usage().outputTokens(),
                     pRes.usage().cacheCreationInputTokens(), pRes.usage().cacheReadInputTokens(),
-                    cost, dur, "ok", null, null, null), pReq, pRes);
-            metrics.record(decision.provider(), decision.model(), "vision-multi", "ok", dur, cost);
-            return new InvocationResult(new LlmResponse(pRes.text(), pRes.stopReason(), pRes.usage(),
-                    decision.provider(), decision.model(), cost, id), budget);
+                    cost, shadow, dur, "ok", null, null, null), pReq, pRes);
+            metrics.record(providerName, model, ctx.endpoint(), "ok", dur, cost);
+            if (shadow != null) {
+                metrics.recordShadowCost(providerName, model, ctx.endpoint(), shadow);
+            }
+            return new InvocationResult(new LlmResponse(pRes.text(), pRes.stopReason(),
+                    pRes.usage(), providerName, model, cost, id), ctx.budget());
         } catch (LlmProvider.ProviderException e) {
-            var dur = (int) ((System.nanoTime() - start) / 1_000_000);
-            var status = e.statusCode() >= 500 ? "error" : "rate_limited";
-            recorder.insertWithBody(new LlmCallRecorder.Row(
-                    id, tenantId, agent.id(), req.purpose(), req.realm(),
-                    decision.provider(), decision.model(), "vision-multi",
-                    0, 0, 0, 0, 0, dur, status, e.errorCode(), null, null), pReq, null);
-            metrics.record(decision.provider(), decision.model(), "vision-multi", status, dur, 0);
+            recordFailure(ctx, id, providerName, model, pReq, start,
+                    e.statusCode() >= 500 ? "error" : "rate_limited", e.errorCode());
             throw e;
+        } catch (UnsupportedOperationException e) {
+            recordFailure(ctx, id, providerName, model, pReq, start, "error", "unsupported_operation");
+            throw e;
+        }
+    }
+
+    private void recordFailure(CallContext ctx, String id, String providerName, String model,
+                               ProviderRequest pReq, long start, String status, String errorCode) {
+        var dur = (int) ((System.nanoTime() - start) / 1_000_000);
+        recorder.insertWithBody(new LlmCallRecorder.Row(
+                id, ctx.tenantId(), ctx.agentId(), ctx.purpose(), ctx.realm(),
+                providerName, model, ctx.endpoint(),
+                0, 0, 0, 0, 0, null, dur, status, errorCode, null, null), pReq, null);
+        metrics.record(providerName, model, ctx.endpoint(), status, dur, 0);
+    }
+
+    private static boolean shouldFallback(RuntimeException e) {
+        if (e instanceof UnsupportedOperationException) return true;
+        if (e instanceof LlmProvider.ProviderException pe) {
+            return pe.statusCode() == 429 || pe.statusCode() >= 500;
+        }
+        return false;
+    }
+
+    private static String fallbackReason(RuntimeException e) {
+        if (e instanceof UnsupportedOperationException) return "unsupported";
+        return ((LlmProvider.ProviderException) e).statusCode() == 429 ? "rate_limited" : "error";
+    }
+
+    private Long shadowCost(String model, de.vesterion.vistierie.pricing.Usage usage) {
+        try {
+            return prices.costMicros(model, usage);
+        } catch (PriceTable.UnknownModelException e) {
+            return null;
         }
     }
 

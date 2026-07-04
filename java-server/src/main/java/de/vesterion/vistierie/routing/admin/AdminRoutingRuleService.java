@@ -46,13 +46,16 @@ public class AdminRoutingRuleService {
 
     @Transactional
     public RoutingRule create(String tenantName, String realm, String purpose,
-                              String provider, String model, Integer priority,
+                              String provider, String model,
+                              String fallbackProvider, String fallbackModel,
+                              Integer priority,
                               boolean allowOverride, boolean locked) {
         var tenant = tenants.findByName(tenantName)
                 .orElseThrow(() -> new BadInputException("unknown tenant " + tenantName));
         if (!providers.has(provider)) {
             throw new BadInputException("unknown provider " + provider);
         }
+        validateFallback(provider, fallbackProvider, fallbackModel);
         int p = priority == null ? 100 : priority;
         if (p < 0 || p > 10000) throw new BadInputException("priority out of range");
 
@@ -62,7 +65,8 @@ public class AdminRoutingRuleService {
 
         var now = Instant.now();
         var rule = new RoutingRule(UUID.randomUUID(), tenant.id(), realm, purpose,
-                provider, model, p, allowOverride, locked, now, now);
+                provider, model, fallbackProvider, fallbackModel,
+                p, allowOverride, locked, now, now);
         try {
             rules.insert(rule);
         } catch (DuplicateKeyException e) {
@@ -71,6 +75,19 @@ public class AdminRoutingRuleService {
         audit.record("create", rule.id(), tenant.id(), null, rule, "admin");
         resolver.bumpVersion();
         return rule;
+    }
+
+    private void validateFallback(String provider, String fallbackProvider, String fallbackModel) {
+        if ((fallbackProvider == null) != (fallbackModel == null)) {
+            throw new BadInputException("fallback_provider and fallback_model must be set together");
+        }
+        if (fallbackProvider == null) return;
+        if (!providers.has(fallbackProvider)) {
+            throw new BadInputException("unknown fallback provider " + fallbackProvider);
+        }
+        if (fallbackProvider.equals(provider)) {
+            throw new BadInputException("fallback provider must differ from primary provider");
+        }
     }
 
     public List<RoutingRule> list(String tenantNameFilter, String realmFilter, String purposeFilter) {
@@ -89,8 +106,9 @@ public class AdminRoutingRuleService {
     }
 
     @Transactional
-    public RoutingRule patch(UUID id, String provider, String model, Integer priority,
-                             Boolean allowOverride, Boolean locked) {
+    public RoutingRule patch(UUID id, String provider, String model,
+                             String fallbackProvider, String fallbackModel, Boolean clearFallback,
+                             Integer priority, Boolean allowOverride, Boolean locked) {
         var before = get(id);
         var newProvider = provider != null ? provider : before.provider();
         var newModel = model != null ? model : before.model();
@@ -105,7 +123,22 @@ public class AdminRoutingRuleService {
             throw new BadInputException("priority out of range");
         }
 
-        rules.update(id, newProvider, newModel, newPriority, newAllow, newLocked);
+        String newFbProvider;
+        String newFbModel;
+        if (Boolean.TRUE.equals(clearFallback)) {
+            newFbProvider = null;
+            newFbModel = null;
+        } else if (fallbackProvider != null || fallbackModel != null) {
+            newFbProvider = fallbackProvider;
+            newFbModel = fallbackModel;
+        } else {
+            newFbProvider = before.fallbackProvider();
+            newFbModel = before.fallbackModel();
+        }
+        validateFallback(newProvider, newFbProvider, newFbModel);
+
+        rules.update(id, newProvider, newModel, newFbProvider, newFbModel,
+                newPriority, newAllow, newLocked);
         var after = rules.findById(id).orElseThrow();
         audit.record("update", id, before.tenantId(), before, after, "admin");
         resolver.bumpVersion();
