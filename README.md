@@ -51,6 +51,10 @@ and operational controls are first-class concepts, not add-ons.
 - **Privacy-locked routing**: rules can pin a sensitive realm (e.g.
   `medical`) to a specific provider regardless of any model override
   in the request body.
+- **Cost-optimized fallback routing**: routing rules carry an optional
+  one-step fallback provider+model, including Claude-subscription support
+  via the `claude-bridge` sidecar, so a failed or quota-limited primary
+  call degrades gracefully instead of failing the request.
 
 ---
 
