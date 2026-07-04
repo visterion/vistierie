@@ -468,3 +468,86 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" \
 After this rule is created, every `llm_calls` row for `realm=medical`
 will show the locked provider+model, never the consumer's requested
 model. Use `/admin/llm-calls?tenant=hivemem&realm=medical` to verify.
+
+---
+
+## claude-bridge (subscription provider)
+
+`claude-bridge` is a small TypeScript sidecar that wraps the Claude Agent SDK
+so Vistierie can route calls through a Claude subscription (OAuth token)
+instead of the pay-per-token Anthropic API. It exposes `POST /v1/complete`
+and `GET /healthz` on port `8091` and is published as
+`ghcr.io/visterion/vistierie-claude-bridge` with the same tag scheme as the
+main image (`:main`, `:vX.Y.Z`, `:latest` on release tags).
+
+### Deployment
+
+Run the sidecar on the same private Docker network as Vistierie so it is
+reachable at the default `http://claude-bridge:8091`:
+
+```bash
+docker run -d --name claude-bridge --network hivemem-net \
+  -e CLAUDE_CODE_OAUTH_TOKEN='sk-ant-oat01-...' \
+  ghcr.io/visterion/vistierie-claude-bridge:main
+```
+
+### Token setup
+
+On a machine with Claude Code installed and an active subscription, run:
+
+```bash
+claude setup-token
+```
+
+This prints a token in the form `sk-ant-oat01-...`. Copy it into the
+container's `CLAUDE_CODE_OAUTH_TOKEN` environment variable — it is the only
+credential the sidecar needs.
+
+### Token renewal
+
+Subscription OAuth tokens expire periodically. Expiry surfaces as:
+
+- a `500` response with `auth_expired` from claude-bridge, logged by
+  Vistierie as a failed `claude-subscription` provider call, and
+- a spike in the `vistierie_llm_fallback_total` metric (calls falling back
+  to the configured `fallback_provider`) if a routing rule has one configured.
+
+Renew by re-running `claude setup-token`, updating
+`CLAUDE_CODE_OAUTH_TOKEN` on the container, and restarting it:
+
+```bash
+docker stop claude-bridge && docker rm claude-bridge
+docker run -d --name claude-bridge --network hivemem-net \
+  -e CLAUDE_CODE_OAUTH_TOKEN='sk-ant-oat01-...' \
+  ghcr.io/visterion/vistierie-claude-bridge:main
+```
+
+### Enabling in Vistierie
+
+```bash
+export CLAUDE_SUBSCRIPTION_ENABLED=true
+# optional, only needed if the sidecar isn't reachable at the default:
+export CLAUDE_BRIDGE_URL=http://claude-bridge:8091
+```
+
+### Rollout
+
+Roll out gradually rather than flipping every purpose at once:
+
+1. Deploy `claude-bridge` **disabled** (`CLAUDE_SUBSCRIPTION_ENABLED=false` or unset).
+2. Start the sidecar and confirm `GET /healthz` on it.
+3. Enable the provider and point **one** routing rule at
+   `provider=claude-subscription`, with `fallback_provider=anthropic` (and a
+   matching `fallback_model`) so a token/quota failure falls back
+   automatically instead of failing the call.
+4. Watch `vistierie_llm_shadow_cost_micros_total` (what the calls would have
+   cost via the API — your realized savings) and `vistierie_llm_fallback_total`
+   (how often the fallback is triggered) in Grafana.
+5. Once stable, migrate more purposes to `claude-subscription`.
+
+### Known limitation
+
+`max_tokens` is **not enforced** on subscription-routed calls: the Claude
+Agent SDK has no per-call output-token cap, unlike the direct Anthropic API.
+Do not rely on `max_tokens` to bound response length or cost for purposes
+routed through `claude-subscription`.

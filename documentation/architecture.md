@@ -22,7 +22,7 @@
 ## Data model
 
 The `vistierie` schema holds the following tables, created across migrations
-V1–V11. The 13 application tables are: `tenants`, `llm_calls`, `agents`,
+V1–V12 (V12 adds columns only, no new tables). The 13 application tables are: `tenants`, `llm_calls`, `agents`,
 `runs`, `run_events`, `routing_rules`, `routing_rules_audit`,
 `llm_call_bodies`, `tenant_budgets`, `agent_budgets`, `streaming_sessions`,
 `run_tool_calls`, `run_search_doc`. (Plus Flyway's `flyway_schema_history`.)
@@ -56,6 +56,7 @@ llm_calls
   error_code                   TEXT
   run_id                       TEXT FK → runs.id (nullable, ON DELETE SET NULL)  -- V2
   batch_id                     TEXT      -- nullable, V4
+  shadow_cost_micros           BIGINT    -- V12, nullable; what a subscription-served call would have cost via the API
   created_at                   TIMESTAMPTZ
 
 tenant_budgets
@@ -192,6 +193,15 @@ in v1, the private network is the trust boundary (see spec §8.1).
 Production image: `ghcr.io/visterion/vistierie:main` (also tagged `latest` and `v1.0.0` on releases)  
 Listen port: `8090`
 
+Optionally, the `claude-bridge` sidecar (a TypeScript service wrapping the
+Claude Agent SDK) runs on the same private network at `claude-bridge:8091`,
+published as `ghcr.io/visterion/vistierie-claude-bridge` with the same tag
+scheme. Vistierie's `ClaudeSubscriptionProvider` calls it over plain HTTP
+when `vistierie.claude-subscription.enabled=true`, routing calls through a
+Claude subscription (OAuth token) instead of the pay-per-token Anthropic API.
+See [providers.md](providers.md) and
+[operations.md](operations.md#claude-bridge-subscription-provider).
+
 ---
 
 ## Routing rules (Slice 6)
@@ -209,6 +219,8 @@ routing_rules
   priority        INTEGER   -- lower wins; default 100, CHECK BETWEEN 0 AND 10000
   allow_override  BOOLEAN
   locked          BOOLEAN   -- when true, ignores allow_override
+  fallback_provider TEXT    -- V12, nullable; one-step fallback if the primary call fails
+  fallback_model    TEXT    -- V12, nullable; CHECK (fallback_provider IS NULL) = (fallback_model IS NULL)
   created_at      TIMESTAMPTZ
   updated_at      TIMESTAMPTZ
 
