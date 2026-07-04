@@ -105,7 +105,9 @@ public class AdminRoutingRuleService {
             throw new BadInputException("priority out of range");
         }
 
-        rules.update(id, newProvider, newModel, newPriority, newAllow, newLocked);
+        rules.update(id, newProvider, newModel,
+                before.fallbackProvider(), before.fallbackModel(),
+                newPriority, newAllow, newLocked);
         var after = rules.findById(id).orElseThrow();
         audit.record("update", id, before.tenantId(), before, after, "admin");
         resolver.bumpVersion();
