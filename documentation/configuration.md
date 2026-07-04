@@ -32,6 +32,16 @@ All properties can be set via `application.yaml` or overridden by environment va
 
 ---
 
+## Claude Subscription Provider
+
+| Property | Env var | Default | Description |
+|----------|---------|---------|-------------|
+| `vistierie.claude-subscription.enabled` | `CLAUDE_SUBSCRIPTION_ENABLED` | `false` | Set to `true` to enable the `claude-subscription` provider |
+| `vistierie.claude-subscription.base-url` | `CLAUDE_BRIDGE_URL` | `http://claude-bridge:8091` | Base URL of the `claude-bridge` sidecar |
+| `vistierie.claude-subscription.timeout-seconds` | — | `300` | HTTP read timeout, in seconds |
+
+---
+
 ## OpenAI-compatible Providers
 
 Defined under `vistierie.providers.<name>`:
