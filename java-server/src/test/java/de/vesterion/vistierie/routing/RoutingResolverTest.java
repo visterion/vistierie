@@ -114,4 +114,34 @@ class RoutingResolverTest {
         assertThat(d.model()).isEqualTo("v2");
         verify(rules, atLeastOnce()).findByTenant(tenantId);
     }
+
+    @Test void resolvePassesFallbackThrough() {
+        var ruleWithFallback = new RoutingRule(UUID.randomUUID(), tenantId, "r", "p",
+                "anthropic", "claude-3-5-sonnet", "anthropic", "claude-haiku-4-5",
+                100, false, false, now, now);
+        when(rules.findByTenant(tenantId)).thenReturn(List.of(ruleWithFallback));
+        var d = resolver.resolve("tn", "r", "p", null);
+        assertThat(d.fallbackProvider()).isEqualTo("anthropic");
+        assertThat(d.fallbackModel()).isEqualTo("claude-haiku-4-5");
+    }
+
+    @Test void modelOverrideAlsoAppliesToFallbackModel() {
+        var ruleWithFallback = new RoutingRule(UUID.randomUUID(), tenantId, "r", "p",
+                "anthropic", "claude-3-5-sonnet", "anthropic", "claude-haiku-4-5",
+                100, true, false, now, now);
+        when(rules.findByTenant(tenantId)).thenReturn(List.of(ruleWithFallback));
+        var d = resolver.resolve("tn", "r", "p", "claude-opus-4-8");
+        assertThat(d.model()).isEqualTo("claude-opus-4-8");
+        // when the consumer overrides the model, the fallback keeps that model
+        // (same model, different provider) instead of the rule's fallback_model:
+        assertThat(d.fallbackModel()).isEqualTo("claude-opus-4-8");
+    }
+
+    @Test void ruleWithoutFallbackYieldsNulls() {
+        when(rules.findByTenant(tenantId)).thenReturn(List.of(
+                rule("r", "p", "default-m", 100, false, false)));
+        var d = resolver.resolve("tn", "r", "p", null);
+        assertThat(d.fallbackProvider()).isNull();
+        assertThat(d.fallbackModel()).isNull();
+    }
 }
