@@ -24,6 +24,8 @@ export function flattenMessages(
           blocks.push(block);
         }
       }
+    } else if (m.content !== null && m.content !== undefined) {
+      blocks.push({ type: "text", text: prefix + String(m.content) });
     }
   }
   return blocks;

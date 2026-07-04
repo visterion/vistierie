@@ -34,6 +34,19 @@ describe("flattenMessages", () => {
     ]);
     expect(blocks).toEqual([img, { type: "text", text: "describe" }]);
   });
+
+  it("coerces non-string/non-array content to a text block via String()", () => {
+    const blocks = flattenMessages([{ role: "user", content: 42 }]);
+    expect(blocks).toEqual([{ type: "text", text: "42" }]);
+  });
+
+  it("emits no block for null/undefined content", () => {
+    const blocks = flattenMessages([
+      { role: "user", content: null },
+      { role: "user", content: undefined },
+    ]);
+    expect(blocks).toEqual([]);
+  });
 });
 
 describe("complete", () => {
