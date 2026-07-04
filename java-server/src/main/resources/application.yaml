@@ -34,6 +34,10 @@ vistierie:
     api-key: ${ANTHROPIC_API_KEY:}
     base-url: https://api.anthropic.com
     timeout-seconds: 60
+  claude-subscription:
+    enabled: ${CLAUDE_SUBSCRIPTION_ENABLED:false}
+    base-url: ${CLAUDE_BRIDGE_URL:http://claude-bridge:8091}
+    timeout-seconds: 300
   providers:
     openai:
       base-url: https://api.openai.com/v1
