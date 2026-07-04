@@ -68,7 +68,12 @@ export async function complete(req: CompleteRequest): Promise<CompleteResponse> 
           },
         };
       }
-      throw mapSdkError(new Error(String(msg.result ?? msg.subtype)));
+      // SDKResultError carries its error text in `errors: string[]` (no `result` field).
+      const errorText =
+        Array.isArray(msg.errors) && msg.errors.length > 0
+          ? msg.errors.join("; ")
+          : String(msg.subtype);
+      throw mapSdkError(new Error(errorText));
     }
     throw new BridgeError(500, "no_result", "SDK stream ended without a result message");
   } catch (err) {
