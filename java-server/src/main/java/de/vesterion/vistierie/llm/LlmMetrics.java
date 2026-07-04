@@ -27,4 +27,15 @@ public class LlmMetrics {
                 .record(Duration.ofMillis(durationMs));
         registry.counter("vistierie.llm.cost.micros", tags).increment(costMicros);
     }
+
+    public void recordFallback(String from, String to, String reason) {
+        registry.counter("vistierie.llm.fallback",
+                Tags.of("from", from, "to", to, "reason", reason)).increment();
+    }
+
+    public void recordShadowCost(String provider, String model, String endpoint, long micros) {
+        registry.counter("vistierie.llm.shadow.cost.micros",
+                Tags.of("provider", provider, "model", model, "endpoint", endpoint))
+                .increment(micros);
+    }
 }

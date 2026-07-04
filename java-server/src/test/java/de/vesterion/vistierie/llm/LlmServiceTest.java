@@ -301,4 +301,122 @@ class LlmServiceTest {
         verify(recorder).insertWithBody(captor.capture(), any(), eq(null));
         assertThat(captor.getValue().status()).isEqualTo("error");
     }
+
+    @Test void fallbackOn429RetriesOnFallbackProvider() {
+        var fallbackProvider = mock(LlmProvider.class);
+        when(routing.resolve(eq(tenantName), eq("test_realm"), eq("test_purpose"), eq(null)))
+                .thenReturn(new RoutingDecision("claude-subscription", "claude-opus-4-8", false,
+                        "anthropic", "claude-haiku-4-5"));
+        when(providers.get("claude-subscription")).thenReturn(provider);
+        when(providers.get("anthropic")).thenReturn(fallbackProvider);
+        when(provider.complete(any())).thenThrow(
+                new LlmProvider.ProviderException(429, "subscription_exhausted", "limit"));
+        when(fallbackProvider.complete(any())).thenReturn(new ProviderResponse(
+                "ok", "end_turn", new Usage(10, 20, 0, 0), "claude-haiku-4-5"));
+
+        var res = svc.complete(completeReq());
+
+        assertThat(res.response().provider()).isEqualTo("anthropic");
+        assertThat(res.response().model()).isEqualTo("claude-haiku-4-5");
+        verify(metrics).recordFallback("claude-subscription", "anthropic", "rate_limited");
+        // two audit rows: failed primary + successful fallback
+        var rows = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
+        verify(recorder, org.mockito.Mockito.times(2)).insertWithBody(rows.capture(), any(), any());
+        assertThat(rows.getAllValues().get(0).status()).isEqualTo("rate_limited");
+        assertThat(rows.getAllValues().get(1).status()).isEqualTo("ok");
+        assertThat(rows.getAllValues().get(0).id()).isNotEqualTo(rows.getAllValues().get(1).id());
+    }
+
+    @Test void no4xxFallback() {
+        var fallbackProvider = mock(LlmProvider.class);
+        when(routing.resolve(any(), any(), any(), any())).thenReturn(
+                new RoutingDecision("claude-subscription", "claude-opus-4-8", false,
+                        "anthropic", "claude-haiku-4-5"));
+        when(providers.get("claude-subscription")).thenReturn(provider);
+        when(provider.complete(any())).thenThrow(
+                new LlmProvider.ProviderException(400, "invalid_request", "bad"));
+
+        assertThatThrownBy(() -> svc.complete(completeReq()))
+                .isInstanceOf(LlmProvider.ProviderException.class);
+        verify(providers, never()).get("anthropic");
+    }
+
+    @Test void unsupportedOperationTriggersFallback() {
+        var fallbackProvider = mock(LlmProvider.class);
+        when(routing.resolve(any(), any(), any(), any())).thenReturn(
+                new RoutingDecision("claude-subscription", "claude-opus-4-8", false,
+                        "anthropic", "claude-haiku-4-5"));
+        when(providers.get("claude-subscription")).thenReturn(provider);
+        when(providers.get("anthropic")).thenReturn(fallbackProvider);
+        when(provider.complete(any())).thenThrow(new UnsupportedOperationException("nope"));
+        when(fallbackProvider.complete(any())).thenReturn(new ProviderResponse(
+                "ok", "end_turn", new Usage(1, 1, 0, 0), "claude-haiku-4-5"));
+
+        var res = svc.complete(completeReq());
+        assertThat(res.response().provider()).isEqualTo("anthropic");
+        verify(metrics).recordFallback("claude-subscription", "anthropic", "unsupported");
+    }
+
+    @Test void fallbackFailurePropagates() {
+        var fallbackProvider = mock(LlmProvider.class);
+        when(routing.resolve(any(), any(), any(), any())).thenReturn(
+                new RoutingDecision("claude-subscription", "claude-opus-4-8", false,
+                        "anthropic", "claude-haiku-4-5"));
+        when(providers.get("claude-subscription")).thenReturn(provider);
+        when(providers.get("anthropic")).thenReturn(fallbackProvider);
+        when(provider.complete(any())).thenThrow(
+                new LlmProvider.ProviderException(429, "subscription_exhausted", "limit"));
+        when(fallbackProvider.complete(any())).thenThrow(
+                new LlmProvider.ProviderException(500, "api_error", "down"));
+
+        assertThatThrownBy(() -> svc.complete(completeReq()))
+                .isInstanceOfSatisfying(LlmProvider.ProviderException.class,
+                        e -> assertThat(e.statusCode()).isEqualTo(500));
+    }
+
+    @Test void subscriptionCallBooksZeroCostAndShadowCost() {
+        when(routing.resolve(any(), any(), any(), any())).thenReturn(
+                new RoutingDecision("claude-subscription", "claude-opus-4-8", false, null, null));
+        when(providers.get("claude-subscription")).thenReturn(provider);
+        when(provider.complete(any())).thenReturn(new ProviderResponse(
+                "ok", "end_turn", new Usage(1_000_000, 0, 0, 0), "claude-opus-4-8"));
+
+        var res = svc.complete(completeReq());
+
+        assertThat(res.response().cost_micros()).isZero();
+        var rows = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
+        verify(recorder).insertWithBody(rows.capture(), any(), any());
+        // 1M input tokens of claude-opus-4-8 = 13_800_000 micros (PriceTable)
+        assertThat(rows.getValue().costMicros()).isZero();
+        assertThat(rows.getValue().shadowCostMicros()).isEqualTo(13_800_000L);
+        verify(metrics).recordShadowCost("claude-subscription", "claude-opus-4-8", "complete", 13_800_000L);
+    }
+
+    @Test void subscriptionCallWithUnknownModelHasNullShadowCost() {
+        when(routing.resolve(any(), any(), any(), any())).thenReturn(
+                new RoutingDecision("claude-subscription", "some-unknown-model", false, null, null));
+        when(providers.get("claude-subscription")).thenReturn(provider);
+        when(provider.complete(any())).thenReturn(new ProviderResponse(
+                "ok", "end_turn", new Usage(10, 10, 0, 0), "some-unknown-model"));
+
+        var res = svc.complete(completeReq());
+        assertThat(res.response().cost_micros()).isZero();
+        var rows = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
+        verify(recorder).insertWithBody(rows.capture(), any(), any());
+        assertThat(rows.getValue().shadowCostMicros()).isNull();
+    }
+
+    @Test void apiProviderCallHasNullShadowCost() {
+        when(routing.resolve(any(), any(), any(), any())).thenReturn(
+                new RoutingDecision("anthropic", "claude-haiku-4-5", false, null, null));
+        when(providers.get("anthropic")).thenReturn(provider);
+        when(provider.complete(any())).thenReturn(new ProviderResponse(
+                "ok", "end_turn", new Usage(10, 20, 0, 0), "claude-haiku-4-5"));
+
+        var res = svc.complete(completeReq());
+        assertThat(res.response().cost_micros()).isGreaterThan(0);
+        var rows = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
+        verify(recorder).insertWithBody(rows.capture(), any(), any());
+        assertThat(rows.getValue().shadowCostMicros()).isNull();
+    }
 }
