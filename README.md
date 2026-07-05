@@ -1,7 +1,7 @@
 # Vistierie
 <img width="1584" height="672" alt="image" src="https://github.com/user-attachments/assets/c737bb3f-4298-451c-8cf3-813b62184642" />
 
-> **A Java agent framework that lets any application become agentic, with cost-discipline and operational controls baked into the core, not bolted on.**
+> **A Java agent framework that lets any application become agentic, with cost-discipline and operational controls built into the core.**
 
 Vistierie runs LLM-driven worker agents on behalf of consumer applications.
 You hand it a tool schema, a system prompt, and (optionally) a cron
@@ -37,11 +37,11 @@ Vistierie is the service that owns that stitching. Your application
 keeps its prompts, tools, and domain logic; Vistierie keeps the runtime.
 
 **What sets it apart from LangChain4j and Spring AI:** cost-discipline
-and operational controls are first-class concepts, not add-ons.
+and operational controls are first-class concepts.
 
 - **Tier-based routing**: declare an agent's purpose (`reasoning`,
   `routine`, `bulk`); the resolver picks the concrete model. Switching
-  Opus → Haiku is a config change, not a code change.
+  Opus to Haiku is a config change.
 - **Tenant kill switch**: one POST freezes all autonomous activity
   for a tenant. Checked before every dispatch and every cron tick.
 - **Per-call audit**: every LLM call writes a row to
@@ -240,8 +240,8 @@ Bedrock and other providers are not supported for batch runs.
 
 ## Inspect & search runs
 
-Every completed run is captured as a provider-neutral transcript —
-`GET /runs/{id}/transcript?view=digest|compact|full` — with per-tool-call
+Every completed run is captured as a provider-neutral transcript
+(`GET /runs/{id}/transcript?view=digest|compact|full`) with per-tool-call
 drill-down via `GET /runs/{id}/tool-calls/{toolUseId}`, and indexed into a
 Postgres full-text document. Search a tenant's runs with
 `GET /runs/search?q=...` (filters: `agent`, `status`, `has_error`, `from`,
@@ -255,9 +255,9 @@ Not everything needs an agent. For a one-shot request/response call,
 hit the gateway directly, the same tier routing, per-call audit, EUR-micros
 cost accounting, and tenant kill switch all still apply:
 
-- `POST /llm/complete` — text completion against the tenant's routed model.
-- `POST /llm/vision` — single-image understanding (one `image` + a `prompt`).
-- `POST /llm/vision-multi` — N images plus one prompt forwarded as a single
+- `POST /llm/complete`: text completion against the tenant's routed model.
+- `POST /llm/vision`: single-image understanding (one `image` + a `prompt`).
+- `POST /llm/vision-multi`: N images plus one prompt forwarded as a single
   model call (N native image blocks + one text block).
 
 Each response carries the same `text`, `stop_reason`, `usage`,
@@ -281,7 +281,7 @@ docker run --rm -p 8090:8090 \
   ghcr.io/visterion/vistierie:main
 ```
 
-Generate `VISTIERIE_ADMIN_TOKEN_HASH` first — see
+Generate `VISTIERIE_ADMIN_TOKEN_HASH` first; see
 [generating the admin token hash](documentation/operations.md#generating-the-admin-token-hash).
 On Linux, `host.docker.internal` is not resolved by default; add
 `--add-host=host.docker.internal:host-gateway` to the `docker run` line (or
@@ -308,6 +308,25 @@ profile ID such as `eu.anthropic.claude-sonnet-4-6`. The SDK reads
 Long Bedrock calls that exceed the default 180s socket read timeout can be tuned
 via `vistierie.bedrock.read-timeout-seconds` (see configuration.md).
 
+To bill against a **Claude Max subscription** rather than a metered API key, run
+the [`claude-bridge`](claude-bridge/) sidecar and point Vistierie at it:
+
+```bash
+docker run --rm -p 8090:8090 \
+  -e VISTIERIE_DB_URL=jdbc:postgresql://host.docker.internal:5432/vistierie \
+  -e VISTIERIE_DB_USER=vistierie \
+  -e VISTIERIE_DB_PASSWORD=vistierie \
+  -e VISTIERIE_ADMIN_TOKEN_HASH='<bcrypt-hash>' \
+  -e CLAUDE_SUBSCRIPTION_ENABLED=true \
+  -e CLAUDE_BRIDGE_URL='http://claude-bridge:8091' \
+  ghcr.io/visterion/vistierie:main
+```
+
+Then target a routing rule at `"provider": "claude-subscription"` with
+`"anthropic"` as its fallback, so subscription-quota exhaustion (429) or a bridge
+failure (502) degrades to the metered API-key provider. Batch runs always stay on
+`anthropic`.
+
 For local development:
 
 ```bash
@@ -327,7 +346,7 @@ queries: [`documentation/operations.md`](documentation/operations.md).
 | [api.md](documentation/api.md) | REST endpoint reference (`/llm/*`, `/agents/*`, `/runs/*`, `/admin/*`) |
 | [architecture.md](documentation/architecture.md) | System overview, data model, request flow |
 | [routing.md](documentation/routing.md) | `<tenant, realm, purpose>` → `<provider, model>` resolution |
-| [providers.md](documentation/providers.md) | Anthropic, Bedrock, OpenAI, xAI plugins, mock mode, adding providers |
+| [providers.md](documentation/providers.md) | Anthropic, Claude subscription, Bedrock, OpenAI, xAI plugins, mock mode, adding providers |
 | [configuration.md](documentation/configuration.md) | All `vistierie.*` properties and env vars |
 | [operations.md](documentation/operations.md) | Tenants, kill switch, cost queries, cron caveats, backups |
 
