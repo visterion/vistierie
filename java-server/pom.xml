@@ -7,7 +7,7 @@
         <java.version>25</java.version>
         <testcontainers.version>1.21.4</testcontainers.version>
         <wiremock.version>3.13.2</wiremock.version>
-        <aws.sdk.version>2.46.17</aws.sdk.version>
+        <aws.sdk.version>2.46.21</aws.sdk.version>
     </properties>
     <dependencyManagement>
         <dependencies>
