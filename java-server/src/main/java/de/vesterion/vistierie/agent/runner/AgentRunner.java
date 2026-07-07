@@ -128,9 +128,13 @@ public class AgentRunner {
         var modelPurpose = snap.path("model_purpose").asText();
 
         ArrayNode messages = mapper.createArrayNode();
+        // Bedrock (and other providers) reject a blank first content block, so fall back to a
+        // non-empty kickoff when the run carries no payload (e.g. scheduled/cron runs).
+        String firstContent = run.payload() != null ? run.payload().toString() : "";
+        if (firstContent.isBlank()) firstContent = "Begin the run.";
         var firstUser = mapper.createObjectNode()
                 .put("role", "user")
-                .put("content", run.payload() != null ? run.payload().toString() : "");
+                .put("content", firstContent);
         messages.add(firstUser);
 
         for (int turn = 0; turn < maxTurns; turn++) {

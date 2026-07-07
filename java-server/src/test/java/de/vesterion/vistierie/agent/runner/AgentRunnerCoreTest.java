@@ -71,6 +71,24 @@ class AgentRunnerCoreTest extends PostgresTestBase {
         assertThat(r.output().path("x").asText()).isEqualTo("yes");
     }
 
+    @Test void nullPayloadStillSendsNonBlankFirstMessage() throws Exception {
+        var tenantId = UUID.randomUUID();
+        tenants.insert(tenantId, "tn-" + tenantId, "h");
+        registerRouting(tenantId);
+        var agentId = UUID.randomUUID();
+        agents.insert(agentId, tenantId, "a", "you are a", "summarize_cell",
+                JsonNodeFactory.instance.arrayNode(), null, 5, 60, "wt", false, null, null, null, null, null, null);
+        tenantBudgets.patch(tenantId, new BudgetPatchRequest(10_000L, 100_000L, 80, 90));
+        agentBudgets.patch(agentId, new BudgetPatchRequest(5_000L, 50_000L, 80, 90));
+        stub.script(StubLlmScripts.Turn.endTurn("done"));
+
+        // scheduled/cron runs carry no payload — the first content block must not be blank
+        runner.startRunSync(tenantId, agentId, "cron", null, null, null, null);
+
+        Object firstContent = stub.lastRequest().messages().get(0).get("content");
+        assertThat(String.valueOf(firstContent)).isNotBlank();
+    }
+
     @Test void appliesDefaultMaxTokensWhenAgentUnset() throws Exception {
         var tenantId = UUID.randomUUID();
         tenants.insert(tenantId, "tn-" + tenantId, "h");
