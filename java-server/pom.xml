@@ -122,6 +122,24 @@
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>apache5-client</artifactId>
         </dependency>
+        <!-- MCP client SDK for the `mcp` tool type (Task 4's dispatchMcp acts as MCP
+             client over Streamable HTTP). mcp-core also bundles the servlet-based
+             HttpServletStreamableServerTransportProvider used by the in-process fake
+             MCP server test double (Task 0 spike), so no separate server artifact is
+             needed. -->
+        <dependency>
+            <groupId>io.modelcontextprotocol.sdk</groupId>
+            <artifactId>mcp-core</artifactId>
+            <version>2.0.0</version>
+        </dependency>
+        <!-- Jackson 3 JSON provider for the MCP SDK (discovered via SPI). Under Spring
+             Boot 4 the Jackson 2 classpath is gone, so the SDK needs the jackson3
+             provider explicitly (transitive-only under mcp-core). -->
+        <dependency>
+            <groupId>io.modelcontextprotocol.sdk</groupId>
+            <artifactId>mcp-json-jackson3</artifactId>
+            <version>2.0.0</version>
+        </dependency>
     </dependencies>
     <build>
         <plugins>
