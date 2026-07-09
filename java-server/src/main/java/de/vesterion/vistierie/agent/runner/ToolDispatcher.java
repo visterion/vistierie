@@ -157,8 +157,23 @@ public class ToolDispatcher {
         Duration timeout = Duration.ofSeconds(
                 tool.mcp_timeout_seconds() != null ? tool.mcp_timeout_seconds() : defaultTimeoutSeconds);
 
-        McpClientHolder holder = mcpClients.computeIfAbsent(key,
-                k -> new McpClientHolder(mcpClientFactory.create(tool.mcp_server_url(), mcpToken, timeout)));
+        // Build the client OUTSIDE any map lock: create() does a blocking initialize() handshake,
+        // and ConcurrentHashMap holds a bin lock for the whole computeIfAbsent mapping function —
+        // which would serialize construction of DIFFERENT keys that hash into the same bin, breaking
+        // the "different (server,token) pairs run in parallel" guarantee. get-then-putIfAbsent keeps
+        // construction lock-free; a racing loser closes its redundant client.
+        McpClientHolder holder = mcpClients.get(key);
+        if (holder == null) {
+            McpClientHandle handle = mcpClientFactory.create(tool.mcp_server_url(), mcpToken, timeout);
+            McpClientHolder fresh = new McpClientHolder(handle);
+            McpClientHolder existing = mcpClients.putIfAbsent(key, fresh);
+            if (existing != null) { // lost the race — another thread already installed one
+                try { handle.close(); } catch (RuntimeException ignored) { /* best effort */ }
+                holder = existing;
+            } else {
+                holder = fresh;
+            }
+        }
         try {
             // McpSyncClient is not thread-safe; serialize all calls on one holder.
             synchronized (holder) {
