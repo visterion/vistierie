@@ -51,6 +51,11 @@ class AgentServiceTest {
                 null, null, "https://example.com/hook", 30);
     }
 
+    private ToolDef mcpTool() {
+        return new ToolDef("mcp-tool", "desc", schema("{\"type\":\"object\"}"),
+                "mcp", null, null, null, "http://agora:8080", null, null, null);
+    }
+
     private Agent existing(UUID id, String name) {
         return new Agent(id, tenantId, name, "sys", "purpose",
                 mapper.createArrayNode(), null,
@@ -241,6 +246,98 @@ class AgentServiceTest {
         when(repo.findByTenant(tenantId)).thenReturn(List.of());
         assertThatThrownBy(() -> svc.create(tenantId, req))
                 .isInstanceOf(AgentDefinitionValidator.InvalidDefinitionException.class);
+    }
+
+    @Test void createRejectsMcpToolWithoutMatchingCredential() {
+        var req = new CreateAgentRequest("agent-mcp-bad", "sys", "purpose",
+                List.of(mcpTool()), null, null, null, null, "tok", null, null, null, null, null, null,
+                schema("{}"));
+        when(repo.findByTenant(tenantId)).thenReturn(List.of());
+        assertThatThrownBy(() -> svc.create(tenantId, req))
+                .isInstanceOf(AgentDefinitionValidator.InvalidDefinitionException.class)
+                .hasMessageContaining("no entry in mcp_credentials");
+        verify(repo, never()).insert(any(), any(), any(), any(), any(), any(), any(),
+                anyInt(), anyInt(), any(), any(), anyBoolean(), any(), any(), any(),
+                any(), any(), any(), any());
+    }
+
+    @Test void createAcceptsMcpToolWithMatchingCredential() {
+        var req = new CreateAgentRequest("agent-mcp-ok", "sys", "purpose",
+                List.of(mcpTool()), null, null, null, null, "tok", null, null, null, null, null, null,
+                schema("{\"http://agora:8080\":\"tok\"}"));
+        when(repo.findByTenant(tenantId)).thenReturn(List.of());
+        when(repo.findById(any())).thenAnswer(inv -> Optional.of(existing(inv.getArgument(0), "agent-mcp-ok")));
+
+        var detail = svc.create(tenantId, req);
+        assertThat(detail.name()).isEqualTo("agent-mcp-ok");
+        verify(repo).insert(any(), eq(tenantId), eq("agent-mcp-ok"), any(), any(), any(), any(),
+                anyInt(), anyInt(), any(), any(), anyBoolean(), any(), any(), any(),
+                any(), any(), any(), any());
+    }
+
+    @Test void replaceRejectsMcpToolWithoutMatchingCredential() {
+        var id = UUID.randomUUID();
+        var existing = existing(id, "agent-mcp-r");
+        when(repo.findByName(tenantId, "agent-mcp-r")).thenReturn(Optional.of(existing));
+        when(repo.findByTenant(tenantId)).thenReturn(List.of(existing));
+
+        var req = new UpdateAgentRequest("sys", "p", List.of(mcpTool()),
+                null, null, null, null, "tok", null, null, null, null, null, null, schema("{}"));
+        assertThatThrownBy(() -> svc.replace(tenantId, "agent-mcp-r", req))
+                .isInstanceOf(AgentDefinitionValidator.InvalidDefinitionException.class)
+                .hasMessageContaining("no entry in mcp_credentials");
+        verify(repo, never()).replace(any(), any(), any(), any(), any(), anyInt(), anyInt(), any(),
+                any(), anyBoolean(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test void replaceAcceptsMcpToolWithMatchingCredential() {
+        var id = UUID.randomUUID();
+        var existing = existing(id, "agent-mcp-r2");
+        when(repo.findByName(tenantId, "agent-mcp-r2")).thenReturn(Optional.of(existing));
+        when(repo.findByTenant(tenantId)).thenReturn(List.of(existing));
+        when(repo.findById(id)).thenReturn(Optional.of(existing));
+
+        var req = new UpdateAgentRequest("sys", "p", List.of(mcpTool()),
+                null, null, null, null, "tok", null, null, null, null, null, null,
+                schema("{\"http://agora:8080\":\"tok\"}"));
+        svc.replace(tenantId, "agent-mcp-r2", req);
+
+        verify(repo).replace(eq(id), any(), any(), any(), any(), anyInt(), anyInt(), any(),
+                any(), anyBoolean(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test void patchRejectsMcpToolWithoutMatchingExistingCredential() {
+        var id = UUID.randomUUID();
+        // existing() uses the convenience Agent constructor → mcpCredentials defaults to empty object
+        var existing = existing(id, "agent-mcp-p");
+        when(repo.findByName(tenantId, "agent-mcp-p")).thenReturn(Optional.of(existing));
+        when(repo.findByTenant(tenantId)).thenReturn(List.of(existing));
+
+        var patch = new PatchAgentRequest(null, null, null, List.of(mcpTool()),
+                null, null, null, null, null, null, null, null, null, null);
+        assertThatThrownBy(() -> svc.patch(tenantId, "agent-mcp-p", patch))
+                .isInstanceOf(AgentDefinitionValidator.InvalidDefinitionException.class)
+                .hasMessageContaining("no entry in mcp_credentials");
+        verify(repo, never()).replace(any(), any(), any(), any(), any(), anyInt(), anyInt(), any(),
+                any(), anyBoolean(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test void patchAcceptsMcpToolWithMatchingExistingCredential() {
+        var id = UUID.randomUUID();
+        var existing = new Agent(id, tenantId, "agent-mcp-p2", "sys", "p",
+                mapper.createArrayNode(), null, 25, 1800, null, "tok", false, 1,
+                Instant.now(), Instant.now(), null, null, null, null, null, null, null,
+                schema("{\"http://agora:8080\":\"tok\"}"));
+        when(repo.findByName(tenantId, "agent-mcp-p2")).thenReturn(Optional.of(existing));
+        when(repo.findByTenant(tenantId)).thenReturn(List.of(existing));
+        when(repo.findById(id)).thenReturn(Optional.of(existing));
+
+        var patch = new PatchAgentRequest(null, null, null, List.of(mcpTool()),
+                null, null, null, null, null, null, null, null, null, null);
+        svc.patch(tenantId, "agent-mcp-p2", patch);
+
+        verify(repo).replace(eq(id), any(), any(), any(), any(), anyInt(), anyInt(), any(),
+                any(), anyBoolean(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test void detailDeserializesToolsRoundtrip() {
