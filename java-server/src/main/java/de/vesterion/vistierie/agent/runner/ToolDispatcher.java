@@ -35,13 +35,15 @@ public class ToolDispatcher {
     private final ConcurrentHashMap<String, McpClientHolder> mcpClients = new ConcurrentHashMap<>();
 
     @Autowired
-    public ToolDispatcher(@Value("${vistierie.agents.tool-default-timeout-seconds:30}") int defaultTimeout) {
+    public ToolDispatcher(
+            @Value("${vistierie.agents.tool-default-timeout-seconds:30}") int defaultTimeout,
+            @Value("${vistierie.agents.mcp-retry-base-millis:1000}") long mcpRetryBaseMillis) {
         this(RestClient.builder()
                         .requestFactory(new SimpleClientHttpRequestFactory())
                         .build(),
                 Executors.newVirtualThreadPerTaskExecutor(),
                 new HttpClientMcpClientFactory(),
-                1000L,
+                mcpRetryBaseMillis,
                 defaultTimeout);
     }
 
