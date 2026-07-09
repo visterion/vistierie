@@ -85,7 +85,8 @@ webhooks. All are optional — the defaults are production-sane. Set via
 |----------|---------|-------------|
 | `vistierie.agents.scheduler.tick-millis` | `30000` | How often the scheduler polls for due cron agents, in ms |
 | `vistierie.agents.subagent.max-depth` | `5` | Maximum recursion depth for subagent dispatch (context-shielding guard) |
-| `vistierie.agents.tool-default-timeout-seconds` | `30` | Default per-tool HTTP timeout when a tool definition omits its own |
+| `vistierie.agents.tool-default-timeout-seconds` | `30` | Default per-tool timeout when a tool definition omits its own (`webhook_timeout_seconds` for HTTP tools, `mcp_timeout_seconds` for MCP tools) |
+| `vistierie.agents.mcp-retry-base-millis` | `1000` | Base delay, in ms, for the MCP tool retry exponential backoff (up to 3 retries: base × 1, × 2, × 4) |
 | `vistierie.agents.completion-webhook.retry-base-millis` | `5000` | Base backoff between completion-webhook delivery retries, in ms |
 | `vistierie.agents.batch.max-items` | `10000` | Maximum items accepted in a single batch submission |
 | `vistierie.agents.batch.poll-millis` | `60000` | How often an in-flight batch's status is polled, in ms |

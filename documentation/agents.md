@@ -12,7 +12,8 @@ the consumer owns the prompts and tool implementations.
 1. **Register**: `POST /agents` with the agent definition (system prompt,
    tools, output schema, limits, webhook token). Vistierie validates the JSON
    schemas and, if any tool is `type: subagent`, that the named target agent
-   exists in the same tenant.
+   exists in the same tenant; if any tool is `type: mcp`, that its
+   `mcp_server_url` has a matching entry in `mcp_credentials`.
 2. **Trigger**: `POST /agents/{name}/run` with a `payload`. Returns
    `202 Accepted` with a `run_id`. Run executes asynchronously on a virtual
    thread.
@@ -76,6 +77,91 @@ receives well-typed JSON.
 
 Recursion depth is capped (default 5) by `vistierie.agents.subagent.max-depth`.
 
+### MCP tool (remote MCP server)
+
+```json
+{
+  "name": "cell.read",
+  "description": "Read a HiveMem cell by id",
+  "input_schema": {
+    "type": "object",
+    "properties": { "id": { "type": "string" } },
+    "required": ["id"]
+  },
+  "type": "mcp",
+  "mcp_server_url": "http://hivemem:8080",
+  "mcp_tool_name": "cell.read",
+  "mcp_timeout_seconds": 10
+}
+```
+
+Vistierie acts as an MCP **client**: it connects to `mcp_server_url` over
+Streamable HTTP at the `/mcp` endpoint and calls the remote tool directly —
+there is no consumer-hosted webhook in the loop. Fields:
+
+| Field | Required | Description |
+|---|---|---|
+| `mcp_server_url` | yes | Base URL of the remote MCP server (`http://` or `https://`) |
+| `mcp_tool_name` | no | Remote tool name to call; defaults to the tool's own `name` |
+| `mcp_auth_ref` | no | Forward-compat marker; **v1 rejects any non-null value** — must be omitted |
+| `mcp_timeout_seconds` | no | Per-call timeout; defaults to `vistierie.agents.tool-default-timeout-seconds` |
+
+A tool must declare **exactly one** of `webhook_url`, `type: subagent`, or
+`type: mcp` — mixing them is a validation error.
+
+#### Auth model: `mcp_credentials`, not `webhook_token`
+
+MCP tool calls are authenticated with a **dedicated bearer token per
+(agent, MCP server)**, stored on the agent in a separate `mcp_credentials`
+map — they do **not** reuse `webhook_token`. The map is keyed by
+`mcp_server_url`:
+
+```json
+{
+  "mcp_credentials": {
+    "http://hivemem:8080": "hivemem-mcp-bearer-token",
+    "http://dracul:8080": "dracul-mcp-bearer-token"
+  }
+}
+```
+
+At registration/update, every `type: mcp` tool's `mcp_server_url` must have
+a matching entry in `mcp_credentials`, or the agent create/update is
+rejected. At dispatch, Vistierie resolves the token for a given tool by
+looking up its `mcp_server_url` in the agent's `mcp_credentials`.
+
+`mcp_credentials` is stored in plaintext JSONB (same trust level as
+`webhook_token`, no secrets vault or encryption in v1) and is **never
+returned** on `GET /agents/{name}` or in list responses — same redaction
+as `webhook_token`.
+
+#### Connection cache, retries, errors
+
+- Vistierie caches one MCP client connection per **(`mcp_server_url`,
+  resolved token)** pair. Because the token is part of the cache key,
+  different agents (or the same agent pointed at different servers) never
+  share a connection — there is no cross-agent sharing. The cache has no
+  eviction, TTL, or size cap in v1.
+- On any MCP failure — transport error, or a tool response with
+  `isError: true` — Vistierie retries up to 3 times with exponential
+  backoff (`vistierie.agents.mcp-retry-base-millis` × 1, ×2, ×4 between
+  attempts), rebuilding the cached client on each retry. If all attempts
+  fail, the tool call resolves to the same error-result shape as a failed
+  HTTP tool, so run-termination, kill-switch, and budget behavior are
+  unchanged.
+
+#### Non-goals (v1)
+
+- **No per-tool credential within one server.** The bearer token is
+  per-(agent, server), not per-tool — two mcp tools on the same agent
+  pointed at the same `mcp_server_url` always share one token.
+- **No secrets vault or encryption.** `mcp_credentials` is stored the same
+  way as `webhook_token`: plaintext JSONB.
+- **Vistierie is not an MCP server.** It is client-only in v1 — it does not
+  expose its own tools over MCP.
+- **No connection-pool eviction, TTL, or cap.** Cached clients live for the
+  process lifetime.
+
 ---
 
 ## Webhook token contract
@@ -87,7 +173,9 @@ it once at registration. Vistierie stores it on the agent row and includes
 it in every dispatched tool request.
 
 The same token is **not** used for completion webhooks, those use the
-per-run `completion_webhook_token` supplied at trigger time.
+per-run `completion_webhook_token` supplied at trigger time. It is also
+**not** used for MCP tool calls, those use the dedicated per-server tokens
+in `mcp_credentials` — see [MCP tool](#mcp-tool-remote-mcp-server) above.
 
 ---
 

@@ -270,20 +270,30 @@ consumer ── POST /agents/{name}/run ──▶ RunController
                                          │
                                          ▼
                                     AgentRunner  (virtual-thread executor)
-                                  ┌──────┴───────┐
-                                  ▼              ▼
-                          ToolDispatcher    AgentRunner (recursive child run)
-                          (parallel HTTP)   (context shielded, only output
-                                             is returned to parent)
-                                  │              │
-                                  ▼              ▼
-                            consumer       AnthropicProvider
-                          tool webhooks    (LlmCallRecorder ─▶ llm_calls)
+                                  ┌──────┴──────────────┐
+                                  ▼                      ▼
+                          ToolDispatcher           AgentRunner (recursive child run)
+                    (parallel HTTP / MCP)          (context shielded, only output
+                                  │                 is returned to parent)
+                       ┌──────────┴──────────┐             │
+                       ▼                      ▼             ▼
+                  consumer            remote MCP server  AnthropicProvider
+                tool webhooks       (Streamable HTTP     (LlmCallRecorder ─▶ llm_calls)
+                                     `/mcp`, client-only)
 ```
 
 Context shielding: a parent run never sees a child's system prompt, turns,
 or intermediate tool calls, only the validated structured `output`. See
 [agents.md](agents.md) for the agent definition and tool format.
+
+`type: mcp` tools are dispatched by `ToolDispatcher.dispatchMcp`, which
+resolves the per-(agent, server) bearer token from `agents.mcp_credentials`
+by the tool's `mcp_server_url`, then reuses a cached MCP client keyed on
+`(mcp_server_url, resolved token)` — no cache sharing across agents or
+tokens. Failures (transport errors or `isError: true` tool responses) retry
+up to 3 times with exponential backoff before surfacing the same
+error-result shape as a failed HTTP tool. See
+[agents.md](agents.md#mcp-tool-remote-mcp-server) for the full contract.
 
 Budget gates also apply beyond manual runs:
 
@@ -338,7 +348,7 @@ run_tool_calls
   turn_index    INTEGER       -- zero-based turn within the run
   tool_use_id   TEXT          -- Anthropic tool_use block id (e.g. "toolu_01A…")
   tool_name     TEXT
-  tool_type     TEXT          -- "http" | "subagent" | "unknown"
+  tool_type     TEXT          -- "http" | "subagent" | "mcp" | "unknown"
   input_json    JSONB
   output_json   JSONB
   is_error      BOOLEAN
