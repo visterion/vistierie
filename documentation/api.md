@@ -472,7 +472,8 @@ Body:
   "max_turns": 10,
   "max_run_seconds": 60,
   "max_tokens": 8192,
-  "webhook_token": "secret-from-tenant"
+  "webhook_token": "secret-from-tenant",
+  "mcp_credentials": { "http://hivemem:8080": "hivemem-mcp-bearer-token" }
 }
 ```
 
@@ -481,6 +482,18 @@ optional — when omitted (`null`), the runtime default of **8192** applies. Set
 it higher for agents that emit large structured output (e.g. multi-page
 extraction) or lower to bound cost; truncation before a tool call surfaces as a
 `failed` run with `no_tool_use: stop_reason=max_tokens`.
+
+`mcp_credentials` is an optional map of `mcp_server_url -> bearer_token`,
+required only when the agent has one or more `type: mcp` tools (see
+[agents.md](agents.md#mcp-tool-remote-mcp-server)). Each `type: mcp` tool's
+`mcp_server_url` must have a matching entry, or the request is rejected with
+`400`. Like `webhook_token`, `mcp_credentials` is **not** echoed back on
+`GET /agents` / `GET /agents/{name}` responses.
+
+Tool objects in `tools[]` support three shapes: `webhook_url` (HTTP tool),
+`type: "subagent"` + `target_agent`, or `type: "mcp"` + `mcp_server_url` /
+`mcp_tool_name` / `mcp_timeout_seconds`. Exactly one shape per tool — see
+[agents.md](agents.md#tool-definitions) for the full field reference.
 
 Returns `201 Created` with the persisted agent (including `id`, `version`,
 timestamps). Validation errors return `400` with the failing field.
