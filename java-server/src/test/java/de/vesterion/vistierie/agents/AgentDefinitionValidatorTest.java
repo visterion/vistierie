@@ -82,4 +82,28 @@ class AgentDefinitionValidatorTest {
         assertThatThrownBy(() -> v.validateSchedule("* * * *"))   // 4 fields, Spring wants 6
                 .isInstanceOf(AgentDefinitionValidator.InvalidDefinitionException.class);
     }
+
+    @Test void toolDefOldConstructorHasNullMcpFields() {
+        var t = new ToolDef("test", "desc", schema("{\"type\":\"object\"}"),
+                "subagent", "agent", null, null);
+        org.assertj.core.api.Assertions.assertThat(t.mcp_server_url()).isNull();
+        org.assertj.core.api.Assertions.assertThat(t.mcp_tool_name()).isNull();
+        org.assertj.core.api.Assertions.assertThat(t.mcp_auth_ref()).isNull();
+        org.assertj.core.api.Assertions.assertThat(t.mcp_timeout_seconds()).isNull();
+        org.assertj.core.api.Assertions.assertThat(t.isMcpTool()).isFalse();
+    }
+
+    @Test void toolDefMcpDeserializesWithDefaults() throws Exception {
+        String json = "{\"name\":\"t\",\"type\":\"mcp\",\"mcp_server_url\":\"http://agora:8080\",\"input_schema\":{\"type\":\"object\"}}";
+        var t = M.readValue(json, ToolDef.class);
+        org.assertj.core.api.Assertions.assertThat(t.isMcpTool()).isTrue();
+        org.assertj.core.api.Assertions.assertThat(t.resolvedMcpToolName()).isEqualTo("t");
+        org.assertj.core.api.Assertions.assertThat(t.mcp_tool_name()).isNull();
+    }
+
+    @Test void toolDefMcpDeserializesWithCustomToolName() throws Exception {
+        String json = "{\"name\":\"t\",\"type\":\"mcp\",\"mcp_server_url\":\"http://agora:8080\",\"mcp_tool_name\":\"remote_x\",\"input_schema\":{\"type\":\"object\"}}";
+        var t = M.readValue(json, ToolDef.class);
+        org.assertj.core.api.Assertions.assertThat(t.resolvedMcpToolName()).isEqualTo("remote_x");
+    }
 }
