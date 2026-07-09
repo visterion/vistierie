@@ -100,6 +100,8 @@ public class AgentRunner {
         snap.put("max_run_seconds", agent.maxRunSeconds());
         if (agent.maxTokens() != null) snap.put("max_tokens", agent.maxTokens().intValue());
         snap.put("webhook_token", agent.webhookToken());
+        snap.set("mcp_credentials", agent.mcpCredentials() != null
+                ? agent.mcpCredentials() : mapper.createObjectNode());
         JsonNode snapshot = snap;
         runs.create(runId, tenantId, agentId, snapshot, agent.version(),
                 parentRunId, trigger, payload, completionWebhook, completionWebhookToken);
