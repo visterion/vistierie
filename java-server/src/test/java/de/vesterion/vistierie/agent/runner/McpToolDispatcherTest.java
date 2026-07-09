@@ -10,7 +10,9 @@ import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -128,6 +130,40 @@ class McpToolDispatcherTest {
         // same server + same token twice -> cached, no new create
         dispatcher.dispatchMcp(tool, block("u3", "echo", "{}"), "r", "token-A").get();
         assertThat(factory.createCount.get()).isEqualTo(2);
+    }
+
+    /**
+     * Deterministic race on a NEW key: two threads both pass the {@code get()==null} check and both
+     * build a client (create blocks on a latch until both are inside); after release exactly one
+     * holder survives and the loser closes its redundant client. Guards the get-then-putIfAbsent
+     * pattern that keeps client construction off any map lock.
+     */
+    @Test
+    void concurrentFirstCallOnSameKeyBuildsOneSurvivingHolderAndClosesLoser() throws Exception {
+        CountDownLatch bothInCreate = new CountDownLatch(2);
+        CountDownLatch release = new CountDownLatch(1);
+        var built = new ConcurrentLinkedQueue<CloseTrackingHandle>();
+        ToolDispatcher.McpClientFactory factory = (serverUrl, token, timeout) -> {
+            CloseTrackingHandle h = new CloseTrackingHandle();
+            built.add(h);
+            bothInCreate.countDown();
+            try { release.await(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            return h;
+        };
+        ToolDispatcher dispatcher = new ToolDispatcher(
+                factory, Executors.newVirtualThreadPerTaskExecutor(), 0L, 30);
+        ToolDef tool = mcpTool("http://server-a", "echo", null);
+
+        var f1 = dispatcher.dispatchMcp(tool, block("u1", "echo", "{}"), "r", "tok");
+        var f2 = dispatcher.dispatchMcp(tool, block("u2", "echo", "{}"), "r", "tok");
+        bothInCreate.await();  // both threads passed get()==null and are inside create()
+        release.countDown();
+
+        assertThat(f1.get().isError()).isFalse();
+        assertThat(f2.get().isError()).isFalse();
+        assertThat(built).hasSize(2);
+        long closed = built.stream().filter(h -> h.closed.get()).count();
+        assertThat(closed).isEqualTo(1); // exactly the race loser's client got closed
     }
 
     // ---- 5. Concurrent same (server,token) do not interleave (unit) --------------------
@@ -248,6 +284,13 @@ class McpToolDispatcherTest {
     static final class EchoHandle implements ToolDispatcher.McpClientHandle {
         @Override public JsonNode callTool(String toolName, JsonNode input) { return input; }
         @Override public void close() {}
+    }
+
+    /** Echoes input; records whether {@code close()} was called (for the race-loser assertion). */
+    static final class CloseTrackingHandle implements ToolDispatcher.McpClientHandle {
+        final AtomicBoolean closed = new AtomicBoolean();
+        @Override public JsonNode callTool(String toolName, JsonNode input) { return input; }
+        @Override public void close() { closed.set(true); }
     }
 
     /** Echoes input and records the max number of concurrent in-flight calls. */
