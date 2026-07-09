@@ -290,6 +290,12 @@ class McpToolDispatcherTest {
         ToolDef tool = mcpTool("http://server-a", "echo", null);
 
         int n = 16;
+        // Warm the cache so all concurrent calls share ONE holder. The cold-cache
+        // get-then-putIfAbsent path intentionally lets a race build >1 client (losers close),
+        // so createCount is only deterministic once the holder is already cached — the surviving
+        // holder count, not the create count, is the design guarantee. This warm-up is NOT added
+        // to `futures`, so the idx 0..n-1 accounting for the 16 real calls stays unchanged.
+        assertThat(dispatcher.dispatchMcp(tool, block("warm", "echo", "{}"), "r", "tok").get().isError()).isFalse();
         var futures = new ConcurrentLinkedQueue<CompletableFuture<ToolResult>>();
         for (int i = 0; i < n; i++) {
             futures.add(dispatcher.dispatchMcp(tool, block("u" + i, "echo", "{\"i\":" + i + "}"), "r", "tok"));
