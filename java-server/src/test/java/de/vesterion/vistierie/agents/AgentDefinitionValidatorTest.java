@@ -30,7 +30,7 @@ class AgentDefinitionValidatorTest {
                 null, null, null, null);
         assertThatThrownBy(() -> v.validateTool(t, List.of()))
                 .isInstanceOf(AgentDefinitionValidator.InvalidDefinitionException.class)
-                .hasMessageContaining("must have either webhook_url or type=subagent");
+                .hasMessageContaining("must have exactly one of webhook_url, type=subagent, type=mcp");
     }
 
     @Test void toolCannotHaveBoth() {
@@ -105,5 +105,103 @@ class AgentDefinitionValidatorTest {
         String json = "{\"name\":\"t\",\"type\":\"mcp\",\"mcp_server_url\":\"http://agora:8080\",\"mcp_tool_name\":\"remote_x\",\"input_schema\":{\"type\":\"object\"}}";
         var t = M.readValue(json, ToolDef.class);
         org.assertj.core.api.Assertions.assertThat(t.resolvedMcpToolName()).isEqualTo("remote_x");
+    }
+
+    @Test void mcpToolWithValidServerUrlPasses() {
+        var t = new ToolDef("mcp-tool", "desc", schema("{\"type\":\"object\"}"),
+                "mcp", null, null, null, "http://agora:8080", null, null, null);
+        v.validateTool(t, List.of());
+    }
+
+    @Test void mcpToolWithHttpsServerUrlPasses() {
+        var t = new ToolDef("mcp-tool", "desc", schema("{\"type\":\"object\"}"),
+                "mcp", null, null, null, "https://agora:8080", null, null, null);
+        v.validateTool(t, List.of());
+    }
+
+    @Test void mcpToolWithNullServerUrlThrows() {
+        var t = new ToolDef("mcp-tool", "desc", schema("{\"type\":\"object\"}"),
+                "mcp", null, null, null, null, null, null, null);
+        assertThatThrownBy(() -> v.validateTool(t, List.of()))
+                .isInstanceOf(AgentDefinitionValidator.InvalidDefinitionException.class)
+                .hasMessageContaining("mcp_server_url");
+    }
+
+    @Test void mcpToolWithBlankServerUrlThrows() {
+        var t = new ToolDef("mcp-tool", "desc", schema("{\"type\":\"object\"}"),
+                "mcp", null, null, null, "   ", null, null, null);
+        assertThatThrownBy(() -> v.validateTool(t, List.of()))
+                .isInstanceOf(AgentDefinitionValidator.InvalidDefinitionException.class)
+                .hasMessageContaining("mcp_server_url");
+    }
+
+    @Test void mcpToolWithNonHttpServerUrlThrows() {
+        var t = new ToolDef("mcp-tool", "desc", schema("{\"type\":\"object\"}"),
+                "mcp", null, null, null, "ftp://agora:8080", null, null, null);
+        assertThatThrownBy(() -> v.validateTool(t, List.of()))
+                .isInstanceOf(AgentDefinitionValidator.InvalidDefinitionException.class)
+                .hasMessageContaining("mcp_server_url must be http(s)");
+    }
+
+    @Test void mcpToolWithAgentWebhookTokenAuthRefThrows() {
+        var t = new ToolDef("mcp-tool", "desc", schema("{\"type\":\"object\"}"),
+                "mcp", null, null, null, "http://agora:8080", null, "agent_webhook_token", null);
+        assertThatThrownBy(() -> v.validateTool(t, List.of()))
+                .isInstanceOf(AgentDefinitionValidator.InvalidDefinitionException.class)
+                .hasMessageContaining("mcp_auth_ref");
+    }
+
+    @Test void mcpToolWithLiteralAuthRefThrows() {
+        var t = new ToolDef("mcp-tool", "desc", schema("{\"type\":\"object\"}"),
+                "mcp", null, null, null, "http://agora:8080", null, "literal:x", null);
+        assertThatThrownBy(() -> v.validateTool(t, List.of()))
+                .isInstanceOf(AgentDefinitionValidator.InvalidDefinitionException.class)
+                .hasMessageContaining("mcp_auth_ref");
+    }
+
+    @Test void mcpToolWithNonPositiveTimeoutThrows() {
+        var t = new ToolDef("mcp-tool", "desc", schema("{\"type\":\"object\"}"),
+                "mcp", null, null, null, "http://agora:8080", null, null, 0);
+        assertThatThrownBy(() -> v.validateTool(t, List.of()))
+                .isInstanceOf(AgentDefinitionValidator.InvalidDefinitionException.class)
+                .hasMessageContaining("mcp_timeout_seconds");
+    }
+
+    @Test void mcpToolWithPositiveTimeoutPasses() {
+        var t = new ToolDef("mcp-tool", "desc", schema("{\"type\":\"object\"}"),
+                "mcp", null, null, null, "http://agora:8080", null, null, 30);
+        v.validateTool(t, List.of());
+    }
+
+    @Test void toolWithBothWebhookAndMcpThrows() {
+        var t = new ToolDef("bad", "desc", schema("{\"type\":\"object\"}"),
+                "mcp", null, "http://x", 30, "http://agora:8080", null, null, null);
+        assertThatThrownBy(() -> v.validateTool(t, List.of()))
+                .isInstanceOf(AgentDefinitionValidator.InvalidDefinitionException.class)
+                .hasMessageContaining("must have exactly one of webhook_url, type=subagent, type=mcp");
+    }
+
+    @Test void toolWithNoneOfWebhookSubagentMcpThrows() {
+        var t = new ToolDef("bad", "desc", schema("{\"type\":\"object\"}"),
+                null, null, null, null);
+        assertThatThrownBy(() -> v.validateTool(t, List.of()))
+                .isInstanceOf(AgentDefinitionValidator.InvalidDefinitionException.class)
+                .hasMessageContaining("must have exactly one of webhook_url, type=subagent, type=mcp");
+    }
+
+    @Test void validateMcpCredentialsThrowsWhenServerUrlAbsentFromCredentials() {
+        var t = new ToolDef("mcp-tool", "desc", schema("{\"type\":\"object\"}"),
+                "mcp", null, null, null, "http://agora:8080", null, null, null);
+        var credentials = schema("{\"http://other:8080\":{\"token\":\"x\"}}");
+        assertThatThrownBy(() -> v.validateMcpCredentials(List.of(t), credentials))
+                .isInstanceOf(AgentDefinitionValidator.InvalidDefinitionException.class)
+                .hasMessageContaining("references server 'http://agora:8080' with no entry in mcp_credentials");
+    }
+
+    @Test void validateMcpCredentialsPassesWhenServerUrlPresentInCredentials() {
+        var t = new ToolDef("mcp-tool", "desc", schema("{\"type\":\"object\"}"),
+                "mcp", null, null, null, "http://agora:8080", null, null, null);
+        var credentials = schema("{\"http://agora:8080\":{\"token\":\"x\"}}");
+        v.validateMcpCredentials(List.of(t), credentials);
     }
 }

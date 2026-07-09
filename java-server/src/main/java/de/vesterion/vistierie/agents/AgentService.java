@@ -41,11 +41,12 @@ public class AgentService {
         validator.validateOutputSchemaIfPresent(req.output_schema());
         var existingNames = repo.findByTenant(tenantId).stream().map(Agent::name).toList();
         for (var t : req.tools()) validator.validateTool(t, existingNames);
+        var mcpCredentials = req.mcp_credentials() != null ? req.mcp_credentials() : mapper.createObjectNode();
+        validator.validateMcpCredentials(req.tools(), mcpCredentials);
         validator.validateSchedule(req.schedule());
         validator.validateStreaming(req.event_source_url(), req.schedule(), req.session_duration_seconds());
         var id = UUID.randomUUID();
         var toolsJson = mapper.valueToTree(req.tools());
-        var mcpCredentials = req.mcp_credentials() != null ? req.mcp_credentials() : mapper.createObjectNode();
         repo.insert(id, tenantId, req.name(), req.system_prompt(), req.model_purpose(),
                 toolsJson, req.output_schema(),
                 req.max_turns() == null ? 25 : req.max_turns(),
@@ -64,10 +65,11 @@ public class AgentService {
         var existing = repo.findByTenant(tenantId).stream()
                 .map(Agent::name).filter(n -> !n.equals(name)).toList();
         for (var t : req.tools()) validator.validateTool(t, existing);
+        var mcpCredentials = req.mcp_credentials() != null ? req.mcp_credentials() : mapper.createObjectNode();
+        validator.validateMcpCredentials(req.tools(), mcpCredentials);
         validator.validateSchedule(req.schedule());
         validator.validateStreaming(req.event_source_url(), req.schedule(), req.session_duration_seconds());
         var toolsJson = mapper.valueToTree(req.tools());
-        var mcpCredentials = req.mcp_credentials() != null ? req.mcp_credentials() : mapper.createObjectNode();
         repo.replace(a.id(), req.system_prompt(), req.model_purpose(),
                 toolsJson, req.output_schema(),
                 req.max_turns() == null ? 25 : req.max_turns(),
@@ -113,6 +115,7 @@ public class AgentService {
             var existing = repo.findByTenant(tenantId).stream()
                     .map(Agent::name).filter(n -> !n.equals(name)).toList();
             for (var t : req.tools()) validator.validateTool(t, existing);
+            validator.validateMcpCredentials(req.tools(), a.mcpCredentials());
         }
         if (req.output_schema() != null) {
             validator.validateOutputSchemaIfPresent(req.output_schema());

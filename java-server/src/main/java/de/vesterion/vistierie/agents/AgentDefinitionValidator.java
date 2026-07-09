@@ -27,9 +27,11 @@ public class AgentDefinitionValidator {
         }
         boolean hasWebhook = t.webhook_url() != null;
         boolean hasSubagent = "subagent".equals(t.type());
-        if (hasWebhook == hasSubagent) {
+        boolean hasMcp = "mcp".equals(t.type());
+        int kinds = (hasWebhook ? 1 : 0) + (hasSubagent ? 1 : 0) + (hasMcp ? 1 : 0);
+        if (kinds != 1) {
             throw new InvalidDefinitionException(
-                    "tool '" + t.name() + "' must have either webhook_url or type=subagent, not both/neither");
+                    "tool '" + t.name() + "' must have exactly one of webhook_url, type=subagent, type=mcp");
         }
         if (hasSubagent) {
             if (t.target_agent() == null || t.target_agent().isBlank()) {
@@ -48,10 +50,43 @@ public class AgentDefinitionValidator {
                         "tool '" + t.name() + "' webhook_url must be http(s)");
             }
         }
+        if (hasMcp) {
+            var u = t.mcp_server_url();
+            if (u == null || u.isBlank()) {
+                throw new InvalidDefinitionException(
+                        "tool '" + t.name() + "' mcp requires mcp_server_url");
+            }
+            if (!(u.startsWith("http://") || u.startsWith("https://"))) {
+                throw new InvalidDefinitionException(
+                        "tool '" + t.name() + "' mcp_server_url must be http(s)");
+            }
+            if (t.mcp_auth_ref() != null) {
+                throw new InvalidDefinitionException(
+                        "tool '" + t.name() + "' unsupported mcp_auth_ref (v1 supports only omitted; token resolved by server URL from mcp_credentials): "
+                                + t.mcp_auth_ref());
+            }
+            if (t.mcp_timeout_seconds() != null && t.mcp_timeout_seconds() <= 0) {
+                throw new InvalidDefinitionException(
+                        "tool '" + t.name() + "' mcp_timeout_seconds must be > 0");
+            }
+        }
         var schemaErr = schemas.parseError(t.input_schema());
         if (schemaErr != null) {
             throw new InvalidDefinitionException(
                     "tool '" + t.name() + "' input_schema: " + schemaErr);
+        }
+    }
+
+    public void validateMcpCredentials(List<ToolDef> tools, tools.jackson.databind.JsonNode mcpCredentials) {
+        for (var t : tools) {
+            if (t.isMcpTool()) {
+                String url = t.mcp_server_url();
+                if (url != null && (mcpCredentials == null || !mcpCredentials.has(url))) {
+                    throw new InvalidDefinitionException(
+                            "mcp tool '" + t.name() + "' references server '" + url
+                                    + "' with no entry in mcp_credentials");
+                }
+            }
         }
     }
 
