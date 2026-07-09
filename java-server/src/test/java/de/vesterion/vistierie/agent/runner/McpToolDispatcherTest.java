@@ -79,6 +79,36 @@ class McpToolDispatcherTest {
         }
     }
 
+    // ---- 2b. Retry-then-succeed through the REAL SDK client (integration) -------------
+
+    /**
+     * Drives the retry loop through the genuine MCP SDK client + Streamable HTTP transport, not the
+     * stub seam. {@code FakeMcpServer} is configured to fail the first {@code fail_then_succeed} call
+     * (tool-level {@code isError=true}) and succeed on the second. The first real {@code callTool}
+     * therefore throws, so {@link ToolDispatcher} evicts + closes the cached {@link McpSyncClient} and
+     * rebuilds a fresh one via {@link ToolDispatcher.HttpClientMcpClientFactory} for the retry, which
+     * hits the now-succeeding server. With {@code mcpRetryBaseMillis = 0} the retry does not sleep, so
+     * the test stays fast and deterministic while proving the evict+rebuild recovery over the actual
+     * transport.
+     */
+    @Test
+    void retryThenSucceedRecoversThroughRealSdkClient() throws Exception {
+        try (FakeMcpServer fake = new FakeMcpServer(TOKEN, 1)) { // fail once, then succeed
+            ToolDispatcher dispatcher = new ToolDispatcher(
+                    new ToolDispatcher.HttpClientMcpClientFactory(),
+                    Executors.newVirtualThreadPerTaskExecutor(), 0L, 30);
+            ToolDef tool = mcpTool(fake.baseUrl(), "fail_then_succeed", null);
+            ToolUseParser.Block block = block("toolu_r", "fail_then_succeed", "{}");
+
+            ToolResult result = dispatcher.dispatchMcp(tool, block, "run-r", TOKEN).get();
+
+            assertThat(result.toolUseId()).isEqualTo("toolu_r");
+            assertThat(result.isError()).isFalse();              // retry recovered
+            assertThat(result.content().path("ok").asBoolean()).isTrue();
+            assertThat(result.content().path("attempt").asInt()).isEqualTo(2); // succeeded on 2nd server call
+        }
+    }
+
     // ---- 3. Retry count (unit) --------------------------------------------------------
 
     @Test
