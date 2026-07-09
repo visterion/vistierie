@@ -270,7 +270,12 @@ public class AgentRunner {
                     runs.markTerminal(runId, "failed", null, "bad_tool_def: " + e.getMessage(), null);
                     return;
                 }
-                futures.add(toolDispatcher.dispatchHttp(td, b, runId, snap.path("webhook_token").asText()));
+                if (td.isMcpTool()) {
+                    String mcpToken = snap.path("mcp_credentials").path(td.mcp_server_url()).asText(null);
+                    futures.add(toolDispatcher.dispatchMcp(td, b, runId, mcpToken));
+                } else {
+                    futures.add(toolDispatcher.dispatchHttp(td, b, runId, snap.path("webhook_token").asText()));
+                }
             }
 
             var assistantMsg = mapper.createObjectNode();
@@ -300,7 +305,8 @@ public class AgentRunner {
                     var blk = blockById.get(res.toolUseId());
                     var bdef = blk == null ? null : toolDefByName.get(blk.name());
                     String toolType = bdef == null ? "unknown"
-                            : ("subagent".equals(bdef.path("type").asText()) ? "subagent" : "http");
+                            : ("subagent".equals(bdef.path("type").asText()) ? "subagent"
+                               : ("mcp".equals(bdef.path("type").asText()) ? "mcp" : "http"));
                     toolCalls.insert(new RunToolCall(
                             newUlid(), runId, run.tenantId(), callId, turn,
                             res.toolUseId(),
