@@ -98,6 +98,7 @@ agents
   session_duration_seconds  INTEGER       -- V9
   poll_interval_seconds     INTEGER       -- V9
   max_tokens                INTEGER       -- V10, nullable → runtime default 8192
+  mcp_credentials           JSONB         -- V13, default '{}' — { "<mcp_server_url>": "<bearer_token>" }
   created_at                TIMESTAMPTZ
   updated_at                TIMESTAMPTZ
   UNIQUE (tenant_id, name)

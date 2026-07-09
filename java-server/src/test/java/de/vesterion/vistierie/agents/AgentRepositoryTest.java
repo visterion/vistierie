@@ -135,4 +135,42 @@ class AgentRepositoryTest extends PostgresTestBase {
         assertThat(updated.completionWebhook()).isEqualTo("https://example.invalid/cb2");
         assertThat(updated.completionWebhookToken()).isEqualTo("secret-cb-token-2");
     }
+
+    @Test
+    void mcpCredentialsRoundTripThroughJsonb() {
+        var tenantId = UUID.randomUUID();
+        tenants.insert(tenantId, "tn-" + tenantId, "h");
+        var id = UUID.randomUUID();
+        var tools = JsonNodeFactory.instance.arrayNode();
+        var creds = mapper.createObjectNode().put("http://agora:8080", "tok-123");
+        repo.insert(id, tenantId, "mcp-agent", "p", "purpose", tools, null,
+                5, 60, null, "wt", false, null, null, null, null, null, null, creds);
+
+        var a = repo.findById(id).orElseThrow();
+        assertThat(a.mcpCredentials()).isEqualTo(creds);
+        assertThat(a.mcpCredentials().path("http://agora:8080").asText()).isEqualTo("tok-123");
+
+        var updatedCreds = mapper.createObjectNode().put("http://agora:9090", "tok-456");
+        repo.replace(id, "p2", "purpose", tools, null, 5, 60, null, "wt", false, null,
+                null, null, null, null, null, updatedCreds);
+
+        var updated = repo.findById(id).orElseThrow();
+        assertThat(updated.mcpCredentials()).isEqualTo(updatedCreds);
+    }
+
+    @Test
+    void mcpCredentialsDefaultsToEmptyObjectForBackwardCompatibility() {
+        var tenantId = UUID.randomUUID();
+        tenants.insert(tenantId, "tn-" + tenantId, "h");
+        var id = UUID.randomUUID();
+        var tools = JsonNodeFactory.instance.arrayNode();
+        // Backward-compatible overload without mcp_credentials — proves existing call sites
+        // (and pre-migration rows) still default to an empty object.
+        repo.insert(id, tenantId, "legacy-agent", "p", "purpose", tools, null,
+                5, 60, "wt", false, null, null, null, null, null, null);
+
+        var a = repo.findById(id).orElseThrow();
+        assertThat(a.mcpCredentials()).isEqualTo(mapper.createObjectNode());
+        assertThat(a.mcpCredentials().isEmpty()).isTrue();
+    }
 }

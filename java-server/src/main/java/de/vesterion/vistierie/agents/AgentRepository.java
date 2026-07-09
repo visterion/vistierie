@@ -4,6 +4,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.JsonNodeFactory;
 
 import java.sql.SQLException;
 import java.time.Instant;
@@ -22,7 +23,7 @@ public class AgentRepository {
         this.mapper = mapper;
     }
 
-    /** Backward-compatible overload: leaves {@code max_tokens} unset (runtime default applies). */
+    /** Backward-compatible overload: leaves {@code max_tokens} unset and {@code mcp_credentials} empty. */
     public void insert(UUID id, UUID tenantId, String name,
                        String systemPrompt, String modelPurpose,
                        JsonNode tools, JsonNode outputSchema,
@@ -35,7 +36,25 @@ public class AgentRepository {
         insert(id, tenantId, name, systemPrompt, modelPurpose, tools, outputSchema,
                 maxTurns, maxRunSeconds, null, webhookToken, paused, schedule,
                 completionWebhook, completionWebhookToken,
-                eventSourceUrl, sessionDurationSeconds, pollIntervalSeconds);
+                eventSourceUrl, sessionDurationSeconds, pollIntervalSeconds,
+                JsonNodeFactory.instance.objectNode());
+    }
+
+    /** Backward-compatible overload: leaves {@code mcp_credentials} empty. */
+    public void insert(UUID id, UUID tenantId, String name,
+                       String systemPrompt, String modelPurpose,
+                       JsonNode tools, JsonNode outputSchema,
+                       int maxTurns, int maxRunSeconds, Integer maxTokens,
+                       String webhookToken, boolean paused,
+                       String schedule,
+                       String completionWebhook, String completionWebhookToken,
+                       String eventSourceUrl, Integer sessionDurationSeconds,
+                       Integer pollIntervalSeconds) {
+        insert(id, tenantId, name, systemPrompt, modelPurpose, tools, outputSchema,
+                maxTurns, maxRunSeconds, maxTokens, webhookToken, paused, schedule,
+                completionWebhook, completionWebhookToken,
+                eventSourceUrl, sessionDurationSeconds, pollIntervalSeconds,
+                JsonNodeFactory.instance.objectNode());
     }
 
     public void insert(UUID id, UUID tenantId, String name,
@@ -46,25 +65,27 @@ public class AgentRepository {
                        String schedule,
                        String completionWebhook, String completionWebhookToken,
                        String eventSourceUrl, Integer sessionDurationSeconds,
-                       Integer pollIntervalSeconds) {
+                       Integer pollIntervalSeconds, JsonNode mcpCredentials) {
         jdbc.sql("""
                 INSERT INTO vistierie.agents
                   (id, tenant_id, name, system_prompt, model_purpose,
                    tools, output_schema, max_turns, max_run_seconds, max_tokens,
                    webhook_token, paused, schedule,
                    completion_webhook, completion_webhook_token,
-                   event_source_url, session_duration_seconds, poll_interval_seconds)
-                VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   event_source_url, session_duration_seconds, poll_interval_seconds,
+                   mcp_credentials)
+                VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
                 """)
                 .params(id, tenantId, name, systemPrompt, modelPurpose,
                         toJsonString(tools), toJsonString(outputSchema),
                         maxTurns, maxRunSeconds, maxTokens, webhookToken, paused, schedule,
                         completionWebhook, completionWebhookToken,
-                        eventSourceUrl, sessionDurationSeconds, pollIntervalSeconds)
+                        eventSourceUrl, sessionDurationSeconds, pollIntervalSeconds,
+                        toJsonString(mcpCredentials))
                 .update();
     }
 
-    /** Backward-compatible overload: leaves {@code max_tokens} unset (runtime default applies). */
+    /** Backward-compatible overload: leaves {@code max_tokens} unset and {@code mcp_credentials} empty. */
     public void replace(UUID id, String systemPrompt, String modelPurpose,
                         JsonNode tools, JsonNode outputSchema,
                         int maxTurns, int maxRunSeconds,
@@ -76,7 +97,24 @@ public class AgentRepository {
         replace(id, systemPrompt, modelPurpose, tools, outputSchema,
                 maxTurns, maxRunSeconds, null, webhookToken, paused, schedule,
                 completionWebhook, completionWebhookToken,
-                eventSourceUrl, sessionDurationSeconds, pollIntervalSeconds);
+                eventSourceUrl, sessionDurationSeconds, pollIntervalSeconds,
+                JsonNodeFactory.instance.objectNode());
+    }
+
+    /** Backward-compatible overload: leaves {@code mcp_credentials} empty. */
+    public void replace(UUID id, String systemPrompt, String modelPurpose,
+                        JsonNode tools, JsonNode outputSchema,
+                        int maxTurns, int maxRunSeconds, Integer maxTokens,
+                        String webhookToken, boolean paused,
+                        String schedule,
+                        String completionWebhook, String completionWebhookToken,
+                        String eventSourceUrl, Integer sessionDurationSeconds,
+                        Integer pollIntervalSeconds) {
+        replace(id, systemPrompt, modelPurpose, tools, outputSchema,
+                maxTurns, maxRunSeconds, maxTokens, webhookToken, paused, schedule,
+                completionWebhook, completionWebhookToken,
+                eventSourceUrl, sessionDurationSeconds, pollIntervalSeconds,
+                JsonNodeFactory.instance.objectNode());
     }
 
     public void replace(UUID id, String systemPrompt, String modelPurpose,
@@ -86,7 +124,7 @@ public class AgentRepository {
                         String schedule,
                         String completionWebhook, String completionWebhookToken,
                         String eventSourceUrl, Integer sessionDurationSeconds,
-                        Integer pollIntervalSeconds) {
+                        Integer pollIntervalSeconds, JsonNode mcpCredentials) {
         jdbc.sql("""
                 UPDATE vistierie.agents
                 SET system_prompt = ?, model_purpose = ?,
@@ -97,6 +135,7 @@ public class AgentRepository {
                     completion_webhook = ?, completion_webhook_token = ?,
                     event_source_url = ?, session_duration_seconds = ?,
                     poll_interval_seconds = ?,
+                    mcp_credentials = ?::jsonb,
                     version = version + 1, updated_at = now()
                 WHERE id = ?
                 """)
@@ -104,7 +143,8 @@ public class AgentRepository {
                         toJsonString(tools), toJsonString(outputSchema),
                         maxTurns, maxRunSeconds, maxTokens, webhookToken, paused, schedule,
                         completionWebhook, completionWebhookToken,
-                        eventSourceUrl, sessionDurationSeconds, pollIntervalSeconds, id)
+                        eventSourceUrl, sessionDurationSeconds, pollIntervalSeconds,
+                        toJsonString(mcpCredentials), id)
                 .update();
     }
 
@@ -167,7 +207,8 @@ public class AgentRepository {
                    webhook_token, paused, version, created_at, updated_at,
                    schedule, last_tick_at,
                    completion_webhook, completion_webhook_token,
-                   event_source_url, session_duration_seconds, poll_interval_seconds
+                   event_source_url, session_duration_seconds, poll_interval_seconds,
+                   mcp_credentials
             FROM vistierie.agents
             """;
 
@@ -198,7 +239,8 @@ public class AgentRepository {
                 rs.getString("completion_webhook_token"),
                 rs.getString("event_source_url"),
                 sessionDuration,
-                pollInterval
+                pollInterval,
+                parseJson(rs.getString("mcp_credentials"))
         );
     }
 

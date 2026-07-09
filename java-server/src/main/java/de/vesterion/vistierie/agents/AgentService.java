@@ -45,6 +45,7 @@ public class AgentService {
         validator.validateStreaming(req.event_source_url(), req.schedule(), req.session_duration_seconds());
         var id = UUID.randomUUID();
         var toolsJson = mapper.valueToTree(req.tools());
+        var mcpCredentials = req.mcp_credentials() != null ? req.mcp_credentials() : mapper.createObjectNode();
         repo.insert(id, tenantId, req.name(), req.system_prompt(), req.model_purpose(),
                 toolsJson, req.output_schema(),
                 req.max_turns() == null ? 25 : req.max_turns(),
@@ -53,7 +54,7 @@ public class AgentService {
                 req.webhook_token(), false, req.schedule(),
                 req.completion_webhook(), req.completion_webhook_token(),
                 req.event_source_url(), req.session_duration_seconds(),
-                req.poll_interval_seconds());
+                req.poll_interval_seconds(), mcpCredentials);
         return toDetail(repo.findById(id).orElseThrow());
     }
 
@@ -66,6 +67,7 @@ public class AgentService {
         validator.validateSchedule(req.schedule());
         validator.validateStreaming(req.event_source_url(), req.schedule(), req.session_duration_seconds());
         var toolsJson = mapper.valueToTree(req.tools());
+        var mcpCredentials = req.mcp_credentials() != null ? req.mcp_credentials() : mapper.createObjectNode();
         repo.replace(a.id(), req.system_prompt(), req.model_purpose(),
                 toolsJson, req.output_schema(),
                 req.max_turns() == null ? 25 : req.max_turns(),
@@ -74,7 +76,7 @@ public class AgentService {
                 req.webhook_token(), a.paused(), req.schedule(),
                 req.completion_webhook(), req.completion_webhook_token(),
                 req.event_source_url(), req.session_duration_seconds(),
-                req.poll_interval_seconds());
+                req.poll_interval_seconds(), mcpCredentials);
         return toDetail(repo.findById(a.id()).orElseThrow());
     }
 
@@ -129,7 +131,7 @@ public class AgentService {
         repo.replace(a.id(), newSysPrompt, newPurpose, newTools, newOutSchema,
                 newMaxTurns, newMaxSeconds, newMaxTokens, newToken, newPaused, newSchedule,
                 newCompletionWebhook, newCompletionWebhookToken,
-                newEventSourceUrl, newSessionDuration, newPollInterval);
+                newEventSourceUrl, newSessionDuration, newPollInterval, a.mcpCredentials());
         return toDetail(repo.findById(a.id()).orElseThrow());
     }
 

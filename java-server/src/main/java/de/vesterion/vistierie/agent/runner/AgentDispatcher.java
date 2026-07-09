@@ -55,6 +55,8 @@ public class AgentDispatcher {
         snap.put("max_run_seconds", agent.maxRunSeconds());
         if (agent.maxTokens() != null) snap.put("max_tokens", agent.maxTokens().intValue());
         snap.put("webhook_token", agent.webhookToken());
+        snap.set("mcp_credentials", agent.mcpCredentials() != null
+                ? agent.mcpCredentials() : mapper.createObjectNode());
         runs.create(runId, tenantId, agent.id(), snap, agent.version(),
                 null, trigger, payload, completionWebhook, completionWebhookToken,
                 sessionId);
