@@ -176,17 +176,24 @@ public class ToolDispatcher {
                 holder = fresh;
             }
         }
-        try {
-            // McpSyncClient is not thread-safe; serialize all calls on one holder.
-            synchronized (holder) {
+        // McpSyncClient is not thread-safe; serialize all calls on one holder. The eviction + close on
+        // failure MUST run WHILE the monitor is held: a sibling call queued on this same holder would
+        // otherwise acquire the monitor the instant this thread left the synchronized block and start a
+        // callTool that overlaps this thread's close() on the shared handle — the exact concurrent access
+        // the monitor exists to prevent (remove() only stops NEW threads from picking up the holder, not
+        // ones already queued on the monitor). Holding the monitor across close() forces the queued sibling
+        // to proceed only after close() finishes; it then calls an already-closed client, fails cleanly,
+        // and its retry loop rebuilds a fresh one.
+        synchronized (holder) {
+            try {
                 JsonNode content = holder.handle.callTool(tool.resolvedMcpToolName(), block.input());
                 return new ToolResult(block.id(), false, content);
+            } catch (RuntimeException e) {
+                // Drop the (possibly stale) client so the retry loop rebuilds a fresh one.
+                mcpClients.remove(key, holder);
+                try { holder.handle.close(); } catch (RuntimeException ignored) { /* best effort */ }
+                throw e;
             }
-        } catch (RuntimeException e) {
-            // Drop the (possibly stale) client so the retry loop rebuilds a fresh one.
-            mcpClients.remove(key, holder);
-            try { holder.handle.close(); } catch (RuntimeException ignored) { /* best effort */ }
-            throw e;
         }
     }
 

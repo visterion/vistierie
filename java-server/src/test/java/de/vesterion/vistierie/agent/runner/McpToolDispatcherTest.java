@@ -10,8 +10,12 @@ import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -166,6 +170,85 @@ class McpToolDispatcherTest {
         assertThat(closed).isEqualTo(1); // exactly the race loser's client got closed
     }
 
+    /**
+     * Deterministic reproduction of the close/callTool race on a SHARED holder.
+     *
+     * <p>Two dispatches hit the same (server, token) and therefore the same cached
+     * {@link ToolDispatcher.McpClientHolder} wrapping one shared handle. Thread A's {@code callTool}
+     * fails, so the retry loop must evict + {@code close()} that shared handle. Thread B is queued on
+     * the holder's monitor and then calls the SAME handle. {@code McpSyncClient} is not thread-safe, so
+     * a {@code callTool} must never overlap a {@code close()} on the same handle. The instrumented handle
+     * flips {@link SharedRaceHandle#overlap} whenever two operations on it are in progress at once; the
+     * test asserts that never happens.
+     *
+     * <p>Pre-fix the try/catch wraps the {@code synchronized} block, so A's {@code close()} runs AFTER the
+     * monitor is released and B's queued {@code callTool} runs concurrently with it -> overlap==true ->
+     * this test FAILS. Post-fix the eviction+close run under the monitor, B stays blocked until close
+     * finishes -> overlap==false -> this test PASSES.
+     *
+     * <p>Determinism: latches force both A's {@code close()} and B's {@code callTool} to be parked (both
+     * "in progress") simultaneously before anything is released, so whichever enters second observes the
+     * overlap — no reliance on scheduling speed. The single bounded {@code await} ({@code bInCall}) is a
+     * liveness bound that only elapses on the post-fix path (where B legitimately cannot proceed until
+     * close completes); the pass/fail outcome does not depend on its duration.
+     */
+    @Test
+    void closeNeverOverlapsCallToolOnSharedHolder() throws Exception {
+        SharedRaceHandle shared = new SharedRaceHandle();
+        AtomicInteger creates = new AtomicInteger();
+        // First create() (the warm-up) hands back the instrumented shared handle that A and B will share;
+        // later creates (A's post-failure rebuild) get throwaway handles so they cannot taint the counters.
+        ToolDispatcher.McpClientFactory factory = (serverUrl, token, timeout) ->
+                creates.getAndIncrement() == 0 ? shared : new EchoHandle();
+
+        List<Thread> workers = new CopyOnWriteArrayList<>();
+        ThreadFactory tf = r -> { Thread t = new Thread(r); workers.add(t); return t; };
+        ExecutorService exec = Executors.newFixedThreadPool(4, tf);
+        try {
+            ToolDispatcher dispatcher = new ToolDispatcher(factory, exec, 0L, 30);
+            ToolDef tool = mcpTool("http://server-a", "echo", null);
+
+            // Warm-up: seed the cache with the shared holder so A and B both get() the SAME holder
+            // (no putIfAbsent creation race, no premature eviction before B has the reference).
+            assertThat(dispatcher.dispatchMcp(tool, block("warm", "echo", "{}"), "r", "tok").get().isError())
+                    .isFalse();
+            shared.arm();
+
+            // A: acquires the holder monitor and parks INSIDE callTool (still holding it).
+            var fA = dispatcher.dispatchMcp(tool, block("uA", "echo", "{}"), "r", "tok");
+            shared.aInCall.await();
+
+            // B: gets the SAME cached holder, then blocks trying to enter the monitor A holds.
+            var fB = dispatcher.dispatchMcp(tool, block("uB", "echo", "{\"i\":1}"), "r", "tok");
+            // Spin until B is genuinely BLOCKED on the holder monitor (not merely scheduled) so that
+            // releasing A cannot outrun B's get()+monitor-enter. Condition-based, no fixed sleep.
+            while (workers.stream().noneMatch(t -> t.getState() == Thread.State.BLOCKED)) {
+                Thread.onSpinWait();
+            }
+
+            // Let A's callTool throw -> the retry loop must evict + close the shared handle.
+            shared.aMayThrow.countDown();
+            shared.closeStarted.await();            // close() is now in progress on the shared handle
+
+            // Wait for B to actually enter callTool (only possible pre-fix, where close ran outside the
+            // monitor) before letting close finish. Post-fix B stays blocked and this bound elapses.
+            boolean bEnteredDuringClose = shared.bInCall.await(2, TimeUnit.SECONDS);
+
+            shared.closeMayProceed.countDown();
+            shared.bMayProceed.countDown();
+            if (!bEnteredDuringClose) shared.bInCall.await();   // post-fix: B runs cleanly after close
+
+            assertThat(fA.get().isError()).isFalse();
+            assertThat(fB.get().isError()).isFalse();
+            assertThat(shared.closed.get()).as("the failed shared handle was closed").isTrue();
+            assertThat(shared.overlap.get())
+                    .as("close() must not overlap a callTool() on the same handle")
+                    .isFalse();
+        } finally {
+            exec.shutdownNow();
+        }
+    }
+
     // ---- 5. Concurrent same (server,token) do not interleave (unit) --------------------
 
     @Test
@@ -311,6 +394,68 @@ class McpToolDispatcherTest {
             }
         }
         @Override public void close() {}
+    }
+
+    /**
+     * Instrumented handle for {@link #closeNeverOverlapsCallToolOnSharedHolder}. Tracks operations on
+     * itself: any moment two of {callTool, close} are in progress flips {@link #overlap}. A's first
+     * (armed) callTool parks holding the holder monitor then throws; a later callTool (B) parks so that,
+     * iff close ran outside the monitor, both B's call and A's close are in progress at the same time.
+     */
+    static final class SharedRaceHandle implements ToolDispatcher.McpClientHandle {
+        final AtomicInteger active = new AtomicInteger();
+        final AtomicBoolean overlap = new AtomicBoolean();
+        final AtomicBoolean closed = new AtomicBoolean();
+        volatile boolean armed = false;      // race phase active (set after warm-up)
+        volatile boolean throwNext = false;  // next callTool is A's failing call
+
+        final CountDownLatch aInCall = new CountDownLatch(1);
+        final CountDownLatch aMayThrow = new CountDownLatch(1);
+        final CountDownLatch bInCall = new CountDownLatch(1);
+        final CountDownLatch bMayProceed = new CountDownLatch(1);
+        final CountDownLatch closeStarted = new CountDownLatch(1);
+        final CountDownLatch closeMayProceed = new CountDownLatch(1);
+
+        void arm() { armed = true; throwNext = true; }
+
+        private void enter() { if (active.incrementAndGet() > 1) overlap.set(true); }
+        private void exit() { active.decrementAndGet(); }
+
+        @Override public JsonNode callTool(String toolName, JsonNode input) {
+            if (throwNext) {                 // A's call: park holding the monitor, then fail
+                throwNext = false;
+                enter();
+                try {
+                    aInCall.countDown();
+                    await(aMayThrow);
+                } finally { exit(); }
+                throw new RuntimeException("boom-A");
+            }
+            if (armed) {                     // B's call: park while active so close can overlap it
+                enter();
+                try {
+                    bInCall.countDown();
+                    await(bMayProceed);
+                    return input;
+                } finally { exit(); }
+            }
+            return input;                    // warm-up
+        }
+
+        @Override public void close() {
+            enter();
+            try {
+                closeStarted.countDown();
+                await(closeMayProceed);
+            } finally {
+                exit();
+                closed.set(true);
+            }
+        }
+
+        private static void await(CountDownLatch l) {
+            try { l.await(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        }
     }
 
     static final class SleepingHandle implements ToolDispatcher.McpClientHandle {
