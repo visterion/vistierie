@@ -1,5 +1,11 @@
 package de.vesterion.vistierie.agent.runner;
 
+/**
+ * Stateless subagent recursion-depth guard. Depth is propagated explicitly through the run
+ * chain (captured in the subagent spawn lambda's closure) rather than tracked per-thread,
+ * so the limit survives the async subagent boundary where each subagent runs on a fresh
+ * virtual thread.
+ */
 public class RecursionGuard {
 
     public static class DepthExceeded extends RuntimeException {
@@ -7,18 +13,11 @@ public class RecursionGuard {
     }
 
     private final int max;
-    private final ThreadLocal<Integer> depth = ThreadLocal.withInitial(() -> 0);
 
     public RecursionGuard(int max) { this.max = max; }
 
-    public void enter() {
-        int d = depth.get();
-        if (d >= max) throw new DepthExceeded(max);
-        depth.set(d + 1);
+    /** Throws {@link DepthExceeded} when {@code depth} exceeds the configured maximum. */
+    public void check(int depth) {
+        if (depth > max) throw new DepthExceeded(max);
     }
-    public void exit() {
-        int d = depth.get();
-        if (d > 0) depth.set(d - 1);
-    }
-    public int depth() { return depth.get(); }
 }

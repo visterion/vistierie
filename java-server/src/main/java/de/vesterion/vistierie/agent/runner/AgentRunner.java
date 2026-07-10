@@ -22,6 +22,8 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -54,6 +56,7 @@ public class AgentRunner {
     private final ExecutorService subagentExecutor;
     private final ObjectMapper mapper;
     private final RunToolCallRepository toolCalls;
+    private final Clock clock;
 
     public AgentRunner(AgentRepository agents, RunStore runs,
                        RoutingResolver routing, ProviderRegistry providers,
@@ -65,7 +68,8 @@ public class AgentRunner {
                        RecursionGuard recursionGuard,
                        ExecutorService subagentExecutor,
                        ObjectMapper mapper,
-                       RunToolCallRepository toolCalls) {
+                       RunToolCallRepository toolCalls,
+                       Clock clock) {
         this.agents = agents;
         this.runs = runs;
         this.routing = routing;
@@ -82,12 +86,26 @@ public class AgentRunner {
         this.subagentExecutor = subagentExecutor;
         this.mapper = mapper;
         this.toolCalls = toolCalls;
+        this.clock = clock;
     }
 
     /** Synchronous run starter — used in tests; production path enqueues. */
     public String startRunSync(UUID tenantId, UUID agentId, String trigger,
                                JsonNode payload, String parentRunId,
                                String completionWebhook, String completionWebhookToken) {
+        return startRunSync(tenantId, agentId, trigger, payload, parentRunId,
+                completionWebhook, completionWebhookToken, 0);
+    }
+
+    /**
+     * Depth-aware variant used by the subagent spawn path. {@code depth} is the recursion
+     * depth of the run being started (0 for a top-level run) and is propagated into the
+     * turn loop so the subagent depth limit survives the async spawn boundary.
+     */
+    private String startRunSync(UUID tenantId, UUID agentId, String trigger,
+                                JsonNode payload, String parentRunId,
+                                String completionWebhook, String completionWebhookToken,
+                                int depth) {
         var runId = newUlid();
         var agent = agents.findById(agentId).orElseThrow();
         var snap = mapper.createObjectNode();
@@ -105,13 +123,17 @@ public class AgentRunner {
         JsonNode snapshot = snap;
         runs.create(runId, tenantId, agentId, snapshot, agent.version(),
                 parentRunId, trigger, payload, completionWebhook, completionWebhookToken);
-        execute(runId);
+        execute(runId, depth);
         return runId;
     }
 
     public void execute(String runId) {
+        execute(runId, 0);
+    }
+
+    private void execute(String runId, int depth) {
         try {
-            executeInternal(runId);
+            executeInternal(runId, depth);
         } catch (Exception e) {
             log.warn("run {} aborted with uncaught exception: {}", runId, e.toString());
             String detail = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
@@ -119,12 +141,21 @@ public class AgentRunner {
         }
     }
 
-    private void executeInternal(String runId) {
+    private void executeInternal(String runId, int depth) {
         runs.markRunning(runId);
         Run run = runs.get(runId);
         var snap = run.agentSnapshot();
         int maxTurns = snap.path("max_turns").asInt(25);
         int maxTokens = snap.path("max_tokens").asInt(DEFAULT_MAX_TOKENS);
+        // Wall-clock budget. <= 0 (absent/zero) means no limit. The deadline is anchored to
+        // the run's start instant so slow tools/providers cannot exceed the configured wall
+        // clock even within a single turn.
+        long maxRunSeconds = snap.path("max_run_seconds").asLong(0);
+        Instant deadline = null;
+        if (maxRunSeconds > 0) {
+            Instant startedAt = run.startedAt() != null ? run.startedAt() : clock.instant();
+            deadline = startedAt.plusSeconds(maxRunSeconds);
+        }
         var tenantName = tenants.findById(run.tenantId()).orElseThrow().name();
         var systemPrompt = snap.path("system_prompt").asText();
         var modelPurpose = snap.path("model_purpose").asText();
@@ -149,6 +180,10 @@ public class AgentRunner {
                 budgets.checkOrThrow(run.tenantId(), tenantName, run.agentId(), snap.path("name").asText());
             } catch (BudgetException e) {
                 runs.markTerminal(runId, "failed", null, e.code() + ": " + e.getMessage(), null);
+                return;
+            }
+            if (deadline != null && clock.instant().isAfter(deadline)) {
+                runs.markTerminal(runId, "failed", null, "max_run_seconds_exceeded", null);
                 return;
             }
 
@@ -236,11 +271,12 @@ public class AgentRunner {
                     final var parentTenantId = run.tenantId();
                     final var parentRunId = runId;
                     final var blockRef = b;
+                    final int childDepth = depth + 1;
                     futures.add(CompletableFuture.supplyAsync(() -> {
                         try {
-                            recursionGuard.enter();
+                            recursionGuard.check(childDepth);
                             var childRunId = startRunSync(parentTenantId, targetId, "subagent",
-                                    blockRef.input(), parentRunId, null, null);
+                                    blockRef.input(), parentRunId, null, null, childDepth);
                             runs.recordEvent(parentRunId, "info", "subagent_spawned",
                                     mapper.valueToTree(Map.of("child_run_id", childRunId, "agent", targetName)));
                             var child = runs.get(childRunId);
@@ -257,8 +293,6 @@ public class AgentRunner {
                         } catch (RecursionGuard.DepthExceeded de) {
                             return new ToolResult(blockRef.id(), true,
                                     mapper.createObjectNode().put("error", de.getMessage()));
-                        } finally {
-                            try { recursionGuard.exit(); } catch (Exception ignored) {}
                         }
                     }, subagentExecutor));
                     continue;
