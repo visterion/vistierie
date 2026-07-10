@@ -31,8 +31,35 @@ export function flattenMessages(
   return blocks;
 }
 
-export async function complete(req: CompleteRequest): Promise<CompleteResponse> {
+/** Options controlling a single {@link complete} call. */
+export interface CompleteOptions {
+  /**
+   * Abort signal tied to the incoming HTTP request. When it fires (client
+   * disconnect / Java-side timeout), the in-flight SDK query is aborted so the
+   * spawned CLI child process is torn down instead of leaking.
+   */
+  signal?: AbortSignal;
+  /**
+   * Hard upper bound (ms) on consuming the SDK query. On expiry the query is
+   * aborted and a 504 timeout error is thrown. Defaults to
+   * `BRIDGE_QUERY_TIMEOUT_MS` (or 290000, just under the Java 300s read timeout
+   * so the bridge gives up first and cleans up).
+   */
+  timeoutMs?: number;
+}
+
+function resolveTimeoutMs(override?: number): number {
+  if (typeof override === "number") return override;
+  const fromEnv = Number(process.env.BRIDGE_QUERY_TIMEOUT_MS);
+  return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : 290000;
+}
+
+export async function complete(
+  req: CompleteRequest,
+  opts: CompleteOptions = {},
+): Promise<CompleteResponse> {
   const content = flattenMessages(req.messages);
+  const timeoutMs = resolveTimeoutMs(opts.timeoutMs);
 
   async function* promptStream(): AsyncGenerator<SDKUserMessage> {
     yield {
@@ -43,7 +70,34 @@ export async function complete(req: CompleteRequest): Promise<CompleteResponse> 
     } as unknown as SDKUserMessage;
   }
 
-  try {
+  // We own this controller and hand it to the SDK via `options.abortController`;
+  // aborting it stops the query and tears down the spawned CLI child process.
+  const controller = new AbortController();
+
+  // A single rejection source for every non-completion outcome (timeout /
+  // client disconnect). Whoever fires first also aborts the controller.
+  let failWith!: (err: BridgeError) => void;
+  const failure = new Promise<never>((_, reject) => {
+    failWith = reject;
+  });
+  const abortWith = (err: BridgeError) => {
+    if (!controller.signal.aborted) controller.abort();
+    failWith(err);
+  };
+
+  const timer = setTimeout(
+    () => abortWith(new BridgeError(504, "timeout", `SDK query exceeded ${timeoutMs}ms`)),
+    timeoutMs,
+  );
+
+  const clientAbort = () =>
+    abortWith(new BridgeError(499, "client_closed", "request aborted by client"));
+  if (opts.signal) {
+    if (opts.signal.aborted) clientAbort();
+    else opts.signal.addEventListener("abort", clientAbort, { once: true });
+  }
+
+  async function consume(): Promise<CompleteResponse> {
     const q = query({
       prompt: promptStream(),
       options: {
@@ -52,6 +106,12 @@ export async function complete(req: CompleteRequest): Promise<CompleteResponse> 
         maxTurns: 1,
         allowedTools: [],
         settingSources: [],
+        abortController: controller,
+        // NOTE (#8): req.max_tokens cannot be forwarded — the Claude Agent SDK
+        // query Options type exposes no per-query output-token cap (only
+        // maxThinkingTokens / maxTurns / maxBudgetUsd). See
+        // documentation/providers.md; this differs from the API-key provider,
+        // which honors max_tokens. Forward it here if the SDK ever adds a field.
       },
     });
 
@@ -78,7 +138,14 @@ export async function complete(req: CompleteRequest): Promise<CompleteResponse> 
       throw mapSdkError(new Error(errorText));
     }
     throw new BridgeError(500, "no_result", "SDK stream ended without a result message");
+  }
+
+  try {
+    return await Promise.race([consume(), failure]);
   } catch (err) {
     throw mapSdkError(err);
+  } finally {
+    clearTimeout(timer);
+    opts.signal?.removeEventListener("abort", clientAbort);
   }
 }

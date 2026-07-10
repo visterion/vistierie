@@ -47,6 +47,24 @@ and reachable at `base-url`.
   response) is surfaced as `ProviderException(502, <code>, ...)` so it behaves like
   a normal upstream outage for routing/fallback purposes.
 
+**Limitations:**
+
+- **`max_tokens` is not enforceable.** The `claude-bridge` sidecar drives the
+  Claude Agent SDK's `query()`, whose `Options` type exposes no per-query
+  output-token cap (only `maxThinkingTokens` / `maxTurns` / `maxBudgetUsd`).
+  A request's `max_tokens` is therefore accepted but **not** applied on this
+  provider, unlike the metered `anthropic` (API-key) provider which honors it.
+  Do not rely on `max_tokens` for cost/latency control when routing to
+  `claude-subscription`. (Tracked in the bridge code as finding #8; re-add
+  forwarding if the SDK gains such a field.)
+
+**Timeout / cancellation:** The bridge bounds each SDK query at
+`BRIDGE_QUERY_TIMEOUT_MS` (default `290000` ms — just under the Java 300s read
+timeout so the bridge gives up first). On timeout, or when the incoming HTTP
+request is aborted/closed by the caller, the bridge aborts the SDK query via an
+`AbortController`, terminating the spawned CLI child process instead of leaking
+it. A timeout is surfaced as HTTP `504` `{"error":{"code":"timeout",...}}`.
+
 **Configuration:**
 
 | Property | Env var | Default | Required |
@@ -54,6 +72,7 @@ and reachable at `base-url`.
 | `vistierie.claude-subscription.enabled` | `CLAUDE_SUBSCRIPTION_ENABLED` | `false` | yes (to enable) |
 | `vistierie.claude-subscription.base-url` | `CLAUDE_BRIDGE_URL` | `http://claude-bridge:8091` | no |
 | `vistierie.claude-subscription.timeout-seconds` | — | `300` | no |
+| _(bridge sidecar)_ query timeout | `BRIDGE_QUERY_TIMEOUT_MS` | `290000` | no |
 
 **Typical pairing:** a routing rule targets `claude-subscription` as the primary
 provider with `anthropic` configured as its fallback, so subscription-quota
