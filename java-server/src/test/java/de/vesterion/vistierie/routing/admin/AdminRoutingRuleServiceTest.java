@@ -157,7 +157,7 @@ class AdminRoutingRuleServiceTest {
         svc.patch(id, null, "claude-sonnet-4-6", null, null, null, null, null, null);
 
         verify(rules).update(eq(id), eq("anthropic"), eq("claude-sonnet-4-6"),
-                eq(null), eq(null), eq(100), eq(false), eq(false));
+                eq(null), eq(null), eq(null), eq(100), eq(false), eq(false));
         verify(audit).record(eq("update"), eq(id), eq(tenantId),
                 eq(before), eq(after), eq("admin"));
         verify(resolver).bumpVersion();
@@ -174,7 +174,7 @@ class AdminRoutingRuleServiceTest {
         assertThatThrownBy(() -> svc.patch(id, "nope", null, null, null, null, null, null, null))
                 .isInstanceOf(AdminRoutingRuleService.BadInputException.class)
                 .hasMessageContaining("unknown provider");
-        verify(rules, never()).update(any(), any(), any(), any(), any(), anyInt(), anyBoolean(), anyBoolean());
+        verify(rules, never()).update(any(), any(), any(), any(), any(), any(), anyInt(), anyBoolean(), anyBoolean());
     }
 
     @Test void patchPriorityOutOfRange() {
@@ -203,7 +203,7 @@ class AdminRoutingRuleServiceTest {
         assertThat(patched.fallbackProvider()).isNull();
         assertThat(patched.fallbackModel()).isNull();
         verify(rules).update(eq(id), eq("claude-subscription"), eq("m"),
-                eq(null), eq(null), eq(100), eq(false), eq(false));
+                eq(null), eq(null), eq(null), eq(100), eq(false), eq(false));
     }
 
     @Test void deleteRefusesWildcardDefault() {

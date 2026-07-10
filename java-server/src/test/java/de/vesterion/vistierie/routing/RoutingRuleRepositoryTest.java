@@ -80,10 +80,30 @@ class RoutingRuleRepositoryTest extends PostgresTestBase {
         assertThat(loaded.fallbackModel()).isEqualTo("claude-opus-4-8");
 
         repo.update(rule.id(), "claude-subscription", "claude-opus-4-8",
-                null, null, 50, false, false);
+                null, null, null, 50, false, false);
         var cleared = repo.findById(rule.id()).orElseThrow();
         assertThat(cleared.fallbackProvider()).isNull();
         assertThat(cleared.fallbackModel()).isNull();
+    }
+
+    @Test
+    void effortRoundtrip() {
+        var now = Instant.now();
+        var rule = new RoutingRule(UUID.randomUUID(), tenantId, "realmB", "purposeB",
+                "claude-subscription", "claude-haiku-4-5",
+                "anthropic", "claude-haiku-4-5",
+                "off", 50, false, false, now, now);
+        repo.insert(rule);
+
+        var loaded = repo.findById(rule.id()).orElseThrow();
+        assertThat(loaded.effort()).isEqualTo("off");
+    }
+
+    @Test
+    void effortDefaultsToNull() {
+        var r = rule(null, null, 1000);
+        repo.insert(r);
+        assertThat(repo.findById(r.id()).orElseThrow().effort()).isNull();
     }
 
     @Test
