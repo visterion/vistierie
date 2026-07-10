@@ -14,6 +14,7 @@ import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -61,9 +62,13 @@ public class OpenAiCompatibleProvidersConfig {
                 GenericBeanDefinition bd = new GenericBeanDefinition();
                 bd.setBeanClass(OpenAiCompatibleProvider.class);
                 bd.setInstanceSupplier(() -> {
+                    int timeoutSeconds = props.timeoutSeconds() != null ? props.timeoutSeconds() : 60;
+                    var factory = new SimpleClientHttpRequestFactory();
+                    factory.setConnectTimeout(Duration.ofSeconds(5));
+                    factory.setReadTimeout(Duration.ofSeconds(timeoutSeconds));
                     var http = RestClient.builder()
                             .baseUrl(baseUrl)
-                            .requestFactory(new SimpleClientHttpRequestFactory())
+                            .requestFactory(factory)
                             .build();
                     return new OpenAiCompatibleProvider(name, http, props.apiKey());
                 });

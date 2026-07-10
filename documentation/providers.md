@@ -80,7 +80,7 @@ vistierie:
     openai:
       base-url: https://api.openai.com/v1
       api-key: ${OPENAI_API_KEY:}
-      timeout-seconds: 60   # accepted but not currently applied to the HTTP client (no-op)
+      timeout-seconds: 60   # HTTP read timeout, in seconds (defaults to 60; connect timeout is a fixed 5s)
     xai:
       base-url: https://api.x.ai/v1
       api-key: ${XAI_API_KEY:}
