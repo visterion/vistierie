@@ -80,12 +80,27 @@ public class RunController {
             var refreshed = runs.findById(id).orElse(null);
             if (refreshed != null) deferred.setResult(ResponseEntity.ok(toDetail(refreshed)));
         };
+        // Register BEFORE the definitive terminal re-check to close the race with
+        // RunStore.markTerminal(), which writes terminal state and then calls
+        // longPoll.notifyTerminal(id) (drain + remove waiters). If the run turns
+        // terminal between the r0 read above and this register call, notifyTerminal
+        // may already have drained an (at that point) empty waiter list; re-querying
+        // now and resolving immediately covers that case. If notifyTerminal instead
+        // runs after register, our wakeup is the one that gets drained and resolves.
+        // DeferredResult.setResult only honors the first call, so double-resolution
+        // between this re-check and a concurrent wakeup/timeout is safe.
         longPoll.register(id, wakeup);
         deferred.onTimeout(() -> {
             longPoll.unregister(id, wakeup);
             runs.findById(id).ifPresent(r -> deferred.setResult(ResponseEntity.ok(toDetail(r))));
         });
         deferred.onCompletion(() -> longPoll.unregister(id, wakeup));
+
+        var recheck = runs.findById(id).orElse(null);
+        if (recheck != null && ("done".equals(recheck.status()) || "failed".equals(recheck.status()))) {
+            longPoll.unregister(id, wakeup);
+            deferred.setResult(ResponseEntity.ok(toDetail(recheck)));
+        }
         return deferred;
     }
 
