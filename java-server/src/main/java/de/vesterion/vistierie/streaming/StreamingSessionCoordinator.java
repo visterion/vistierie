@@ -104,13 +104,20 @@ public class StreamingSessionCoordinator {
         }
 
         // Poll the event source
-        var events = poller.poll(
+        var pollResult = poller.poll(
                 agent.eventSourceUrl(),
                 agent.webhookToken(),
                 session.id(),
                 agent.name(),
                 lastPoll,
                 now);
+
+        if (!pollResult.ok()) {
+            log.warn("streaming-bee: poll failed for agent {} session {}, cursor preserved for retry",
+                    agent.name(), session.id());
+            return;
+        }
+        var events = pollResult.events();
 
         // Resolve tenant name once — reused for every per-event budget check below
         var tenantName = tenants.findById(agent.tenantId()).orElseThrow().name();

@@ -110,7 +110,7 @@ class StreamingSessionCoordinatorTest extends PostgresTestBase {
         // Use a fresh coordinator with real EventSourcePoller that won't be called
         var realPoller = mock(EventSourcePoller.class);
         when(realPoller.poll(any(), any(), any(), any(), any(), any()))
-                .thenReturn(List.of());
+                .thenReturn(EventSourcePoller.PollResult.ok(List.of()));
         var c = new StreamingSessionCoordinator(sessionRepo, realPoller, dispatcher,
                 kill, budgets, mockTenants,
                 Clock.fixed(now, ZoneOffset.UTC));
@@ -150,7 +150,7 @@ class StreamingSessionCoordinatorTest extends PostgresTestBase {
         var realPoller = mock(EventSourcePoller.class);
         when(realPoller.poll(eq("https://events.invalid/poll"), eq("wt"),
                 eq(sessionId), eq("daywalker"), isNull(), eq(now)))
-                .thenReturn(List.of(event1, event2));
+                .thenReturn(EventSourcePoller.PollResult.ok(List.of(event1, event2)));
 
         var c = new StreamingSessionCoordinator(sessionRepo, realPoller, dispatcher,
                 kill, budgets, mockTenants,
@@ -240,7 +240,7 @@ class StreamingSessionCoordinatorTest extends PostgresTestBase {
         var event = M.readTree("{\"symbol\":\"AAPL\"}");
         var realPoller = mock(EventSourcePoller.class);
         when(realPoller.poll(any(), any(), any(), any(), any(), any()))
-                .thenReturn(List.of(event));
+                .thenReturn(EventSourcePoller.PollResult.ok(List.of(event)));
         doThrow(BudgetException.exceeded("tenant", "daily", "test-tenant", "daywalker"))
                 .when(budgets).checkOrThrow(any(), any(), any(), any());
 
@@ -261,7 +261,7 @@ class StreamingSessionCoordinatorTest extends PostgresTestBase {
 
         var realPoller = mock(EventSourcePoller.class);
         when(realPoller.poll(any(), any(), any(), any(), any(), any()))
-                .thenReturn(List.of());
+                .thenReturn(EventSourcePoller.PollResult.ok(List.of()));
 
         var c = new StreamingSessionCoordinator(sessionRepo, realPoller, dispatcher,
                 kill, budgets, mockTenants,
@@ -271,5 +271,54 @@ class StreamingSessionCoordinatorTest extends PostgresTestBase {
 
         verifyNoInteractions(dispatcher);
         assertThat(sessionRepo.findOpenByAgent(agentId).get().lastPollAt()).isEqualTo(now);
+    }
+
+    @Test
+    void failedPoll_doesNotAdvanceCursor_soNextTickRetriesSameWindow() {
+        var now = Instant.parse("2026-06-02T09:30:00Z");
+        var sessionId = UUID.randomUUID();
+        var priorLastPoll = now.minusSeconds(120);
+        sessionRepo.insertOpen(sessionId, tenantId, agentId,
+                now.minusSeconds(3600), now.plusSeconds(27000));
+        sessionRepo.updateLastPoll(sessionId, priorLastPoll);
+
+        var realPoller = mock(EventSourcePoller.class);
+        when(realPoller.poll(any(), any(), any(), any(), any(), any()))
+                .thenReturn(EventSourcePoller.PollResult.failed());
+
+        var c = new StreamingSessionCoordinator(sessionRepo, realPoller, dispatcher,
+                kill, budgets, mockTenants,
+                Clock.fixed(now, ZoneOffset.UTC));
+
+        c.handleTick(streamingAgent, false);
+
+        verifyNoInteractions(dispatcher);
+        assertThat(sessionRepo.findOpenByAgent(agentId).get().lastPollAt())
+                .as("cursor must be preserved so the next tick retries the same since-window")
+                .isEqualTo(priorLastPoll);
+    }
+
+    @Test
+    void successfulEmptyPoll_advancesCursor() {
+        var now = Instant.parse("2026-06-02T09:30:00Z");
+        var sessionId = UUID.randomUUID();
+        var priorLastPoll = now.minusSeconds(120);
+        sessionRepo.insertOpen(sessionId, tenantId, agentId,
+                now.minusSeconds(3600), now.plusSeconds(27000));
+        sessionRepo.updateLastPoll(sessionId, priorLastPoll);
+
+        var realPoller = mock(EventSourcePoller.class);
+        when(realPoller.poll(any(), any(), any(), any(), any(), any()))
+                .thenReturn(EventSourcePoller.PollResult.ok(List.of()));
+
+        var c = new StreamingSessionCoordinator(sessionRepo, realPoller, dispatcher,
+                kill, budgets, mockTenants,
+                Clock.fixed(now, ZoneOffset.UTC));
+
+        c.handleTick(streamingAgent, false);
+
+        verifyNoInteractions(dispatcher);
+        assertThat(sessionRepo.findOpenByAgent(agentId).get().lastPollAt())
+                .isEqualTo(now);
     }
 }
