@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -44,8 +45,8 @@ public class AdminRoutingRuleService {
         public LastDefaultException(String m) { super(m); }
     }
 
-    private static final java.util.Set<String> EFFORTS =
-            java.util.Set.of("off", "low", "medium", "high", "max");
+    private static final Set<String> EFFORTS =
+            Set.of("off", "low", "medium", "high", "max");
 
     private void validateEffort(String effort) {
         if (effort != null && !EFFORTS.contains(effort)) {

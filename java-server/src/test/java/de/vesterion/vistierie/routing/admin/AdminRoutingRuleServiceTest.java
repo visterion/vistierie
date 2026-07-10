@@ -280,6 +280,21 @@ class AdminRoutingRuleServiceTest {
                 eq(null), eq(null), eq("low"), eq(100), eq(false), eq(false));
     }
 
+    @Test void patchRejectsInvalidEffort() {
+        var id = UUID.randomUUID();
+        var now = Instant.parse("2026-01-01T00:00:00Z");
+        var before = new RoutingRule(id, tenantId, "r", "p", "anthropic", "m",
+                null, null, null, 100, false, false, now, now);
+        when(rules.findById(id)).thenReturn(Optional.of(before));
+
+        assertThatThrownBy(() -> svc.patch(id, null, null, null, null, null,
+                "turbo", null, null, null, null))
+                .isInstanceOf(AdminRoutingRuleService.BadInputException.class)
+                .hasMessageContaining("effort");
+        verify(rules, never()).update(any(), any(), any(), any(), any(), any(),
+                anyInt(), anyBoolean(), anyBoolean());
+    }
+
     @Test void patchClearsEffort() {
         var id = UUID.randomUUID();
         var now = Instant.parse("2026-01-01T00:00:00Z");
