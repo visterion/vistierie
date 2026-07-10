@@ -103,4 +103,19 @@ class ClaudeSubscriptionProviderTest {
         return new ProviderRequest("claude-opus-4-8", 10, null, null,
                 List.of(Map.of("role", "user", "content", "hi")), null, null, null);
     }
+
+    @Test void completeSendsEffortWhenSet() {
+        stubFor(post(urlEqualTo("/v1/complete")).willReturn(okJson(OK_BODY)));
+        provider.complete(new ProviderRequest("claude-opus-4-8", 256, null, null,
+                List.of(Map.of("role", "user", "content", "hi")), null, null, null, "off"));
+        verify(postRequestedFor(urlEqualTo("/v1/complete"))
+                .withRequestBody(containing("\"effort\":\"off\"")));
+    }
+
+    @Test void completeOmitsEffortWhenNull() {
+        stubFor(post(urlEqualTo("/v1/complete")).willReturn(okJson(OK_BODY)));
+        provider.complete(minimalReq());
+        verify(postRequestedFor(urlEqualTo("/v1/complete"))
+                .withRequestBody(notMatching(".*\"effort\".*")));
+    }
 }

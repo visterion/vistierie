@@ -222,6 +222,8 @@ routing_rules
   locked          BOOLEAN   -- when true, ignores allow_override
   fallback_provider TEXT    -- V12, nullable; one-step fallback if the primary call fails
   fallback_model    TEXT    -- V12, nullable; CHECK (fallback_provider IS NULL) = (fallback_model IS NULL)
+  effort            TEXT    -- V14, nullable; CHECK IN ('off','low','medium','high','max'); optional
+                             -- reasoning effort, forwarded to the claude-bridge on complete calls
   created_at      TIMESTAMPTZ
   updated_at      TIMESTAMPTZ
 

@@ -1,6 +1,6 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import type { SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import { BridgeError, type CompleteRequest, type CompleteResponse } from "./types.js";
+import type { Options, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { BridgeError, EFFORT_VALUES, type CompleteRequest, type CompleteResponse } from "./types.js";
 import { mapSdkError } from "./errors.js";
 
 /**
@@ -58,6 +58,14 @@ export async function complete(
   req: CompleteRequest,
   opts: CompleteOptions = {},
 ): Promise<CompleteResponse> {
+  if (req.effort !== undefined && !EFFORT_VALUES.includes(req.effort)) {
+    throw new BridgeError(
+      400,
+      "invalid_request",
+      `effort must be one of ${EFFORT_VALUES.join(", ")}`,
+    );
+  }
+
   const content = flattenMessages(req.messages);
   const timeoutMs = resolveTimeoutMs(opts.timeoutMs);
 
@@ -97,22 +105,30 @@ export async function complete(
     else opts.signal.addEventListener("abort", clientAbort, { once: true });
   }
 
+  const options: Options = {
+    model: req.model,
+    systemPrompt: req.system ?? "",
+    maxTurns: 1,
+    allowedTools: [],
+    settingSources: [],
+    abortController: controller,
+  };
+  if (req.effort === "off") {
+    options.thinking = { type: "disabled" };
+  } else if (req.effort !== undefined) {
+    options.effort = req.effort;
+  }
+  // The Claude Agent SDK query Options type exposes no direct per-query
+  // output-token cap, but the bundled CLI honors CLAUDE_CODE_MAX_OUTPUT_TOKENS,
+  // so we forward req.max_tokens through the child process env.
+  if (req.max_tokens !== undefined) {
+    options.env = { ...process.env, CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(req.max_tokens) };
+  }
+
   async function consume(): Promise<CompleteResponse> {
     const q = query({
       prompt: promptStream(),
-      options: {
-        model: req.model,
-        systemPrompt: req.system ?? "",
-        maxTurns: 1,
-        allowedTools: [],
-        settingSources: [],
-        abortController: controller,
-        // NOTE (#8): req.max_tokens cannot be forwarded — the Claude Agent SDK
-        // query Options type exposes no per-query output-token cap (only
-        // maxThinkingTokens / maxTurns / maxBudgetUsd). See
-        // documentation/providers.md; this differs from the API-key provider,
-        // which honors max_tokens. Forward it here if the SDK ever adds a field.
-      },
+      options,
     });
 
     for await (const msg of q as AsyncIterable<Record<string, any>>) {

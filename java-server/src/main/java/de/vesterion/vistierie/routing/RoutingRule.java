@@ -12,12 +12,24 @@ public record RoutingRule(
         String model,
         String fallbackProvider,
         String fallbackModel,
+        String effort,
         int priority,
         boolean allowOverride,
         boolean locked,
         Instant createdAt,
         Instant updatedAt
 ) {
+    /** Compatibility constructor: rule without effort. */
+    public RoutingRule(UUID id, UUID tenantId, String realm, String purpose,
+                       String provider, String model,
+                       String fallbackProvider, String fallbackModel,
+                       int priority, boolean allowOverride, boolean locked,
+                       Instant createdAt, Instant updatedAt) {
+        this(id, tenantId, realm, purpose, provider, model,
+                fallbackProvider, fallbackModel, null,
+                priority, allowOverride, locked, createdAt, updatedAt);
+    }
+
     /** Compatibility constructor: rule without fallback. */
     public RoutingRule(UUID id, UUID tenantId, String realm, String purpose,
                        String provider, String model, int priority,

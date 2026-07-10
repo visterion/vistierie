@@ -6,6 +6,8 @@ public record PatchRoutingRuleRequest(
         String fallback_provider,
         String fallback_model,
         Boolean clear_fallback,
+        String effort,
+        Boolean clear_effort,
         Integer priority,
         Boolean allow_override,
         Boolean locked

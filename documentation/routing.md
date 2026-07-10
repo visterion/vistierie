@@ -132,6 +132,40 @@ primary provider/model and, if triggered, one for the fallback
 provider/model. This keeps per-provider cost and latency accounting exact
 even when a fallback occurred.
 
+## Reasoning effort
+
+A rule may optionally carry `effort`, controlling how much thinking the
+provider applies to calls matched by the rule. Values: `off`, `low`,
+`medium`, `high`, `max`; `off` disables extended thinking entirely.
+
+- Absent / `null` (default): the provider's default behavior applies —
+  existing rules are unaffected.
+- Currently honored only by the `claude-subscription` provider: the
+  claude-bridge maps `off` to disabled thinking and the other values to
+  Agent SDK effort levels. All other providers ignore the field.
+- Applies to `POST /llm/complete` calls; vision endpoints are unaffected.
+- A rule's fallback attempt uses the same `effort` as the primary attempt.
+- On `PATCH`, `"clear_effort": true` removes the value, sending
+  `"effort": "..."` replaces it, and omitting both leaves it untouched
+  (same pattern as `clear_fallback`).
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+     -H "Content-Type: application/json" \
+     -X POST https://vistierie/admin/routing-rules \
+     -d '{
+       "tenant": "hivemem",
+       "realm": null,
+       "purpose": "assembly",
+       "provider": "claude-subscription",
+       "model": "claude-haiku-4-5",
+       "effort": "off",
+       "priority": 200,
+       "allow_override": false,
+       "locked": false
+     }'
+```
+
 ## Migration from the previous YAML config
 
 The previous YAML-based routing has been removed. The single source of

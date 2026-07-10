@@ -1,7 +1,11 @@
+export const EFFORT_VALUES = ["off", "low", "medium", "high", "max"] as const;
+export type Effort = (typeof EFFORT_VALUES)[number];
+
 export interface CompleteRequest {
   model: string;
   max_tokens?: number;
   system?: string | null;
+  effort?: Effort;
   messages: Array<{ role: string; content: unknown }>;
 }
 

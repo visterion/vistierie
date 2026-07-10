@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -44,10 +45,19 @@ public class AdminRoutingRuleService {
         public LastDefaultException(String m) { super(m); }
     }
 
+    private static final Set<String> EFFORTS =
+            Set.of("off", "low", "medium", "high", "max");
+
+    private void validateEffort(String effort) {
+        if (effort != null && !EFFORTS.contains(effort)) {
+            throw new BadInputException("effort must be one of off, low, medium, high, max");
+        }
+    }
+
     @Transactional
     public RoutingRule create(String tenantName, String realm, String purpose,
                               String provider, String model,
-                              String fallbackProvider, String fallbackModel,
+                              String fallbackProvider, String fallbackModel, String effort,
                               Integer priority,
                               boolean allowOverride, boolean locked) {
         var tenant = tenants.findByName(tenantName)
@@ -56,6 +66,7 @@ public class AdminRoutingRuleService {
             throw new BadInputException("unknown provider " + provider);
         }
         validateFallback(provider, fallbackProvider, fallbackModel);
+        validateEffort(effort);
         int p = priority == null ? 100 : priority;
         if (p < 0 || p > 10000) throw new BadInputException("priority out of range");
 
@@ -65,7 +76,7 @@ public class AdminRoutingRuleService {
 
         var now = Instant.now();
         var rule = new RoutingRule(UUID.randomUUID(), tenant.id(), realm, purpose,
-                provider, model, fallbackProvider, fallbackModel,
+                provider, model, fallbackProvider, fallbackModel, effort,
                 p, allowOverride, locked, now, now);
         try {
             rules.insert(rule);
@@ -108,6 +119,7 @@ public class AdminRoutingRuleService {
     @Transactional
     public RoutingRule patch(UUID id, String provider, String model,
                              String fallbackProvider, String fallbackModel, Boolean clearFallback,
+                             String effort, Boolean clearEffort,
                              Integer priority, Boolean allowOverride, Boolean locked) {
         var before = get(id);
         var newProvider = provider != null ? provider : before.provider();
@@ -137,7 +149,17 @@ public class AdminRoutingRuleService {
         }
         validateFallback(newProvider, newFbProvider, newFbModel);
 
-        rules.update(id, newProvider, newModel, newFbProvider, newFbModel,
+        String newEffort;
+        if (Boolean.TRUE.equals(clearEffort)) {
+            newEffort = null;
+        } else if (effort != null) {
+            newEffort = effort;
+        } else {
+            newEffort = before.effort();
+        }
+        validateEffort(newEffort);
+
+        rules.update(id, newProvider, newModel, newFbProvider, newFbModel, newEffort,
                 newPriority, newAllow, newLocked);
         var after = rules.findById(id).orElseThrow();
         audit.record("update", id, before.tenantId(), before, after, "admin");

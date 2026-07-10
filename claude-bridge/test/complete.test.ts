@@ -137,26 +137,6 @@ describe("complete", () => {
     expect(opts.abortController).toBeInstanceOf(AbortController);
   });
 
-  // Finding #8: the Claude Agent SDK query Options exposes no per-query
-  // output-token cap (only maxThinkingTokens / maxTurns / maxBudgetUsd), so
-  // req.max_tokens cannot be forwarded. This test documents that current, known
-  // limitation — see documentation/providers.md and the code comment in
-  // complete.ts. If the SDK ever gains such a field, forward max_tokens and
-  // update this test.
-  it("does not forward max_tokens (SDK has no per-query output-token option)", async () => {
-    queryMock.mockReturnValue(sdkStream([
-      { type: "result", subtype: "success", result: "ok" },
-    ]));
-    await complete({
-      model: "claude-opus-4-8",
-      max_tokens: 256,
-      messages: [{ role: "user", content: "hi" }],
-    });
-    const opts = queryMock.mock.calls[0][0].options;
-    expect(opts.maxOutputTokens).toBeUndefined();
-    expect(opts.maxTokens).toBeUndefined();
-    expect(opts.max_tokens).toBeUndefined();
-  });
 });
 
 // A stubbed SDK stream that never yields a result and never completes.
@@ -207,5 +187,68 @@ describe("complete timeout & abort (#9)", () => {
     await expect(p).rejects.toMatchObject({ status: 499, code: "client_closed" });
     const ac = queryMock.mock.calls[0][0].options.abortController as AbortController;
     expect(ac.signal.aborted).toBe(true);
+  });
+});
+
+function successStream() {
+  return sdkStream([
+    {
+      type: "result",
+      subtype: "success",
+      result: "ok",
+      usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+    },
+  ]);
+}
+
+describe("effort mapping", () => {
+  it('maps "off" to thinking disabled', async () => {
+    queryMock.mockReturnValue(successStream());
+    await complete({ model: "m", messages: [{ role: "user", content: "hi" }], effort: "off" });
+    const opts = queryMock.mock.calls[0][0].options;
+    expect(opts.thinking).toEqual({ type: "disabled" });
+    expect(opts.effort).toBeUndefined();
+  });
+
+  it.each(["low", "medium", "high", "max"] as const)(
+    'maps "%s" to the SDK effort option',
+    async (level) => {
+      queryMock.mockReturnValue(successStream());
+      await complete({ model: "m", messages: [{ role: "user", content: "hi" }], effort: level });
+      const opts = queryMock.mock.calls[0][0].options;
+      expect(opts.effort).toBe(level);
+      expect(opts.thinking).toBeUndefined();
+    },
+  );
+
+  it("sets neither thinking nor effort when the field is absent", async () => {
+    queryMock.mockReturnValue(successStream());
+    await complete({ model: "m", messages: [{ role: "user", content: "hi" }] });
+    const opts = queryMock.mock.calls[0][0].options;
+    expect(opts.thinking).toBeUndefined();
+    expect(opts.effort).toBeUndefined();
+  });
+
+  it("rejects unknown effort values with 400 before calling the SDK", async () => {
+    await expect(
+      complete({ model: "m", messages: [{ role: "user", content: "hi" }], effort: "turbo" as never }),
+    ).rejects.toMatchObject({ status: 400, code: "invalid_request" });
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("max_tokens passthrough", () => {
+  it("forwards max_tokens as CLAUDE_CODE_MAX_OUTPUT_TOKENS in env", async () => {
+    queryMock.mockReturnValue(successStream());
+    await complete({ model: "m", max_tokens: 256, messages: [{ role: "user", content: "hi" }] });
+    const opts = queryMock.mock.calls[0][0].options;
+    expect(opts.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS).toBe("256");
+  });
+
+  it("passes no env override when max_tokens is absent", async () => {
+    queryMock.mockReturnValue(successStream());
+    await complete({ model: "m", messages: [{ role: "user", content: "hi" }] });
+    const opts = queryMock.mock.calls[0][0].options;
+    expect(opts.env).toBeUndefined();
   });
 });
