@@ -1,6 +1,6 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import type { SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import { BridgeError, type CompleteRequest, type CompleteResponse } from "./types.js";
+import type { Options, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { BridgeError, EFFORT_VALUES, type CompleteRequest, type CompleteResponse } from "./types.js";
 import { mapSdkError } from "./errors.js";
 
 /**
@@ -32,6 +32,14 @@ export function flattenMessages(
 }
 
 export async function complete(req: CompleteRequest): Promise<CompleteResponse> {
+  if (req.effort !== undefined && !EFFORT_VALUES.includes(req.effort)) {
+    throw new BridgeError(
+      400,
+      "invalid_request",
+      `effort must be one of ${EFFORT_VALUES.join(", ")}`,
+    );
+  }
+
   const content = flattenMessages(req.messages);
 
   async function* promptStream(): AsyncGenerator<SDKUserMessage> {
@@ -43,16 +51,26 @@ export async function complete(req: CompleteRequest): Promise<CompleteResponse> 
     } as unknown as SDKUserMessage;
   }
 
+  const options: Options = {
+    model: req.model,
+    systemPrompt: req.system ?? "",
+    maxTurns: 1,
+    allowedTools: [],
+    settingSources: [],
+  };
+  if (req.effort === "off") {
+    options.thinking = { type: "disabled" };
+  } else if (req.effort !== undefined) {
+    options.effort = req.effort;
+  }
+  if (req.max_tokens !== undefined) {
+    options.env = { ...process.env, CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(req.max_tokens) };
+  }
+
   try {
     const q = query({
       prompt: promptStream(),
-      options: {
-        model: req.model,
-        systemPrompt: req.system ?? "",
-        maxTurns: 1,
-        allowedTools: [],
-        settingSources: [],
-      },
+      options,
     });
 
     for await (const msg of q as AsyncIterable<Record<string, any>>) {
