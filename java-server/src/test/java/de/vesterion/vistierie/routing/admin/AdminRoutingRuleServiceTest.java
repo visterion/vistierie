@@ -48,7 +48,7 @@ class AdminRoutingRuleServiceTest {
 
     @Test void createWithDefaultPriorityInsertsAndAudits() {
         svc.create("tn", "myrealm", "summarize", "anthropic", "claude-haiku-4-5",
-                null, null, null, false, false);
+                null, null, null, null, false, false);
 
         var captor = ArgumentCaptor.forClass(RoutingRule.class);
         verify(rules).insert(captor.capture());
@@ -65,7 +65,7 @@ class AdminRoutingRuleServiceTest {
     @Test void createUnknownTenant() {
         when(tenants.findByName("ghost")).thenReturn(Optional.empty());
         assertThatThrownBy(() -> svc.create("ghost", "r", "p", "anthropic", "m",
-                null, null, null, false, false))
+                null, null, null, null, false, false))
                 .isInstanceOf(AdminRoutingRuleService.BadInputException.class)
                 .hasMessageContaining("unknown tenant");
         verify(rules, never()).insert(any());
@@ -74,24 +74,24 @@ class AdminRoutingRuleServiceTest {
     @Test void createUnknownProvider() {
         when(providers.has("unknownprov")).thenReturn(false);
         assertThatThrownBy(() -> svc.create("tn", "r", "p", "unknownprov", "m",
-                null, null, null, false, false))
+                null, null, null, null, false, false))
                 .isInstanceOf(AdminRoutingRuleService.BadInputException.class)
                 .hasMessageContaining("unknown provider");
     }
 
     @Test void createPriorityOutOfRange() {
         assertThatThrownBy(() -> svc.create("tn", "r", "p", "anthropic", "m",
-                null, null, -1, false, false))
+                null, null, null, -1, false, false))
                 .isInstanceOf(AdminRoutingRuleService.BadInputException.class);
         assertThatThrownBy(() -> svc.create("tn", "r", "p", "anthropic", "m",
-                null, null, 10001, false, false))
+                null, null, null, 10001, false, false))
                 .isInstanceOf(AdminRoutingRuleService.BadInputException.class);
     }
 
     @Test void createWildcardConflictsIfWildcardExists() {
         when(rules.existsWildcard(tenantId)).thenReturn(true);
         assertThatThrownBy(() -> svc.create("tn", null, null, "anthropic", "m",
-                null, null, null, false, false))
+                null, null, null, null, false, false))
                 .isInstanceOf(AdminRoutingRuleService.ConflictException.class)
                 .hasMessageContaining("wildcard");
     }
@@ -100,7 +100,7 @@ class AdminRoutingRuleServiceTest {
         org.mockito.Mockito.doThrow(new DuplicateKeyException("dup"))
                 .when(rules).insert(any());
         assertThatThrownBy(() -> svc.create("tn", "r", "p", "anthropic", "m",
-                null, null, null, false, false))
+                null, null, null, null, false, false))
                 .isInstanceOf(AdminRoutingRuleService.ConflictException.class)
                 .hasMessageContaining("duplicate");
         verify(audit, never()).record(any(), any(), any(), any(), any(), any());
@@ -110,14 +110,14 @@ class AdminRoutingRuleServiceTest {
         when(providers.has("claude-subscription")).thenReturn(true);
         when(providers.has("anthropic")).thenReturn(true);
         var r = svc.create("tn", "r", "p", "claude-subscription", "claude-opus-4-8",
-                "anthropic", "claude-opus-4-8", 50, false, false);
+                "anthropic", "claude-opus-4-8", null, 50, false, false);
         assertThat(r.fallbackProvider()).isEqualTo("anthropic");
     }
 
     @Test void createRejectsHalfSetFallback() {
         when(providers.has("anthropic")).thenReturn(true);
         assertThatThrownBy(() -> svc.create("tn", "r", "p", "anthropic", "m",
-                "claude-subscription", null, null, false, false))
+                "claude-subscription", null, null, null, false, false))
                 .isInstanceOf(AdminRoutingRuleService.BadInputException.class)
                 .hasMessageContaining("together");
     }
@@ -126,14 +126,14 @@ class AdminRoutingRuleServiceTest {
         when(providers.has("anthropic")).thenReturn(true);
         when(providers.has("nope")).thenReturn(false);
         assertThatThrownBy(() -> svc.create("tn", "r", "p", "anthropic", "m",
-                "nope", "m2", null, false, false))
+                "nope", "m2", null, null, false, false))
                 .isInstanceOf(AdminRoutingRuleService.BadInputException.class);
     }
 
     @Test void createRejectsFallbackEqualToPrimary() {
         when(providers.has("anthropic")).thenReturn(true);
         assertThatThrownBy(() -> svc.create("tn", "r", "p", "anthropic", "m",
-                "anthropic", "m", null, false, false))
+                "anthropic", "m", null, null, false, false))
                 .isInstanceOf(AdminRoutingRuleService.BadInputException.class)
                 .hasMessageContaining("differ");
     }
@@ -154,10 +154,10 @@ class AdminRoutingRuleServiceTest {
                 "anthropic", "claude-sonnet-4-6", 100, false, false, now, now);
         when(rules.findById(id)).thenReturn(Optional.of(before), Optional.of(after));
 
-        svc.patch(id, null, "claude-sonnet-4-6", null, null, null, null, null, null);
+        svc.patch(id, null, "claude-sonnet-4-6", null, null, null, null, null, null, null, null);
 
         verify(rules).update(eq(id), eq("anthropic"), eq("claude-sonnet-4-6"),
-                eq(null), eq(null), eq(100), eq(false), eq(false));
+                eq(null), eq(null), eq(null), eq(100), eq(false), eq(false));
         verify(audit).record(eq("update"), eq(id), eq(tenantId),
                 eq(before), eq(after), eq("admin"));
         verify(resolver).bumpVersion();
@@ -171,10 +171,10 @@ class AdminRoutingRuleServiceTest {
         when(rules.findById(id)).thenReturn(Optional.of(before));
         when(providers.has("nope")).thenReturn(false);
 
-        assertThatThrownBy(() -> svc.patch(id, "nope", null, null, null, null, null, null, null))
+        assertThatThrownBy(() -> svc.patch(id, "nope", null, null, null, null, null, null, null, null, null))
                 .isInstanceOf(AdminRoutingRuleService.BadInputException.class)
                 .hasMessageContaining("unknown provider");
-        verify(rules, never()).update(any(), any(), any(), any(), any(), anyInt(), anyBoolean(), anyBoolean());
+        verify(rules, never()).update(any(), any(), any(), any(), any(), any(), anyInt(), anyBoolean(), anyBoolean());
     }
 
     @Test void patchPriorityOutOfRange() {
@@ -184,7 +184,7 @@ class AdminRoutingRuleServiceTest {
                 "anthropic", "m", 100, false, false, now, now);
         when(rules.findById(id)).thenReturn(Optional.of(before));
 
-        assertThatThrownBy(() -> svc.patch(id, null, null, null, null, null, 99999, null, null))
+        assertThatThrownBy(() -> svc.patch(id, null, null, null, null, null, null, null, 99999, null, null))
                 .isInstanceOf(AdminRoutingRuleService.BadInputException.class);
     }
 
@@ -198,12 +198,12 @@ class AdminRoutingRuleServiceTest {
         when(rules.findById(id)).thenReturn(Optional.of(before), Optional.of(after));
         when(providers.has("claude-subscription")).thenReturn(true);
 
-        var patched = svc.patch(id, null, null, null, null, true, null, null, null);
+        var patched = svc.patch(id, null, null, null, null, true, null, null, null, null, null);
 
         assertThat(patched.fallbackProvider()).isNull();
         assertThat(patched.fallbackModel()).isNull();
         verify(rules).update(eq(id), eq("claude-subscription"), eq("m"),
-                eq(null), eq(null), eq(100), eq(false), eq(false));
+                eq(null), eq(null), eq(null), eq(100), eq(false), eq(false));
     }
 
     @Test void deleteRefusesWildcardDefault() {
@@ -249,5 +249,62 @@ class AdminRoutingRuleServiceTest {
         when(rules.findAll(eq(null), eq(null), eq(null))).thenReturn(java.util.List.of());
         svc.list(null, null, null);
         verify(rules).findAll(eq(null), eq(null), eq(null));
+    }
+
+    @Test void createPersistsEffort() {
+        svc.create("tn", "r", "p", "anthropic", "claude-haiku-4-5",
+                null, null, "off", null, false, false);
+        var captor = ArgumentCaptor.forClass(RoutingRule.class);
+        verify(rules).insert(captor.capture());
+        assertThat(captor.getValue().effort()).isEqualTo("off");
+    }
+
+    @Test void createRejectsInvalidEffort() {
+        assertThatThrownBy(() -> svc.create("tn", "r", "p", "anthropic", "m",
+                null, null, "turbo", null, false, false))
+                .isInstanceOf(AdminRoutingRuleService.BadInputException.class)
+                .hasMessageContaining("effort");
+        verify(rules, never()).insert(any());
+    }
+
+    @Test void patchSetsEffort() {
+        var id = UUID.randomUUID();
+        var now = Instant.parse("2026-01-01T00:00:00Z");
+        var before = new RoutingRule(id, tenantId, "r", "p", "anthropic", "m",
+                null, null, null, 100, false, false, now, now);
+        when(rules.findById(id)).thenReturn(Optional.of(before), Optional.of(before));
+
+        svc.patch(id, null, null, null, null, null, "low", null, null, null, null);
+
+        verify(rules).update(eq(id), eq("anthropic"), eq("m"),
+                eq(null), eq(null), eq("low"), eq(100), eq(false), eq(false));
+    }
+
+    @Test void patchRejectsInvalidEffort() {
+        var id = UUID.randomUUID();
+        var now = Instant.parse("2026-01-01T00:00:00Z");
+        var before = new RoutingRule(id, tenantId, "r", "p", "anthropic", "m",
+                null, null, null, 100, false, false, now, now);
+        when(rules.findById(id)).thenReturn(Optional.of(before));
+
+        assertThatThrownBy(() -> svc.patch(id, null, null, null, null, null,
+                "turbo", null, null, null, null))
+                .isInstanceOf(AdminRoutingRuleService.BadInputException.class)
+                .hasMessageContaining("effort");
+        verify(rules, never()).update(any(), any(), any(), any(), any(), any(),
+                anyInt(), anyBoolean(), anyBoolean());
+    }
+
+    @Test void patchClearsEffort() {
+        var id = UUID.randomUUID();
+        var now = Instant.parse("2026-01-01T00:00:00Z");
+        var before = new RoutingRule(id, tenantId, "r", "p", "anthropic", "m",
+                null, null, "high", 100, false, false, now, now);
+        when(rules.findById(id)).thenReturn(Optional.of(before), Optional.of(before));
+
+        svc.patch(id, null, null, null, null, null, null, true, null, null, null);
+
+        verify(rules).update(eq(id), eq("anthropic"), eq("m"),
+                eq(null), eq(null), eq(null), eq(100), eq(false), eq(false));
     }
 }

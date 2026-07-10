@@ -27,7 +27,7 @@ public class AdminRoutingRuleController {
         try {
             var r = svc.create(req.tenant(), req.realm(), req.purpose(),
                     req.provider(), req.model(),
-                    req.fallback_provider(), req.fallback_model(),
+                    req.fallback_provider(), req.fallback_model(), req.effort(),
                     req.priority(), req.allow_override(), req.locked());
             return RoutingRuleResponse.of(r);
         } catch (AdminRoutingRuleService.ConflictException e) {
@@ -65,6 +65,7 @@ public class AdminRoutingRuleController {
         try {
             var r = svc.patch(id, req.provider(), req.model(),
                     req.fallback_provider(), req.fallback_model(), req.clear_fallback(),
+                    req.effort(), req.clear_effort(),
                     req.priority(), req.allow_override(), req.locked());
             return RoutingRuleResponse.of(r);
         } catch (AdminRoutingRuleService.BadInputException e) {

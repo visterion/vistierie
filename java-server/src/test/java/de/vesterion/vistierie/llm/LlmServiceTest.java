@@ -119,6 +119,21 @@ class LlmServiceTest {
         assertThat(captor.getValue().maxTokens()).isEqualTo(1024);
     }
 
+    @Test void completeForwardsDecisionEffortToProvider() {
+        when(routing.resolve(any(), any(), any(), any()))
+                .thenReturn(new RoutingDecision("claude-subscription", "claude-haiku-4-5",
+                        false, null, null, "off"));
+        when(providers.get("claude-subscription")).thenReturn(provider);
+        when(provider.complete(any())).thenReturn(new ProviderResponse(
+                "ok", "end_turn", new Usage(1, 1, 0, 0), "claude-haiku-4-5"));
+
+        svc.complete(completeReq());
+
+        var captor = ArgumentCaptor.forClass(ProviderRequest.class);
+        verify(provider).complete(captor.capture());
+        assertThat(captor.getValue().effort()).isEqualTo("off");
+    }
+
     @Test void completeBlockedByKillSwitchRecordsKilledAndThrows() {
         var killExc = new KillSwitchService.KilledException("abuse",
                 Instant.parse("2026-05-10T13:00:00Z"));

@@ -60,7 +60,7 @@ public class RoutingResolver {
                 : match.fallbackModel();
 
         return new RoutingDecision(match.provider(), model, effectiveOverride,
-                match.fallbackProvider(), fallbackModel);
+                match.fallbackProvider(), fallbackModel, match.effort());
     }
 
     private record CacheEntry(long version, List<RoutingRule> rules) {}

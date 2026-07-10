@@ -83,7 +83,7 @@ public class LlmService {
 
         java.util.function.Function<String, ProviderRequest> reqForModel = model ->
                 new ProviderRequest(model, maxTokens, req.temperature(), req.system(),
-                        req.messages(), null, null, null);
+                        req.messages(), null, null, null, decision.effort());
 
         return invoke(ctx, decision, reqForModel,
                 (provider, model) -> provider.complete(reqForModel.apply(model)));
