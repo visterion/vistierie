@@ -627,9 +627,15 @@ walking parent → child run trees.
 {
   "tenant": "hivemem", "realm": "medical", "purpose": null,
   "provider": "ollama", "model": "llama-3.1-70b",
+  "effort": null,
   "priority": 10, "allow_override": false, "locked": true
 }
 ```
+
+`effort` is optional, one of `"off"`, `"low"`, `"medium"`, `"high"`,
+`"max"`, or omitted/`null` for provider-default behavior. Invalid values
+return 400. See `documentation/routing.md`, "Reasoning effort", for the
+provider support matrix.
 
 ### Status codes
 
@@ -638,7 +644,7 @@ walking parent → child run trees.
 | 201 | Rule created |
 | 200 | List or read success |
 | 204 | Delete success |
-| 400 | Unknown tenant, unknown provider, priority out of range, or invalid body |
+| 400 | Unknown tenant, unknown provider, priority out of range, invalid `effort`, or invalid body |
 | 401 | Missing or invalid admin token |
 | 404 | Rule not found |
 | 409 | Duplicate `(tenant, realm, purpose)` |
@@ -646,9 +652,14 @@ walking parent → child run trees.
 
 ### PATCH semantics
 
-Only `provider`, `model`, `priority`, `allow_override`, `locked` are
-mutable. `tenant`, `realm`, `purpose` are immutable, change them by
+Only `provider`, `model`, `priority`, `allow_override`, `locked`, `effort`
+are mutable. `tenant`, `realm`, `purpose` are immutable, change them by
 DELETE + POST.
+
+`effort`/`clear_effort` follow the same keep/replace/clear pattern as
+`fallback_provider`/`fallback_model`/`clear_fallback`: sending
+`"clear_effort": true` resets `effort` to `null`; sending `"effort":
+"..."` replaces it; omitting both leaves the existing value untouched.
 
 ---
 
