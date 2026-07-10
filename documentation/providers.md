@@ -43,9 +43,19 @@ Routing rules set `effort` per tenant/realm/purpose — see
 [routing.md](routing.md#reasoning-effort).
 
 The bridge also enforces `max_tokens` on the per-call SDK process via the
-`CLAUDE_CODE_MAX_OUTPUT_TOKENS` environment variable.
+`CLAUDE_CODE_MAX_OUTPUT_TOKENS` environment variable. Note the interaction
+with thinking: without `effort` set, extended thinking stays enabled and
+thinking tokens count against the `max_tokens` budget — Vistierie defaults
+it to 1024 when the caller omits it, so thinking-heavy calls can truncate.
+Set `effort: "off"` (or a generous `max_tokens`) on latency-sensitive
+`claude-subscription` routes.
 
-Off by default. Enable it only once the `claude-bridge` sidecar (Task 6) is deployed
+Both the `effort` field and `max_tokens` enforcement require a current
+`claude-bridge` image — an older bridge silently ignores the unknown
+`effort` field (no error, just no latency win), so redeploy the sidecar
+when adopting this.
+
+Off by default. Enable it only once the `claude-bridge` sidecar is deployed
 and reachable at `base-url`.
 
 **Error semantics:**
