@@ -127,4 +127,85 @@ describe("complete", () => {
       messages: [{ role: "user", content: "hi" }],
     })).rejects.toMatchObject({ status: 500, code: "no_result" });
   });
+
+  it("passes an AbortController into the SDK query options", async () => {
+    queryMock.mockReturnValue(sdkStream([
+      { type: "result", subtype: "success", result: "ok" },
+    ]));
+    await complete({ model: "claude-opus-4-8", messages: [{ role: "user", content: "hi" }] });
+    const opts = queryMock.mock.calls[0][0].options;
+    expect(opts.abortController).toBeInstanceOf(AbortController);
+  });
+
+  // Finding #8: the Claude Agent SDK query Options exposes no per-query
+  // output-token cap (only maxThinkingTokens / maxTurns / maxBudgetUsd), so
+  // req.max_tokens cannot be forwarded. This test documents that current, known
+  // limitation — see documentation/providers.md and the code comment in
+  // complete.ts. If the SDK ever gains such a field, forward max_tokens and
+  // update this test.
+  it("does not forward max_tokens (SDK has no per-query output-token option)", async () => {
+    queryMock.mockReturnValue(sdkStream([
+      { type: "result", subtype: "success", result: "ok" },
+    ]));
+    await complete({
+      model: "claude-opus-4-8",
+      max_tokens: 256,
+      messages: [{ role: "user", content: "hi" }],
+    });
+    const opts = queryMock.mock.calls[0][0].options;
+    expect(opts.maxOutputTokens).toBeUndefined();
+    expect(opts.maxTokens).toBeUndefined();
+    expect(opts.max_tokens).toBeUndefined();
+  });
+});
+
+// A stubbed SDK stream that never yields a result and never completes.
+function hangingStream() {
+  return {
+    [Symbol.asyncIterator]() {
+      return { next: () => new Promise<never>(() => {}) };
+    },
+  };
+}
+
+describe("complete timeout & abort (#9)", () => {
+  it("aborts the query and rejects with a timeout error when no result ever arrives", async () => {
+    queryMock.mockReturnValue(hangingStream());
+    const start = Date.now();
+    await expect(
+      complete(
+        { model: "claude-opus-4-8", messages: [{ role: "user", content: "hi" }] },
+        { timeoutMs: 50 },
+      ),
+    ).rejects.toMatchObject({ status: 504, code: "timeout" });
+    expect(Date.now() - start).toBeLessThan(2000);
+    const ac = queryMock.mock.calls[0][0].options.abortController as AbortController;
+    expect(ac.signal.aborted).toBe(true);
+  });
+
+  it("aborts promptly and rejects when the incoming signal is already aborted", async () => {
+    queryMock.mockReturnValue(hangingStream());
+    const signal = AbortSignal.abort();
+    await expect(
+      complete(
+        { model: "claude-opus-4-8", messages: [{ role: "user", content: "hi" }] },
+        { signal, timeoutMs: 60000 },
+      ),
+    ).rejects.toMatchObject({ status: 499, code: "client_closed" });
+    const ac = queryMock.mock.calls[0][0].options.abortController as AbortController;
+    expect(ac.signal.aborted).toBe(true);
+  });
+
+  it("aborts when the incoming signal fires mid-flight", async () => {
+    queryMock.mockReturnValue(hangingStream());
+    const controller = new AbortController();
+    const p = complete(
+      { model: "claude-opus-4-8", messages: [{ role: "user", content: "hi" }] },
+      { signal: controller.signal, timeoutMs: 60000 },
+    );
+    setTimeout(() => controller.abort(), 20);
+    await expect(p).rejects.toMatchObject({ status: 499, code: "client_closed" });
+    const ac = queryMock.mock.calls[0][0].options.abortController as AbortController;
+    expect(ac.signal.aborted).toBe(true);
+  });
 });
