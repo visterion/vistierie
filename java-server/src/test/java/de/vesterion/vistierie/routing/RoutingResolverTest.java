@@ -156,6 +156,17 @@ class RoutingResolverTest {
         assertThat(d.fallbackProvider()).isEqualTo("anthropic");
     }
 
+    @Test void effortSurvivesModelOverride() {
+        var overridable = new RoutingRule(UUID.randomUUID(), tenantId, "r", "p",
+                "claude-subscription", "claude-haiku-4-5",
+                "anthropic", "claude-haiku-4-5",
+                "low", 100, true, false, now, now);
+        when(rules.findByTenant(tenantId)).thenReturn(List.of(overridable));
+        var d = resolver.resolve("tn", "r", "p", "my-override-model");
+        assertThat(d.model()).isEqualTo("my-override-model");
+        assertThat(d.effort()).isEqualTo("low");
+    }
+
     @Test void effortIsNullWhenRuleHasNone() {
         when(rules.findByTenant(tenantId)).thenReturn(List.of(
                 rule(null, null, "m", 100, false, false)));
