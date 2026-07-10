@@ -40,10 +40,10 @@ On `/v1/complete` the bridge request accepts an optional `effort` field
 `thinking: {type: "disabled"}`); the other values map to Agent SDK effort
 levels. Without the field the SDK default applies (thinking enabled).
 Routing rules set `effort` per tenant/realm/purpose — see
-`documentation/routing.md`, "Reasoning effort".
+[routing.md](routing.md#reasoning-effort).
 
 The bridge also enforces `max_tokens` on the per-call SDK process via the
-`CLAUDE_CODE_MAX_OUTPUT_TOKENS` environment variable (previously ignored).
+`CLAUDE_CODE_MAX_OUTPUT_TOKENS` environment variable.
 
 Off by default. Enable it only once the `claude-bridge` sidecar (Task 6) is deployed
 and reachable at `base-url`.
