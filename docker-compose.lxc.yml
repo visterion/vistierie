@@ -1,6 +1,7 @@
 # Override for LXC hosts (Proxmox/PVE) where the kernel denies Unix-domain
 # socket creation inside unprivileged containers. Postgres fails at pg_ctl
-# socket init; the JDK NIO UnixDispatcher fails at <clinit>.
+# socket init; the JDK NIO UnixDispatcher fails at <clinit>; Node's
+# child_process.spawn in claude-bridge fails with ENOTCONN at socketpair.
 #
 # Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.lxc.yml up -d
@@ -12,4 +13,6 @@ services:
   db:
     privileged: true
   vistierie:
+    privileged: true
+  claude-bridge:
     privileged: true

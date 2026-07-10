@@ -482,11 +482,31 @@ main image (`:main`, `:vX.Y.Z`, `:latest` on release tags).
 
 ### Deployment
 
-Run the sidecar on the same private Docker network as Vistierie so it is
-reachable at the default `http://claude-bridge:8091`:
+The sidecar ships as a service in `docker-compose.yml` behind the
+`subscription` profile. Token, feature flag, and profile activation all live
+in the same `.env` (chmod 600) that holds the other secrets:
 
 ```bash
-docker run -d --name claude-bridge --network hivemem-net \
+# .env on the host
+CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
+CLAUDE_SUBSCRIPTION_ENABLED=true
+COMPOSE_PROFILES=subscription
+```
+
+```bash
+docker compose up -d
+```
+
+The bridge joins `vistierie-net`, so Vistierie reaches it at the default
+`http://claude-bridge:8091` (`CLAUDE_BRIDGE_URL` only needs setting for a
+non-default location). Without `COMPOSE_PROFILES=subscription` (or
+`--profile subscription` on the command line) the service does not start
+and the stack behaves as before the feature existed.
+
+Standalone alternative — run it on any Docker network shared with Vistierie:
+
+```bash
+docker run -d --name claude-bridge --network hivemem-net --restart unless-stopped \
   -e CLAUDE_CODE_OAUTH_TOKEN='sk-ant-oat01-...' \
   ghcr.io/visterion/vistierie-claude-bridge:main
 ```
@@ -499,9 +519,13 @@ On a machine with Claude Code installed and an active subscription, run:
 claude setup-token
 ```
 
-This prints a token in the form `sk-ant-oat01-...`. Copy it into the
-container's `CLAUDE_CODE_OAUTH_TOKEN` environment variable — it is the only
-credential the sidecar needs.
+This prints a token in the form `sk-ant-oat01-...`. Put it into
+`CLAUDE_CODE_OAUTH_TOKEN` in the `.env` — it is the only credential the
+sidecar needs. To append it without the value landing in your shell history:
+
+```bash
+read -rsp 'Token: ' T && echo && printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$T" >> .env && unset T
+```
 
 ### Token renewal
 
@@ -512,22 +536,11 @@ Subscription OAuth tokens expire periodically. Expiry surfaces as:
 - a spike in the `vistierie_llm_fallback_total` metric (calls falling back
   to the configured `fallback_provider`) if a routing rule has one configured.
 
-Renew by re-running `claude setup-token`, updating
-`CLAUDE_CODE_OAUTH_TOKEN` on the container, and restarting it:
+Renew by re-running `claude setup-token`, replacing
+`CLAUDE_CODE_OAUTH_TOKEN` in the `.env`, and recreating the sidecar:
 
 ```bash
-docker stop claude-bridge && docker rm claude-bridge
-docker run -d --name claude-bridge --network hivemem-net \
-  -e CLAUDE_CODE_OAUTH_TOKEN='sk-ant-oat01-...' \
-  ghcr.io/visterion/vistierie-claude-bridge:main
-```
-
-### Enabling in Vistierie
-
-```bash
-export CLAUDE_SUBSCRIPTION_ENABLED=true
-# optional, only needed if the sidecar isn't reachable at the default:
-export CLAUDE_BRIDGE_URL=http://claude-bridge:8091
+docker compose up -d --force-recreate claude-bridge
 ```
 
 ### Rollout
