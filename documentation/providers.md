@@ -34,6 +34,17 @@ instead of a per-token API key. Supports text completion, vision, and multi-imag
 vision (`/llm/vision-multi`). **No batch support** — batch traffic always stays on
 the `anthropic` (API-key) provider.
 
+On `/v1/complete` the bridge request accepts an optional `effort` field
+(`off`, `low`, `medium`, `high`, `max`), forwarded only for text completion
+— never for vision. `off` disables extended thinking (Agent SDK
+`thinking: {type: "disabled"}`); the other values map to Agent SDK effort
+levels. Without the field the SDK default applies (thinking enabled).
+Routing rules set `effort` per tenant/realm/purpose — see
+`documentation/routing.md`, "Reasoning effort".
+
+The bridge also enforces `max_tokens` on the per-call SDK process via the
+`CLAUDE_CODE_MAX_OUTPUT_TOKENS` environment variable (previously ignored).
+
 Off by default. Enable it only once the `claude-bridge` sidecar (Task 6) is deployed
 and reachable at `base-url`.
 
