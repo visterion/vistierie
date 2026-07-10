@@ -144,4 +144,21 @@ class RoutingResolverTest {
         assertThat(d.fallbackProvider()).isNull();
         assertThat(d.fallbackModel()).isNull();
     }
+
+    @Test void effortFromRuleLandsInDecision() {
+        var withEffort = new RoutingRule(UUID.randomUUID(), tenantId, "r", "p",
+                "claude-subscription", "claude-haiku-4-5",
+                "anthropic", "claude-haiku-4-5",
+                "off", 100, false, false, now, now);
+        when(rules.findByTenant(tenantId)).thenReturn(List.of(withEffort));
+        var d = resolver.resolve("tn", "r", "p", null);
+        assertThat(d.effort()).isEqualTo("off");
+        assertThat(d.fallbackProvider()).isEqualTo("anthropic");
+    }
+
+    @Test void effortIsNullWhenRuleHasNone() {
+        when(rules.findByTenant(tenantId)).thenReturn(List.of(
+                rule(null, null, "m", 100, false, false)));
+        assertThat(resolver.resolve("tn", "r", "p", null).effort()).isNull();
+    }
 }
