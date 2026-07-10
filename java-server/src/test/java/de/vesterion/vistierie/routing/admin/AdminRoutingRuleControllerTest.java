@@ -50,7 +50,7 @@ class AdminRoutingRuleControllerTest extends PostgresTestBase {
     void postCreatesAndGetReturns() throws Exception {
         var body = """
                 { "tenant": "%s", "realm": "medical", "purpose": null,
-                  "provider": "anthropic", "model": "x", "priority": 10,
+                  "provider": "anthropic", "model": "x", "effort": "low", "priority": 10,
                   "allow_override": false, "locked": true }
                 """.formatted(tenantName);
 
@@ -59,6 +59,7 @@ class AdminRoutingRuleControllerTest extends PostgresTestBase {
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.locked").value(true))
+                .andExpect(jsonPath("$.effort").value("low"))
                 .andReturn().getResponse().getContentAsString();
         var id = json.readTree(loc).get("id").asText();
 
