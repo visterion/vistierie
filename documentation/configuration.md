@@ -22,6 +22,22 @@ All properties can be set via `application.yaml` or overridden by environment va
 
 ---
 
+## Auth token cache
+
+`AuthFilter` caches the resolved tenant identity for a presented Bearer token (keyed by a
+SHA-256 hash of the token, not the raw token) to avoid re-running the O(n) BCrypt scan over
+all tenants on every request. This is an in-process cache — correct only because Vistierie
+is deployed single-instance (no replicas). It is bounded (10,000 entries, oldest-evicted) and
+fully flushed whenever tenant auth state changes (tenant create, kill, clear-kill via
+`AdminTenantController`).
+
+| Property | Env var | Default | Description |
+|----------|---------|---------|-------------|
+| `vistierie.auth.cache.positive-ttl-seconds` | `VISTIERIE_AUTH_CACHE_POSITIVE_TTL_SECONDS` | `60` | How long a successfully resolved token→tenant mapping stays cached |
+| `vistierie.auth.cache.negative-ttl-seconds` | `VISTIERIE_AUTH_CACHE_NEGATIVE_TTL_SECONDS` | `10` | How long an unknown/invalid token is cached as a "no match", to blunt repeated bad-token scans |
+
+---
+
 ## Anthropic Provider
 
 | Property | Env var | Default | Description |

@@ -1,5 +1,6 @@
 package de.vesterion.vistierie.tenants;
 
+import de.vesterion.vistierie.auth.TokenAuthCache;
 import de.vesterion.vistierie.routing.RoutingRule;
 import de.vesterion.vistierie.routing.RoutingRuleRepository;
 import de.vesterion.vistierie.routing.RoutingResolver;
@@ -24,13 +25,16 @@ public class AdminTenantController {
     private final SecureRandom rng = new SecureRandom();
     private final RoutingRuleRepository routingRules;
     private final RoutingResolver routingResolver;
+    private final TokenAuthCache authCache;
 
     public AdminTenantController(TenantRepository repo, BCryptPasswordEncoder enc,
-                                 RoutingRuleRepository routingRules, RoutingResolver routingResolver) {
+                                 RoutingRuleRepository routingRules, RoutingResolver routingResolver,
+                                 TokenAuthCache authCache) {
         this.repo = repo;
         this.enc = enc;
         this.routingRules = routingRules;
         this.routingResolver = routingResolver;
+        this.authCache = authCache;
     }
 
     @GetMapping
@@ -48,6 +52,7 @@ public class AdminTenantController {
         rng.nextBytes(bytes);
         var token = HexFormat.of().formatHex(bytes);
         repo.insert(id, req.name(), enc.encode(token));
+        authCache.clear();
         var now = Instant.now();
         routingRules.insert(new RoutingRule(
                 UUID.randomUUID(),
@@ -64,6 +69,7 @@ public class AdminTenantController {
         var t = repo.findByName(name).orElseThrow();
         var until = req.until() == null ? Instant.parse("9999-12-31T23:59:59Z") : req.until();
         repo.setKill(t.id(), until, req.reason(), req.setBy() == null ? "admin" : req.setBy());
+        authCache.clear();
         return ResponseEntity.noContent().build();
     }
 
@@ -71,6 +77,7 @@ public class AdminTenantController {
     public ResponseEntity<Void> clearKill(@PathVariable String name) {
         var t = repo.findByName(name).orElseThrow();
         repo.clearKill(t.id());
+        authCache.clear();
         return ResponseEntity.noContent().build();
     }
 

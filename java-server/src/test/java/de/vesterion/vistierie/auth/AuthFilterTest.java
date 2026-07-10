@@ -62,4 +62,21 @@ class AuthFilterTest extends PostgresTestBase {
         mvc.perform(get("/llm/complete").header("Authorization", "Bearer " + plainToken))
                 .andExpect(status().isMethodNotAllowed());
     }
+
+    // Finding #10: admin-path check must use a decoded path, matching Spring MVC's routing,
+    // otherwise a percent-encoded "/admin/" prefix bypasses the admin-token check while
+    // Spring still dispatches the request to the admin controller.
+    @Test void percentEncodedAdminPathRejectsNonAdminTenantToken() throws Exception {
+        String uniqueName = "hivemem-" + UUID.randomUUID();
+        String plainToken = "token-" + UUID.randomUUID();
+        tenants.insert(UUID.randomUUID(), uniqueName, enc.encode(plainToken));
+
+        // "%61" decodes to 'a' -> "/admin/tenants". Must be treated as an admin path
+        // (and rejected, since the token is a tenant token, not the admin token) —
+        // not silently treated as a non-admin tenant request.
+        // Use a pre-built URI (not the String/UriComponentsBuilder overload) so MockMvc
+        // sends "%61" as-is on the wire instead of re-encoding the literal '%' to "%25".
+        mvc.perform(get(java.net.URI.create("/%61dmin/tenants")).header("Authorization", "Bearer " + plainToken))
+                .andExpect(status().isUnauthorized());
+    }
 }
