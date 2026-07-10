@@ -9,6 +9,7 @@ import de.vesterion.vistierie.kill.KillSwitchService;
 import de.vesterion.vistierie.pricing.PriceTable;
 import de.vesterion.vistierie.provider.ProviderRegistry;
 import de.vesterion.vistierie.provider.ProviderRequest;
+import de.vesterion.vistierie.provider.ProviderResponse;
 import de.vesterion.vistierie.routing.RoutingResolver;
 import de.vesterion.vistierie.runs.Run;
 import de.vesterion.vistierie.runs.RunStore;
@@ -176,12 +177,6 @@ public class AgentRunner {
                 runs.markTerminal(runId, "failed", null, "killed: " + e.reason(), null);
                 return;
             }
-            try {
-                budgets.checkOrThrow(run.tenantId(), tenantName, run.agentId(), snap.path("name").asText());
-            } catch (BudgetException e) {
-                runs.markTerminal(runId, "failed", null, e.code() + ": " + e.getMessage(), null);
-                return;
-            }
             if (deadline != null && clock.instant().isAfter(deadline)) {
                 runs.markTerminal(runId, "failed", null, "max_run_seconds_exceeded", null);
                 return;
@@ -199,15 +194,26 @@ public class AgentRunner {
                     maxTokens, null, systemPrompt, toMessagesList(messages),
                     toolsList, null, Map.of("agent_name", snap.path("name").asText()));
 
-            var pRes = provider.complete(providerReq);
-            var cost = prices.costMicros(decision.model(), pRes.usage());
+            // Reserve estimated cost across this turn's provider call + audit write so concurrent
+            // runs (e.g. parallel subagents) see this turn's in-flight cost in their own cap check.
+            // Released in the finally regardless of outcome; the real cost lands in the DB row.
             String callId = newUlid();
-            recorder.insertWithBody(new LlmCallRecorder.Row(
-                    callId, run.tenantId(), run.agentId(), modelPurpose, null,
-                    providerName, decision.model(), "complete",
-                    pRes.usage().inputTokens(), pRes.usage().outputTokens(),
-                    pRes.usage().cacheCreationInputTokens(), pRes.usage().cacheReadInputTokens(),
-                    cost, 0, "ok", null, runId, null), providerReq, pRes);
+            long estimate = estimateMicros(decision.model(), maxTokens);
+            ProviderResponse pRes;
+            try (var res = budgets.reserveOrThrow(run.tenantId(), tenantName,
+                    run.agentId(), snap.path("name").asText(), estimate)) {
+                pRes = provider.complete(providerReq);
+                var cost = prices.costMicros(decision.model(), pRes.usage());
+                recorder.insertWithBody(new LlmCallRecorder.Row(
+                        callId, run.tenantId(), run.agentId(), modelPurpose, null,
+                        providerName, decision.model(), "complete",
+                        pRes.usage().inputTokens(), pRes.usage().outputTokens(),
+                        pRes.usage().cacheCreationInputTokens(), pRes.usage().cacheReadInputTokens(),
+                        cost, 0, "ok", null, runId, null), providerReq, pRes);
+            } catch (BudgetException e) {
+                runs.markTerminal(runId, "failed", null, e.code() + ": " + e.getMessage(), null);
+                return;
+            }
 
             if ("end_turn".equals(pRes.stopReason())) {
                 JsonNode output;
@@ -368,6 +374,19 @@ public class AgentRunner {
         }
 
         runs.markTerminal(runId, "failed", null, "max_turns_exceeded", null);
+    }
+
+    /**
+     * Conservative pre-call cost estimate for the budget reservation: treat {@code maxTokens} as
+     * output tokens (input tokens unknown pre-call). Mirrors this runner's actual billing, which
+     * prices every turn via {@link PriceTable#costMicros}; an unpriced model reserves 0.
+     */
+    private long estimateMicros(String model, int maxTokens) {
+        try {
+            return prices.costMicros(model, new de.vesterion.vistierie.pricing.Usage(0, maxTokens, 0, 0));
+        } catch (PriceTable.UnknownModelException e) {
+            return 0L;
+        }
     }
 
     private String summarize(String text) {

@@ -18,12 +18,16 @@ import de.vesterion.vistierie.provider.ProviderRequest;
 import de.vesterion.vistierie.provider.ProviderResponse;
 import de.vesterion.vistierie.routing.RoutingDecision;
 import de.vesterion.vistierie.routing.RoutingResolver;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.UUID;
 
 @Service
 public class LlmService {
+
+    private static final Logger log = LoggerFactory.getLogger(LlmService.class);
 
     private final RoutingResolver routing;
     private final ProviderRegistry providers;
@@ -54,7 +58,8 @@ public class LlmService {
         ProviderResponse run(LlmProvider provider, String model);
     }
 
-    private record CallContext(UUID tenantId, UUID agentId, String purpose, String realm,
+    private record CallContext(UUID tenantId, String tenantName, UUID agentId, String agentName,
+                               String purpose, String realm,
                                String endpoint, BudgetEnforcer.BudgetCheckResult budget) {}
 
     public InvocationResult complete(CompleteRequest req) {
@@ -73,7 +78,8 @@ public class LlmService {
 
         var decision = routing.resolve(tenant, req.realm(), req.purpose(), req.model());
         int maxTokens = req.max_tokens() == null ? 1024 : req.max_tokens();
-        var ctx = new CallContext(tenantId, agent.id(), req.purpose(), req.realm(), "complete", budget);
+        var ctx = new CallContext(tenantId, tenant, agent.id(), agent.name(),
+                req.purpose(), req.realm(), "complete", budget);
 
         java.util.function.Function<String, ProviderRequest> reqForModel = model ->
                 new ProviderRequest(model, maxTokens, req.temperature(), req.system(),
@@ -99,7 +105,8 @@ public class LlmService {
 
         var decision = routing.resolve(tenant, req.realm(), req.purpose(), req.model());
         int maxTokens = req.max_tokens() == null ? 1024 : req.max_tokens();
-        var ctx = new CallContext(tenantId, agent.id(), req.purpose(), req.realm(), "vision", budget);
+        var ctx = new CallContext(tenantId, tenant, agent.id(), agent.name(),
+                req.purpose(), req.realm(), "vision", budget);
 
         java.util.function.Function<String, ProviderRequest> reqForModel = model ->
                 new ProviderRequest(
@@ -134,7 +141,8 @@ public class LlmService {
 
         var decision = routing.resolve(tenant, req.realm(), req.purpose(), req.model());
         int maxTokens = req.max_tokens() == null ? 1024 : req.max_tokens();
-        var ctx = new CallContext(tenantId, agent.id(), req.purpose(), req.realm(), "vision-multi", budget);
+        var ctx = new CallContext(tenantId, tenant, agent.id(), agent.name(),
+                req.purpose(), req.realm(), "vision-multi", budget);
 
         var content = new java.util.ArrayList<Object>();
         var images = new java.util.ArrayList<LlmProvider.ImageInput>();
@@ -174,32 +182,63 @@ public class LlmService {
         var provider = providers.get(providerName);
         var pReq = reqForModel.apply(model);
         var id = randomCallId();
+        long estimate = estimateMicros(providerName, model, pReq.maxTokens());
         var start = System.nanoTime();
-        try {
-            var pRes = call.run(provider, model);
-            var dur = (int) ((System.nanoTime() - start) / 1_000_000);
-            boolean subscription = ClaudeSubscriptionProvider.NAME.equals(providerName);
-            long cost = subscription ? 0L : prices.costMicros(model, pRes.usage());
-            Long shadow = subscription ? shadowCost(model, pRes.usage()) : null;
-            recorder.insertWithBody(new LlmCallRecorder.Row(
-                    id, ctx.tenantId(), ctx.agentId(), ctx.purpose(), ctx.realm(),
-                    providerName, model, ctx.endpoint(),
-                    pRes.usage().inputTokens(), pRes.usage().outputTokens(),
-                    pRes.usage().cacheCreationInputTokens(), pRes.usage().cacheReadInputTokens(),
-                    cost, shadow, dur, "ok", null, null, null), pReq, pRes);
-            metrics.record(providerName, model, ctx.endpoint(), "ok", dur, cost);
-            if (shadow != null) {
-                metrics.recordShadowCost(providerName, model, ctx.endpoint(), shadow);
+        // Reserve estimated cost for the duration of the provider call + audit write so concurrent
+        // requests see this call's in-flight cost when they run their own cap check. Released in the
+        // try-with-resources finally regardless of outcome (the real cost lands in the DB row).
+        // Each attempt (primary and fallback) reserves and releases independently — no double-reserve.
+        try (var res = budgets.reserveOrThrow(ctx.tenantId(), ctx.tenantName(),
+                ctx.agentId(), ctx.agentName(), estimate)) {
+            try {
+                var pRes = call.run(provider, model);
+                var dur = (int) ((System.nanoTime() - start) / 1_000_000);
+                boolean subscription = ClaudeSubscriptionProvider.NAME.equals(providerName);
+                long cost = subscription ? 0L : prices.costMicros(model, pRes.usage());
+                Long shadow = subscription ? shadowCost(model, pRes.usage()) : null;
+                // Post-success audit write is non-fatal (finding #11): the provider call already
+                // succeeded and was billed, so an audit-write failure must degrade to "no audit row"
+                // rather than surface as a 500 that would prompt a retry and double the real spend.
+                try {
+                    recorder.insertWithBody(new LlmCallRecorder.Row(
+                            id, ctx.tenantId(), ctx.agentId(), ctx.purpose(), ctx.realm(),
+                            providerName, model, ctx.endpoint(),
+                            pRes.usage().inputTokens(), pRes.usage().outputTokens(),
+                            pRes.usage().cacheCreationInputTokens(), pRes.usage().cacheReadInputTokens(),
+                            cost, shadow, dur, "ok", null, null, null), pReq, pRes);
+                } catch (RuntimeException auditEx) {
+                    log.warn("audit write failed for successful call id={} provider={} model={}: {}",
+                            id, providerName, model, auditEx.toString());
+                }
+                metrics.record(providerName, model, ctx.endpoint(), "ok", dur, cost);
+                if (shadow != null) {
+                    metrics.recordShadowCost(providerName, model, ctx.endpoint(), shadow);
+                }
+                return new InvocationResult(new LlmResponse(pRes.text(), pRes.stopReason(),
+                        pRes.usage(), providerName, model, cost, id), ctx.budget());
+            } catch (LlmProvider.ProviderException e) {
+                recordFailure(ctx, id, providerName, model, pReq, start,
+                        e.statusCode() >= 500 ? "error" : "rate_limited", e.errorCode());
+                throw e;
+            } catch (UnsupportedOperationException e) {
+                recordFailure(ctx, id, providerName, model, pReq, start, "error", "unsupported_operation");
+                throw e;
             }
-            return new InvocationResult(new LlmResponse(pRes.text(), pRes.stopReason(),
-                    pRes.usage(), providerName, model, cost, id), ctx.budget());
-        } catch (LlmProvider.ProviderException e) {
-            recordFailure(ctx, id, providerName, model, pReq, start,
-                    e.statusCode() >= 500 ? "error" : "rate_limited", e.errorCode());
-            throw e;
-        } catch (UnsupportedOperationException e) {
-            recordFailure(ctx, id, providerName, model, pReq, start, "error", "unsupported_operation");
-            throw e;
+        }
+    }
+
+    /**
+     * Conservative pre-call cost estimate for the budget reservation: treat {@code maxTokens} as
+     * output tokens (input tokens are unknown pre-call). Over-estimating is the safe direction for
+     * a hard cap (fail-closed). Subscription calls are free and unknown models are unpriced, so both
+     * reserve 0 (no meaningful reservation, but the committed cap is still enforced).
+     */
+    private long estimateMicros(String providerName, String model, int maxTokens) {
+        if (ClaudeSubscriptionProvider.NAME.equals(providerName)) return 0L;
+        try {
+            return prices.costMicros(model, new de.vesterion.vistierie.pricing.Usage(0, maxTokens, 0, 0));
+        } catch (PriceTable.UnknownModelException e) {
+            return 0L;
         }
     }
 

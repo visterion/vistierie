@@ -59,8 +59,10 @@ class AgentRunnerLifecycleTest extends PostgresTestBase {
         agents.insert(agentId, tenantId, "a", "you are a", "summarize_cell",
                 JsonNodeFactory.instance.arrayNode(), null, 5, 60, "wt",
                 false, null, null, null, null, null, null);
-        tenantBudgets.patch(tenantId, new BudgetPatchRequest(10_000L, 100_000L, 80, 90));
-        agentBudgets.patch(agentId, new BudgetPatchRequest(5_000L, 50_000L, 80, 90));
+        // Caps must exceed one turn's worst-case cost: the reservation reserves a fail-closed
+        // estimate (maxTokens as output tokens) before the call, so tiny caps would block every turn.
+        tenantBudgets.patch(tenantId, new BudgetPatchRequest(100_000_000L, 100_000_000L, 80, 90));
+        agentBudgets.patch(agentId, new BudgetPatchRequest(50_000_000L, 50_000_000L, 80, 90));
         return new Ids(tenantId, agentId);
     }
 

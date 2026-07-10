@@ -406,6 +406,24 @@ class LlmServiceTest {
         assertThat(rows.getValue().shadowCostMicros()).isNull();
     }
 
+    @Test void auditWriteFailureOnSuccessPathDoesNotFailTheCall() {
+        // Finding #11: the provider call already succeeded (and was billed). A failure in the
+        // post-success audit write must NOT propagate as a 500 for a successful, charged call.
+        when(routing.resolve(any(), any(), any(), any()))
+                .thenReturn(new RoutingDecision("anthropic", "claude-haiku-4-5", false));
+        when(providers.get("anthropic")).thenReturn(provider);
+        when(provider.complete(any())).thenReturn(new ProviderResponse(
+                "ok", "end_turn", new Usage(10, 20, 0, 0), "claude-haiku-4-5"));
+        org.mockito.Mockito.doThrow(new RuntimeException("db down"))
+                .when(recorder).insertWithBody(any(), any(), any());
+
+        var res = svc.complete(completeReq());
+
+        assertThat(res.response().text()).isEqualTo("ok");
+        assertThat(res.response().cost_micros()).isGreaterThan(0L);
+        assertThat(res.response().llm_call_id()).isNotBlank();
+    }
+
     @Test void apiProviderCallHasNullShadowCost() {
         when(routing.resolve(any(), any(), any(), any())).thenReturn(
                 new RoutingDecision("anthropic", "claude-haiku-4-5", false, null, null));
