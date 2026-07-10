@@ -43,7 +43,7 @@ public class ImageRedactor {
             newMessages.add(copy);
         }
         return new ProviderRequest(req.model(), req.maxTokens(), req.temperature(),
-                req.system(), newMessages, req.tools(), req.toolChoice(), req.metadata());
+                req.system(), newMessages, req.tools(), req.toolChoice(), req.metadata(), req.effort());
     }
 
     private Map<String, Object> redactImageBlock(Map<String, Object> block) {

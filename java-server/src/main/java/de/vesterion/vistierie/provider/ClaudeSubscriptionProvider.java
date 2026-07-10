@@ -31,6 +31,7 @@ public class ClaudeSubscriptionProvider implements LlmProvider {
         body.put("model", req.model());
         body.put("max_tokens", req.maxTokens());
         if (req.system() != null && !req.system().isEmpty()) body.put("system", req.system());
+        if (req.effort() != null) body.put("effort", req.effort());
         body.put("messages", req.messages());
         return call(body);
     }
