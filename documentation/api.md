@@ -618,7 +618,7 @@ walking parent → child run trees.
 | POST | `/admin/routing-rules` | admin | Create a rule |
 | GET  | `/admin/routing-rules?tenant=&realm=&purpose=` | admin | List with optional filters |
 | GET  | `/admin/routing-rules/{id}` | admin | Read one |
-| PATCH | `/admin/routing-rules/{id}` | admin | Update `provider`, `model`, fallback, `effort`, `priority`, `allow_override`, `locked` |
+| PATCH | `/admin/routing-rules/{id}` | admin | Update `provider`, `model`, `fallback_*`, `effort`, `priority`, `allow_override`, `locked` |
 | DELETE | `/admin/routing-rules/{id}` | admin | Delete (refuses to delete the tenant's last wildcard rule) |
 
 ### Create body
@@ -634,8 +634,8 @@ walking parent → child run trees.
 
 `effort` is optional, one of `"off"`, `"low"`, `"medium"`, `"high"`,
 `"max"`, or omitted/`null` for provider-default behavior. Invalid values
-return 400. See `documentation/routing.md`, "Reasoning effort", for the
-provider support matrix.
+return 400. See [routing.md](routing.md#reasoning-effort) for which
+providers honor it.
 
 ### Status codes
 
