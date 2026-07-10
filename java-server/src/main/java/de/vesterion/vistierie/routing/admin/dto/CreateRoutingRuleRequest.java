@@ -10,6 +10,7 @@ public record CreateRoutingRuleRequest(
         @NotBlank String model,
         String fallback_provider,
         String fallback_model,
+        String effort,
         Integer priority,
         boolean allow_override,
         boolean locked
