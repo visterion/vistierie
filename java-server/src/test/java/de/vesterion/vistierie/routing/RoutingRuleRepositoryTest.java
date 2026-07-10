@@ -107,6 +107,30 @@ class RoutingRuleRepositoryTest extends PostgresTestBase {
     }
 
     @Test
+    void updatePersistsEffort() {
+        var r = rule("realmC", "purposeC", 100);
+        repo.insert(r);
+
+        repo.update(r.id(), "anthropic", "claude-sonnet-4-6",
+                null, null, "high", 100, false, false);
+
+        var loaded = repo.findById(r.id()).orElseThrow();
+        assertThat(loaded.effort()).isEqualTo("high");
+    }
+
+    @Test
+    void checkConstraintRejectsInvalidEffort() {
+        var now = Instant.now();
+        var invalid = new RoutingRule(UUID.randomUUID(), tenantId, "realmD", "purposeD",
+                "anthropic", "claude-sonnet-4-6",
+                null, null,
+                "bogus", 100, false, false, now, now);
+        assertThatThrownBy(() -> repo.insert(invalid))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class)
+                .hasMessageContaining("routing_rules_effort_check");
+    }
+
+    @Test
     void compatibilityConstructorLeavesFallbackNull() {
         var now = Instant.now();
         var rule = new RoutingRule(UUID.randomUUID(), tenantId, null, null,
