@@ -37,28 +37,41 @@ public class EventSourcePoller {
     }
 
     /**
-     * POST the event-source webhook and return the list of events.
-     * On hard failure returns List.of() and logs — never throws.
+     * A poll's outcome. {@code ok=false} signals a hard failure (persistent
+     * 5xx after retry, connection error, or any other unexpected exception);
+     * callers must not treat this the same as a successful poll that simply
+     * found zero events, since doing so would let the caller advance its
+     * poll cursor and permanently skip the events that occurred during the
+     * failed window.
      */
-    public List<JsonNode> poll(String url, String token, UUID sessionId,
-                                String agentName, Instant since, Instant now) {
+    public record PollResult(boolean ok, List<JsonNode> events) {
+        static PollResult ok(List<JsonNode> events) { return new PollResult(true, events); }
+        static PollResult failed() { return new PollResult(false, List.of()); }
+    }
+
+    /**
+     * POST the event-source webhook and return the poll outcome.
+     * On hard failure returns {@link PollResult#failed()} and logs — never throws.
+     */
+    public PollResult poll(String url, String token, UUID sessionId,
+                            String agentName, Instant since, Instant now) {
         try {
-            return callOnce(url, token, sessionId, agentName, since, now);
+            return PollResult.ok(callOnce(url, token, sessionId, agentName, since, now));
         } catch (TransientPollError e) {
             try { Thread.sleep(1000); } catch (InterruptedException ignored) {
                 Thread.currentThread().interrupt();
             }
             try {
-                return callOnce(url, token, sessionId, agentName, since, now);
+                return PollResult.ok(callOnce(url, token, sessionId, agentName, since, now));
             } catch (Exception second) {
                 log.warn("EventSourcePoller: retry failed for agent {} session {}: {}",
                         agentName, sessionId, second.getMessage());
-                return List.of();
+                return PollResult.failed();
             }
         } catch (Exception e) {
             log.warn("EventSourcePoller: poll failed for agent {} session {}: {}",
                     agentName, sessionId, e.getMessage());
-            return List.of();
+            return PollResult.failed();
         }
     }
 

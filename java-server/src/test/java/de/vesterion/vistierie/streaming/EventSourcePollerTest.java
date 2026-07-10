@@ -39,10 +39,12 @@ class EventSourcePollerTest {
         var now = Instant.parse("2026-06-02T14:00:00Z");
         var since = Instant.parse("2026-06-02T13:55:00Z");
 
-        var events = poller.poll(
+        var result = poller.poll(
                 "http://localhost:" + wm.port() + "/events",
                 "bearer-token", sessionId, "daywalker", since, now);
 
+        assertThat(result.ok()).isTrue();
+        var events = result.events();
         assertThat(events).hasSize(2);
         assertThat(events.get(0).get("symbol").asText()).isEqualTo("AAPL");
         assertThat(events.get(1).get("symbol").asText()).isEqualTo("MSFT");
@@ -51,22 +53,24 @@ class EventSourcePollerTest {
                 .withHeader("content-type", equalTo("application/json")));
     }
 
-    @Test void emptyEvents_returnsEmptyList() {
+    @Test void emptyEvents_returnsSuccessfulEmptyResult() {
         stubFor(post(urlEqualTo("/events")).willReturn(okJson("{\"events\":[]}")));
-        var events = poller.poll(
+        var result = poller.poll(
                 "http://localhost:" + wm.port() + "/events",
                 "tok", UUID.randomUUID(), "daywalker",
                 null, Instant.now());
-        assertThat(events).isEmpty();
+        assertThat(result.ok()).isTrue();
+        assertThat(result.events()).isEmpty();
     }
 
-    @Test void missingEventsKey_returnsEmptyList() {
+    @Test void missingEventsKey_returnsSuccessfulEmptyResult() {
         stubFor(post(urlEqualTo("/events")).willReturn(okJson("{\"ok\":true}")));
-        var events = poller.poll(
+        var result = poller.poll(
                 "http://localhost:" + wm.port() + "/events",
                 "tok", UUID.randomUUID(), "daywalker",
                 null, Instant.now());
-        assertThat(events).isEmpty();
+        assertThat(result.ok()).isTrue();
+        assertThat(result.events()).isEmpty();
     }
 
     @Test void sinceIsNullified_whenNotProvided() throws Exception {
@@ -87,30 +91,33 @@ class EventSourcePollerTest {
                 .inScenario("retry").whenScenarioStateIs("ok")
                 .willReturn(okJson("{\"events\":[{\"x\":1}]}")));
 
-        var events = poller.poll(
+        var result = poller.poll(
                 "http://localhost:" + wm.port() + "/events",
                 "tok", UUID.randomUUID(), "daywalker",
                 null, Instant.now());
-        assertThat(events).hasSize(1);
+        assertThat(result.ok()).isTrue();
+        assertThat(result.events()).hasSize(1);
         verify(2, postRequestedFor(urlEqualTo("/events")));
     }
 
-    @Test void persistent5xx_returnsEmptyList_doesNotThrow() {
+    @Test void persistent5xx_returnsFailedResult_doesNotThrow() {
         stubFor(post(anyUrl()).willReturn(serverError()));
-        var events = poller.poll(
+        var result = poller.poll(
                 "http://localhost:" + wm.port() + "/events",
                 "tok", UUID.randomUUID(), "daywalker",
                 null, Instant.now());
-        assertThat(events).isEmpty();
+        assertThat(result.ok()).isFalse();
+        assertThat(result.events()).isEmpty();
     }
 
-    @Test void connectionError_returnsEmptyList_doesNotThrow() {
+    @Test void connectionError_returnsFailedResult_doesNotThrow() {
         // port 1 is almost certainly closed
-        var events = poller.poll(
+        var result = poller.poll(
                 "http://localhost:1/events",
                 "tok", UUID.randomUUID(), "daywalker",
                 null, Instant.now());
-        assertThat(events).isEmpty();
+        assertThat(result.ok()).isFalse();
+        assertThat(result.events()).isEmpty();
     }
 
     @Test void requestBodyContainsExpectedFields() throws Exception {
