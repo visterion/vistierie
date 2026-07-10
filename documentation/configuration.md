@@ -44,7 +44,7 @@ fully flushed whenever tenant auth state changes (tenant create, kill, clear-kil
 |----------|---------|---------|-------------|
 | `vistierie.anthropic.api-key` | `ANTHROPIC_API_KEY` | — | Required to enable the `anthropic` provider |
 | `vistierie.anthropic.base-url` | — | `https://api.anthropic.com` | Override for proxies |
-| `vistierie.anthropic.timeout-seconds` | — | `60` | HTTP timeout |
+| `vistierie.anthropic.timeout-seconds` | — | `60` | HTTP read timeout, in seconds (connect timeout is a fixed 5s) |
 
 ---
 
@@ -66,7 +66,7 @@ Defined under `vistierie.providers.<name>`:
 |-------------|-------------|
 | `base-url` | Required. Base URL for the OpenAI-compatible endpoint |
 | `api-key` | Required. Bearer token. Provider is skipped if blank |
-| `timeout-seconds` | Accepted in config but **not currently applied** to the HTTP client (no-op). |
+| `timeout-seconds` | HTTP read timeout, in seconds. Defaults to `60` if omitted (connect timeout is a fixed 5s). |
 
 ---
 

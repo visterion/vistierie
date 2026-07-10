@@ -9,6 +9,7 @@ import org.springframework.web.client.RestClient;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,7 +32,14 @@ public class AnthropicProvider implements LlmProvider {
             @Value("${vistierie.anthropic.api-key}") String apiKey,
             @Value("${vistierie.anthropic.timeout-seconds:60}") int timeoutSeconds) {
         this(RestClient.builder().baseUrl(baseUrl)
-                .requestFactory(new SimpleClientHttpRequestFactory()).build(), apiKey, timeoutSeconds);
+                .requestFactory(buildRequestFactory(timeoutSeconds)).build(), apiKey, timeoutSeconds);
+    }
+
+    private static SimpleClientHttpRequestFactory buildRequestFactory(int timeoutSeconds) {
+        var factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(Duration.ofSeconds(5));
+        factory.setReadTimeout(Duration.ofSeconds(timeoutSeconds));
+        return factory;
     }
 
     // package-private ctor for tests (inject a pre-built RestClient)
