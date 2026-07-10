@@ -128,3 +128,66 @@ describe("complete", () => {
     })).rejects.toMatchObject({ status: 500, code: "no_result" });
   });
 });
+
+function successStream() {
+  return sdkStream([
+    {
+      type: "result",
+      subtype: "success",
+      result: "ok",
+      usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+    },
+  ]);
+}
+
+describe("effort mapping", () => {
+  it('maps "off" to thinking disabled', async () => {
+    queryMock.mockReturnValue(successStream());
+    await complete({ model: "m", messages: [{ role: "user", content: "hi" }], effort: "off" });
+    const opts = queryMock.mock.calls[0][0].options;
+    expect(opts.thinking).toEqual({ type: "disabled" });
+    expect(opts.effort).toBeUndefined();
+  });
+
+  it.each(["low", "medium", "high", "max"] as const)(
+    'maps "%s" to the SDK effort option',
+    async (level) => {
+      queryMock.mockReturnValue(successStream());
+      await complete({ model: "m", messages: [{ role: "user", content: "hi" }], effort: level });
+      const opts = queryMock.mock.calls[0][0].options;
+      expect(opts.effort).toBe(level);
+      expect(opts.thinking).toBeUndefined();
+    },
+  );
+
+  it("sets neither thinking nor effort when the field is absent", async () => {
+    queryMock.mockReturnValue(successStream());
+    await complete({ model: "m", messages: [{ role: "user", content: "hi" }] });
+    const opts = queryMock.mock.calls[0][0].options;
+    expect(opts.thinking).toBeUndefined();
+    expect(opts.effort).toBeUndefined();
+  });
+
+  it("rejects unknown effort values with 400 before calling the SDK", async () => {
+    await expect(
+      complete({ model: "m", messages: [{ role: "user", content: "hi" }], effort: "turbo" as never }),
+    ).rejects.toMatchObject({ status: 400, code: "invalid_request" });
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("max_tokens passthrough", () => {
+  it("forwards max_tokens as CLAUDE_CODE_MAX_OUTPUT_TOKENS in env", async () => {
+    queryMock.mockReturnValue(successStream());
+    await complete({ model: "m", max_tokens: 256, messages: [{ role: "user", content: "hi" }] });
+    const opts = queryMock.mock.calls[0][0].options;
+    expect(opts.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS).toBe("256");
+  });
+
+  it("passes no env override when max_tokens is absent", async () => {
+    queryMock.mockReturnValue(successStream());
+    await complete({ model: "m", messages: [{ role: "user", content: "hi" }] });
+    const opts = queryMock.mock.calls[0][0].options;
+    expect(opts.env).toBeUndefined();
+  });
+});
