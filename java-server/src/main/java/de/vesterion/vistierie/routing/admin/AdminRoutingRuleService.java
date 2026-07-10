@@ -137,7 +137,7 @@ public class AdminRoutingRuleService {
         }
         validateFallback(newProvider, newFbProvider, newFbModel);
 
-        rules.update(id, newProvider, newModel, newFbProvider, newFbModel,
+        rules.update(id, newProvider, newModel, newFbProvider, newFbModel, before.effort(),
                 newPriority, newAllow, newLocked);
         var after = rules.findById(id).orElseThrow();
         audit.record("update", id, before.tenantId(), before, after, "admin");
