@@ -30,12 +30,26 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY required}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       XAI_API_KEY: ${XAI_API_KEY:-}
+      CLAUDE_SUBSCRIPTION_ENABLED: ${CLAUDE_SUBSCRIPTION_ENABLED:-false}
+      CLAUDE_BRIDGE_URL: ${CLAUDE_BRIDGE_URL:-http://claude-bridge:8091}
     depends_on:
       db:
         condition: service_healthy
     networks:
       - vistierie-net
       - hivemem-net
+    restart: unless-stopped
+
+  claude-bridge:
+    image: ${CLAUDE_BRIDGE_IMAGE:-ghcr.io/visterion/vistierie-claude-bridge:main}
+    container_name: claude-bridge
+    profiles: ["subscription"]
+    environment:
+      # cannot be :?-required — compose interpolates even with the profile
+      # inactive, which would break token-less deployments
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+    networks:
+      - vistierie-net
     restart: unless-stopped
 
 networks:
