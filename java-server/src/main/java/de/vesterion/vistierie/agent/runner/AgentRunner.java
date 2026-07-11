@@ -7,6 +7,8 @@ import de.vesterion.vistierie.budget.BudgetEnforcer;
 import de.vesterion.vistierie.budget.BudgetException;
 import de.vesterion.vistierie.kill.KillSwitchService;
 import de.vesterion.vistierie.pricing.PriceTable;
+import de.vesterion.vistierie.provider.ClaudeSubscriptionProvider;
+import de.vesterion.vistierie.provider.LlmProvider;
 import de.vesterion.vistierie.provider.ProviderRegistry;
 import de.vesterion.vistierie.provider.ProviderRequest;
 import de.vesterion.vistierie.provider.ProviderResponse;
@@ -171,6 +173,12 @@ public class AgentRunner {
                 .put("content", firstContent);
         messages.add(firstUser);
 
+        // Provider-session thread: the subscription bridge returns a session id on tool_use turns
+        // so the next turn can resume the same SDK session (see ClaudeSubscriptionProvider). Null
+        // until the first such response; reset to null whenever a turn is served by the fallback
+        // provider (bridge sessions are provider-specific and must not leak across providers).
+        String providerSessionId = null;
+
         for (int turn = 0; turn < maxTurns; turn++) {
             try { kill.check(run.tenantId()); }
             catch (KillSwitchService.KilledException e) {
@@ -190,26 +198,67 @@ public class AgentRunner {
 
             List<Map<String, Object>> toolsList = toToolsList(snap.path("tools"));
 
+            String agentName = snap.path("name").asText();
+            // Carry the threaded session id (when present) so the subscription bridge resumes the
+            // same SDK session on the next turn.
+            Map<String, Object> metadata = providerSessionId == null
+                    ? Map.of("agent_name", agentName)
+                    : Map.of("agent_name", agentName, "provider_session_id", providerSessionId);
             var providerReq = new ProviderRequest(decision.model(),
                     maxTokens, null, systemPrompt, toMessagesList(messages),
-                    toolsList, null, Map.of("agent_name", snap.path("name").asText()));
+                    toolsList, null, metadata);
 
             // Reserve estimated cost across this turn's provider call + audit write so concurrent
             // runs (e.g. parallel subagents) see this turn's in-flight cost in their own cap check.
             // Released in the finally regardless of outcome; the real cost lands in the DB row.
             String callId = newUlid();
-            long estimate = estimateMicros(decision.model(), maxTokens);
+            // The reserved estimate is the PRIMARY provider's (0 for subscription) and may
+            // under-reserve a priced fallback attempt for the in-flight window — intentional;
+            // the committed cost lands in the row.
+            long estimate = estimateMicros(providerName, decision.model(), maxTokens);
             ProviderResponse pRes;
+            String usedProvider = providerName;
+            String usedModel = decision.model();
+            var usedReq = providerReq;
             try (var res = budgets.reserveOrThrow(run.tenantId(), tenantName,
-                    run.agentId(), snap.path("name").asText(), estimate)) {
-                pRes = provider.complete(providerReq);
-                var cost = prices.costMicros(decision.model(), pRes.usage());
+                    run.agentId(), agentName, estimate)) {
+                boolean fellBack = false;
+                try {
+                    pRes = provider.complete(providerReq);
+                } catch (RuntimeException e) {
+                    // Mirror LlmService: on a retryable primary failure with a configured fallback,
+                    // retry once against the fallback provider. Never send the bridge session id
+                    // cross-provider — sessions are bridge-specific.
+                    if (decision.fallbackProvider() == null || !shouldFallback(e)) throw e;
+                    log.warn("run {} provider {} failed ({}), falling back to {}",
+                            runId, providerName, e.toString(), decision.fallbackProvider());
+                    runs.recordEvent(runId, "info", "provider_fallback", mapper.valueToTree(
+                            Map.of("from", providerName, "to", decision.fallbackProvider())));
+                    usedProvider = decision.fallbackProvider();
+                    usedModel = decision.fallbackModel();
+                    usedReq = new ProviderRequest(usedModel, maxTokens, null, systemPrompt,
+                            toMessagesList(messages), toolsList, null,
+                            Map.of("agent_name", agentName));
+                    pRes = providers.get(usedProvider).complete(usedReq);
+                    fellBack = true;
+                }
+                // Subscription calls are free: real cost 0, the equivalent API-key cost logged as a
+                // shadow figure. Other providers bill the real per-turn cost.
+                boolean subscription = ClaudeSubscriptionProvider.NAME.equals(usedProvider);
+                long cost = subscription ? 0L : prices.costMicros(usedModel, pRes.usage());
+                Long shadow = subscription ? shadowCost(usedModel, pRes.usage()) : null;
                 recorder.insertWithBody(new LlmCallRecorder.Row(
                         callId, run.tenantId(), run.agentId(), modelPurpose, null,
-                        providerName, decision.model(), "complete",
+                        usedProvider, usedModel, "complete",
                         pRes.usage().inputTokens(), pRes.usage().outputTokens(),
                         pRes.usage().cacheCreationInputTokens(), pRes.usage().cacheReadInputTokens(),
-                        cost, 0, "ok", null, runId, null), providerReq, pRes);
+                        cost, shadow, 0, "ok", null, runId, null), usedReq, pRes);
+                // Session threading: a fallback turn ALWAYS drops the threaded id — even one the
+                // fallback itself returned — so a fallback-issued session is never sent to the
+                // primary on a later turn. Otherwise adopt a fresh id whenever the provider returns
+                // one. (end_turn responses return null, which is fine — the run ends.)
+                if (fellBack) providerSessionId = null;
+                else if (pRes.sessionId() != null) providerSessionId = pRes.sessionId();
             } catch (BudgetException e) {
                 runs.markTerminal(runId, "failed", null, e.code() + ": " + e.getMessage(), null);
                 return;
@@ -381,11 +430,31 @@ public class AgentRunner {
      * output tokens (input tokens unknown pre-call). Mirrors this runner's actual billing, which
      * prices every turn via {@link PriceTable#costMicros}; an unpriced model reserves 0.
      */
-    private long estimateMicros(String model, int maxTokens) {
+    private long estimateMicros(String providerName, String model, int maxTokens) {
+        // Subscription calls are free — reserve nothing (mirrors LlmService.estimateMicros).
+        if (ClaudeSubscriptionProvider.NAME.equals(providerName)) return 0L;
         try {
             return prices.costMicros(model, new de.vesterion.vistierie.pricing.Usage(0, maxTokens, 0, 0));
         } catch (PriceTable.UnknownModelException e) {
             return 0L;
+        }
+    }
+
+    /** Retryable-primary predicate for provider fallback (mirrors {@code LlmService.shouldFallback}). */
+    private static boolean shouldFallback(RuntimeException e) {
+        if (e instanceof UnsupportedOperationException) return true;
+        if (e instanceof LlmProvider.ProviderException pe) {
+            return pe.statusCode() == 429 || pe.statusCode() >= 500;
+        }
+        return false;
+    }
+
+    /** What the API-key path would have cost for a free subscription call; null for unpriced models. */
+    private Long shadowCost(String model, de.vesterion.vistierie.pricing.Usage usage) {
+        try {
+            return prices.costMicros(model, usage);
+        } catch (PriceTable.UnknownModelException e) {
+            return null;
         }
     }
 
