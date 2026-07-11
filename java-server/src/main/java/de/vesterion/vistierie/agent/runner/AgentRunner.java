@@ -212,6 +212,9 @@ public class AgentRunner {
             // runs (e.g. parallel subagents) see this turn's in-flight cost in their own cap check.
             // Released in the finally regardless of outcome; the real cost lands in the DB row.
             String callId = newUlid();
+            // The reserved estimate is the PRIMARY provider's (0 for subscription) and may
+            // under-reserve a priced fallback attempt for the in-flight window — intentional;
+            // the committed cost lands in the row.
             long estimate = estimateMicros(providerName, decision.model(), maxTokens);
             ProviderResponse pRes;
             String usedProvider = providerName;
@@ -250,11 +253,12 @@ public class AgentRunner {
                         pRes.usage().inputTokens(), pRes.usage().outputTokens(),
                         pRes.usage().cacheCreationInputTokens(), pRes.usage().cacheReadInputTokens(),
                         cost, shadow, 0, "ok", null, runId, null), usedReq, pRes);
-                // Session threading: adopt a fresh id whenever the provider returns one; otherwise
-                // clear a stale id after a fallback so the next turn doesn't resend it to a provider
-                // that never issued it. (end_turn responses return null, which is fine — the run ends.)
-                if (pRes.sessionId() != null) providerSessionId = pRes.sessionId();
-                else if (fellBack) providerSessionId = null;
+                // Session threading: a fallback turn ALWAYS drops the threaded id — even one the
+                // fallback itself returned — so a fallback-issued session is never sent to the
+                // primary on a later turn. Otherwise adopt a fresh id whenever the provider returns
+                // one. (end_turn responses return null, which is fine — the run ends.)
+                if (fellBack) providerSessionId = null;
+                else if (pRes.sessionId() != null) providerSessionId = pRes.sessionId();
             } catch (BudgetException e) {
                 runs.markTerminal(runId, "failed", null, e.code() + ": " + e.getMessage(), null);
                 return;
