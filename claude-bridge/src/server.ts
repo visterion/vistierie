@@ -1,9 +1,14 @@
 import express from "express";
 import { complete } from "./complete.js";
+import { SessionStore } from "./sessions.js";
 import { BridgeError, type CompleteRequest } from "./types.js";
 
 const app = express();
 app.use(express.json({ limit: "50mb" })); // base64 images
+
+// One shared session store for tool mode; swept periodically for expiry.
+const sessions = new SessionStore();
+setInterval(() => sessions.sweep(), 60_000).unref();
 
 app.get("/healthz", (_req, res) => {
   res.json({ status: "ok" });
@@ -22,7 +27,7 @@ app.post("/v1/complete", async (req, res) => {
     if (!res.writableEnded) ac.abort();
   });
   try {
-    res.json(await complete(body as CompleteRequest, { signal: ac.signal }));
+    res.json(await complete(body as CompleteRequest, { signal: ac.signal, sessions }));
   } catch (err) {
     const e = err instanceof BridgeError ? err : new BridgeError(500, "sdk_error", String(err));
     console.error(`complete failed: ${e.status} ${e.code} ${e.message}`);
