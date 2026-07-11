@@ -412,6 +412,10 @@ Returns the configured budget policy and live usage state for one agent inside o
 
 **Auth:** admin token required.
 
+
+If no agent budget policy exists yet, the cap, warn, and remaining fields are
+`null`, but `daily_usage_micros` / `monthly_usage_micros` still reflect the
+agent's real recorded spend from `llm_calls`.
 ## `PATCH /admin/tenants/{tenant}/agents/{agent}/budget`
 
 Create or partially update an agent budget policy. Request and response shapes are identical to the tenant budget endpoints.
@@ -727,9 +731,15 @@ Cross-tenant cost rollup against `llm_calls`.
 |---|---|---|
 | `from`, `to` | last 7 days | ISO-8601, filter on `created_at` |
 | `granularity` | `hour` | `hour` \| `day` \| `none` |
-| `group_by` | `` | comma list: any of `tenant`, `realm`, `purpose`, `provider`, `model`, `endpoint`, `status` |
+| `group_by` | `` | comma list: any of `tenant`, `realm`, `purpose`, `provider`, `model`, `endpoint`, `status`, `agent` |
 | `tenant`, `realm`, `purpose`, `provider`, `model`, `endpoint` | – | exact filter |
 | `status` | – | repeatable filter (`?status=ok&status=error`) |
+
+Grouping by `agent` uses the agent name; calls without an attributed agent
+(`agent_id` is null, e.g. recorded before agent attribution existed) are
+reported under the synthetic group `(unattributed)`. Agent names are unique
+per tenant only — combine with a `tenant` filter or `group_by=tenant,agent`
+to disambiguate across tenants.
 
 Response:
 
