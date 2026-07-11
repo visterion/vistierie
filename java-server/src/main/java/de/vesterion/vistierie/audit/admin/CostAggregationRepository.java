@@ -16,7 +16,7 @@ import java.util.Set;
 public class CostAggregationRepository {
 
     private static final Set<String> ALLOWED_GROUP_BY = Set.of(
-            "tenant", "realm", "purpose", "provider", "model", "endpoint", "status");
+            "tenant", "realm", "purpose", "provider", "model", "endpoint", "status", "agent");
 
     private final JdbcClient jdbc;
 
@@ -74,6 +74,7 @@ public class CostAggregationRepository {
                 case "model"    -> "c.model";
                 case "endpoint" -> "c.endpoint";
                 case "status"   -> "c.status";
+                case "agent"    -> "COALESCE(a.name, '(unattributed)')";
                 default -> throw new IllegalStateException();
             };
             selects.add(col + " AS \"" + dim + "\"");
@@ -88,6 +89,9 @@ public class CostAggregationRepository {
 
         sql.append(String.join(", ", selects));
         sql.append(" FROM vistierie.llm_calls c JOIN vistierie.tenants t ON t.id = c.tenant_id");
+        if (q.groupBy().contains("agent")) {
+            sql.append(" LEFT JOIN vistierie.agents a ON a.id = c.agent_id");
+        }
         sql.append(" WHERE c.created_at >= ? AND c.created_at < ?");
 
         var params = new ArrayList<Object>();

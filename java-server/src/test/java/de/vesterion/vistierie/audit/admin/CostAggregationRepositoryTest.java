@@ -1,11 +1,13 @@
 package de.vesterion.vistierie.audit.admin;
 
 import de.vesterion.vistierie.PostgresTestBase;
+import de.vesterion.vistierie.agents.AgentRepository;
 import de.vesterion.vistierie.tenants.TenantRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import tools.jackson.databind.ObjectMapper;
 
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -20,7 +22,9 @@ class CostAggregationRepositoryTest extends PostgresTestBase {
 
     @Autowired CostAggregationRepository repo;
     @Autowired TenantRepository tenants;
+    @Autowired AgentRepository agents;
     @Autowired JdbcClient jdbc;
+    @Autowired ObjectMapper mapper;
 
     UUID tA, tB;
     String nameA, nameB;
@@ -45,6 +49,16 @@ class CostAggregationRepositoryTest extends PostgresTestBase {
                 VALUES (?, ?, ?, ?, ?, ?, 'complete', ?, 0, ?, 'ok', ?)
                 """).params(UUID.randomUUID().toString(), tenantId, purpose, realm,
                             provider, model, inputTokens, costMicros,
+                            Timestamp.from(createdAt)).update();
+    }
+
+    private void seedCallWithAgent(UUID tenantId, UUID agentId, long costMicros, Instant createdAt) {
+        jdbc.sql("""
+                INSERT INTO vistierie.llm_calls
+                  (id, tenant_id, agent_id, purpose, provider, model, endpoint,
+                   input_tokens, output_tokens, cost_micros, status, created_at)
+                VALUES (?, ?, ?, 'p', 'anthropic', 'haiku', 'complete', 10, 0, ?, 'ok', ?)
+                """).params(UUID.randomUUID().toString(), tenantId, agentId, costMicros,
                             Timestamp.from(createdAt)).update();
     }
 
@@ -141,5 +155,34 @@ class CostAggregationRepositoryTest extends PostgresTestBase {
                 null, null, null, null, null, null, null);
         assertThatThrownBy(() -> repo.query(q))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void groupByAgentSplitsNamedAndUnattributed() {
+        var t0 = Instant.now().minus(1, ChronoUnit.HOURS);
+        var agentId = UUID.randomUUID();
+        var agentName = "cost-agent-" + agentId.toString().substring(0, 8);
+        agents.insert(agentId, tA, agentName, "sys", "routine",
+                mapper.createArrayNode(), null, 5, 60, "wt", false,
+                null, null, null, null, null, null);
+
+        seedCallWithAgent(tA, agentId, 500, t0);
+        seedCallWithAgent(tA, agentId, 250, t0.plus(10, ChronoUnit.MINUTES));
+        seedCall(tA, "p", null, "anthropic", "haiku", 100, 50, t0); // agent_id NULL
+
+        var q = new CostAggregationRepository.Query(
+                t0.minus(1, ChronoUnit.HOURS), Instant.now().plus(1, ChronoUnit.HOURS),
+                "none", List.of("agent"),
+                nameA, null, null, null, null, null, null);
+        var rows = repo.query(q);
+
+        assertThat(rows).hasSize(2);
+        var byAgent = rows.stream().collect(java.util.stream.Collectors.toMap(
+                r -> r.groupValues().get("agent"), r -> r));
+        assertThat(byAgent).containsOnlyKeys(agentName, "(unattributed)");
+        assertThat(byAgent.get(agentName).calls()).isEqualTo(2);
+        assertThat(byAgent.get(agentName).costMicros()).isEqualTo(750);
+        assertThat(byAgent.get("(unattributed)").calls()).isEqualTo(1);
+        assertThat(byAgent.get("(unattributed)").costMicros()).isEqualTo(100);
     }
 }

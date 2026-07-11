@@ -103,4 +103,23 @@ class AdminCostControllerTest extends PostgresTestBase {
         mvc.perform(get("/admin/cost").header("Authorization", "Bearer tenant"))
                 .andExpect(status().isUnauthorized());
     }
+
+    @Test
+    void groupByAgentReturnsUnattributedForNullAgentId() throws Exception {
+        var t0 = Instant.now().minus(1, ChronoUnit.HOURS);
+        seedCall(100, t0, "haiku"); // seeds without agent_id
+
+        mvc.perform(get("/admin/cost?granularity=none&group_by=agent&tenant=" + tenantName)
+                        .header("Authorization", "Bearer " + ADMIN))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.buckets[0].groups[0].dimensions.agent").value("(unattributed)"))
+                .andExpect(jsonPath("$.buckets[0].groups[0].cost_micros").value(100));
+    }
+
+    @Test
+    void unknownGroupByReturns400() throws Exception {
+        mvc.perform(get("/admin/cost?group_by=nonsense")
+                        .header("Authorization", "Bearer " + ADMIN))
+                .andExpect(status().isBadRequest());
+    }
 }
