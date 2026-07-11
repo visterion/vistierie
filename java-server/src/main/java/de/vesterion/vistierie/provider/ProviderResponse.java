@@ -8,9 +8,15 @@ public record ProviderResponse(
         String stopReason,
         Usage usage,
         String model,
-        JsonNode contentBlocks
+        JsonNode contentBlocks,
+        String sessionId
 ) {
     public ProviderResponse(String text, String stopReason, Usage usage, String model) {
-        this(text, stopReason, usage, model, null);
+        this(text, stopReason, usage, model, null, null);
+    }
+
+    public ProviderResponse(String text, String stopReason, Usage usage, String model,
+                            JsonNode contentBlocks) {
+        this(text, stopReason, usage, model, contentBlocks, null);
     }
 }
