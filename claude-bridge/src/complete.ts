@@ -344,6 +344,11 @@ function startSession(
     maxTurns: 100,
     settingSources: [],
     mcpServers: { vistierie: mcpServer },
+    // `tools: []` disables ALL built-in tools (availability filter); MCP tools
+    // from `mcpServers` are unaffected. `allowedTools` is only the permission
+    // auto-allow list, so both are needed: without `tools: []` the built-ins
+    // would still be offered to the model.
+    tools: [],
     allowedTools: toolDefs.map((t) => `mcp__vistierie__${t.name}`),
     abortController: controller,
   };
@@ -371,13 +376,17 @@ function startSession(
 
   let session: Session;
   try {
-    session = store.create({ abort: controller, iterator, pending });
+    session = store.create({
+      abort: controller,
+      iterator,
+      pending,
+      runtime: { matcher, closeInput },
+    });
   } catch (err) {
     // At cap (or any create failure): abort so the spawned CLI child is torn down.
     controller.abort();
     throw err;
   }
-  session.runtime = { matcher, closeInput };
 
   return runWithGuards(req, opts, store, session);
 }
@@ -388,6 +397,16 @@ function continueSession(
   store: SessionStore,
   session: Session,
 ): Promise<CompleteResponse> {
+  // Reject concurrent continues before touching any pending state: one iterator
+  // must never be pumped by two HTTP calls at once.
+  if (session.busy) {
+    throw new BridgeError(
+      409,
+      "session_busy",
+      `session ${session.id} already has a request in flight`,
+    );
+  }
+
   const last = req.messages[req.messages.length - 1];
   const results = Array.isArray(last?.content)
     ? (last.content as Array<Record<string, unknown>>).filter((b) => b.type === "tool_result")
@@ -448,7 +467,7 @@ async function pump(
       // Assistant text with no tool_use (e.g. interstitial thinking) — keep going.
     }
     if (msg.type === "result") {
-      session.runtime?.closeInput();
+      session.runtime!.closeInput();
       store.close(session.id);
       return resultToResponse(msg, req.model);
     }
@@ -457,8 +476,11 @@ async function pump(
 
 /**
  * Apply the per-HTTP-call timeout + client-disconnect race around a pump. On
- * either failure the session is closed (aborting the query and failing any
- * parked handlers). On a successful tool_use return the session stays live.
+ * any failure (timeout, client disconnect, or the pump itself erroring) the
+ * session is closed (aborting the query and failing any parked handlers) — a
+ * dead iterator must not linger in the store, so the caller's next attempt
+ * takes the replay path instead. On a successful tool_use return the session
+ * stays live. Marks the session busy for the duration (see continueSession).
  */
 async function runWithGuards(
   req: CompleteRequest,
@@ -489,11 +511,21 @@ async function runWithGuards(
     else opts.signal.addEventListener("abort", clientAbort, { once: true });
   }
 
+  session.busy = true;
+  const pumping = pump(req, store, session);
+  // If the failure branch wins the race, the losing pump promise may still
+  // reject later (e.g. the aborted iterator throws) — swallow that so it never
+  // surfaces as an unhandledRejection.
+  pumping.catch(() => {});
   try {
-    return await Promise.race([pump(req, store, session), failure]);
+    return await Promise.race([pumping, failure]);
   } catch (err) {
+    // Pump errors (rejected iterator, SDK error result) as well as
+    // timeout/disconnect must not leave a dead session in the store.
+    store.close(session.id);
     throw mapSdkError(err);
   } finally {
+    session.busy = false;
     clearTimeout(timer);
     opts.signal?.removeEventListener("abort", clientAbort);
   }
