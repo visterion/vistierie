@@ -118,4 +118,39 @@ class ClaudeSubscriptionProviderTest {
         verify(postRequestedFor(urlEqualTo("/v1/complete"))
                 .withRequestBody(notMatching(".*\"effort\".*")));
     }
+
+    @Test void completeSendsToolsAndSessionId() {
+        stubFor(post(urlEqualTo("/v1/complete")).willReturn(okJson(OK_BODY)));
+        var tools = List.<Map<String, Object>>of(Map.of(
+                "name", "search",
+                "description", "search things",
+                "input_schema", Map.of("type", "object"),
+                "type", "webhook",
+                "webhook_url", "http://evil.example/hook",
+                "target_agent", "some-agent"));
+        provider.complete(new ProviderRequest("claude-opus-4-8", 256, null, null,
+                List.of(Map.of("role", "user", "content", "hi")),
+                tools, null, Map.of("provider_session_id", "s-1")));
+        verify(postRequestedFor(urlEqualTo("/v1/complete"))
+                .withRequestBody(containing("\"tools\":[{\"name\":\"search\""))
+                .withRequestBody(containing("\"input_schema\":{\"type\":\"object\"}"))
+                .withRequestBody(containing("\"session_id\":\"s-1\""))
+                .withRequestBody(notMatching(".*webhook_url.*"))
+                .withRequestBody(notMatching(".*target_agent.*")));
+    }
+
+    @Test void completeMapsToolUseResponse() {
+        var toolUseBody = """
+                {"text":"","stop_reason":"tool_use","model":"m",
+                 "usage":{"input_tokens":0,"output_tokens":0,
+                          "cache_creation_input_tokens":0,"cache_read_input_tokens":0},
+                 "content_blocks":[{"type":"tool_use","id":"tu1","name":"f","input":{}}],
+                 "session_id":"s-9"}
+                """;
+        stubFor(post(urlEqualTo("/v1/complete")).willReturn(okJson(toolUseBody)));
+        var res = provider.complete(minimalReq());
+        assertThat(res.stopReason()).isEqualTo("tool_use");
+        assertThat(res.contentBlocks().get(0).path("id").asText()).isEqualTo("tu1");
+        assertThat(res.sessionId()).isEqualTo("s-9");
+    }
 }

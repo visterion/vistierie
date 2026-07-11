@@ -33,6 +33,19 @@ public class ClaudeSubscriptionProvider implements LlmProvider {
         if (req.system() != null && !req.system().isEmpty()) body.put("system", req.system());
         if (req.effort() != null) body.put("effort", req.effort());
         body.put("messages", req.messages());
+        if (req.tools() != null && !req.tools().isEmpty()) {
+            var wireTools = new ArrayList<Map<String, Object>>();
+            for (var t : req.tools()) {
+                var wt = new LinkedHashMap<String, Object>();
+                wt.put("name", t.get("name"));
+                if (t.get("description") != null) wt.put("description", t.get("description"));
+                if (t.get("input_schema") != null) wt.put("input_schema", t.get("input_schema"));
+                wireTools.add(wt);
+            }
+            body.put("tools", wireTools);
+        }
+        Object sessionId = req.metadata() == null ? null : req.metadata().get("provider_session_id");
+        if (sessionId != null) body.put("session_id", sessionId);
         return call(body);
     }
 
@@ -110,10 +123,14 @@ public class ClaudeSubscriptionProvider implements LlmProvider {
                 Math.max(0, u.path("output_tokens").asInt(0)),
                 Math.max(0, u.path("cache_creation_input_tokens").asInt(0)),
                 Math.max(0, u.path("cache_read_input_tokens").asInt(0)));
+        JsonNode contentBlocks = resp.has("content_blocks") ? resp.get("content_blocks") : null;
+        String sessionId = resp.has("session_id") ? resp.path("session_id").asText(null) : null;
         return new ProviderResponse(
                 resp.path("text").asText(""),
                 resp.path("stop_reason").asText("end_turn"),
                 usage,
-                resp.path("model").asText(""));
+                resp.path("model").asText(""),
+                contentBlocks,
+                sessionId);
     }
 }
