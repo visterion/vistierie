@@ -222,6 +222,20 @@ async function completePlain(
 // Tool mode: start / continue / replay over a parked SDK session.
 // ---------------------------------------------------------------------------
 
+/**
+ * The SDK exposes in-process MCP tools to the model as
+ * `mcp__<serverName>__<toolName>`, and assistant tool_use blocks come back with
+ * that fully qualified name. The Java caller only knows the bare tool name, so
+ * every observed tool_use name is normalized by stripping this prefix — both in
+ * the content_blocks returned on the wire and in what the FIFO matcher
+ * registers (MCP handlers park under the bare name).
+ */
+const MCP_PREFIX = "mcp__vistierie__";
+
+function stripPrefix(name: string): string {
+  return name.startsWith(MCP_PREFIX) ? name.slice(MCP_PREFIX.length) : name;
+}
+
 interface Slot {
   promise: Promise<ToolResult>;
   resolve: (r: ToolResult) => void;
@@ -349,7 +363,7 @@ function startSession(
     // auto-allow list, so both are needed: without `tools: []` the built-ins
     // would still be offered to the model.
     tools: [],
-    allowedTools: toolDefs.map((t) => `mcp__vistierie__${t.name}`),
+    allowedTools: toolDefs.map((t) => `${MCP_PREFIX}${t.name}`),
     abortController: controller,
   };
   applyModelKnobs(options, req);
@@ -449,7 +463,11 @@ async function pump(
       throw new BridgeError(500, "no_result", "SDK stream ended without a result message");
     }
     if (msg.type === "assistant") {
-      const blocks = (msg.message?.content ?? []) as ContentBlockWire[];
+      // Strip the MCP server prefix from tool_use names; all other blocks
+      // (text, thinking, ...) pass through untouched.
+      const blocks = ((msg.message?.content ?? []) as ContentBlockWire[]).map((b) =>
+        b.type === "tool_use" ? { ...b, name: stripPrefix(String(b.name)) } : b,
+      );
       const toolUses = blocks.filter((b) => b.type === "tool_use");
       if (toolUses.length > 0) {
         for (const tu of toolUses) {

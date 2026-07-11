@@ -52,7 +52,8 @@ describe("tool-start", () => {
       sdkStream([
         {
           type: "assistant",
-          message: { content: [{ type: "tool_use", id: "tu_1", name: "fetch_x", input: { a: 1 } }] },
+          // The real SDK emits the fully qualified MCP name.
+          message: { content: [{ type: "tool_use", id: "tu_1", name: "mcp__vistierie__fetch_x", input: { a: 1 } }] },
         },
         { type: "result", subtype: "success", result: "done", usage },
       ]),
@@ -70,6 +71,7 @@ describe("tool-start", () => {
 
     expect(res.stop_reason).toBe("tool_use");
     expect(res.text).toBe("");
+    // The wire response carries the UNPREFIXED name the Java caller knows.
     expect(res.content_blocks?.[0]).toMatchObject({ type: "tool_use", id: "tu_1", name: "fetch_x" });
     expect(res.session_id).toBeTruthy();
     expect(res.usage).toEqual({
@@ -159,7 +161,7 @@ describe("tool-start", () => {
     });
   });
 
-  it("associates two same-name tool_use blocks FIFO with their handlers", async () => {
+  it("associates two same-name tool_use blocks FIFO with their handlers (unprefixed names pass through)", async () => {
     queryMock.mockReturnValue(
       sdkStream([
         {
@@ -185,6 +187,9 @@ describe("tool-start", () => {
       { sessions: store },
     );
     expect(start.content_blocks).toHaveLength(2);
+    // A name WITHOUT the MCP prefix must pass through unchanged.
+    expect(start.content_blocks?.[0]).toMatchObject({ name: "fetch_x" });
+    expect(start.content_blocks?.[1]).toMatchObject({ name: "fetch_x" });
 
     // Two handler invocations for the same tool name, in emission order.
     const registered = toolMock.mock.results[0].value as { handler: (a: unknown, e: unknown) => Promise<unknown> };
@@ -219,7 +224,8 @@ describe("tool-continue", () => {
       sdkStream([
         {
           type: "assistant",
-          message: { content: [{ type: "tool_use", id: "tu_1", name: "fetch_x", input: { a: 1 } }] },
+          // Fully qualified MCP name, as the real SDK emits it.
+          message: { content: [{ type: "tool_use", id: "tu_1", name: "mcp__vistierie__fetch_x", input: { a: 1 } }] },
         },
         { type: "result", subtype: "success", result: "the answer", usage },
       ]),
@@ -234,8 +240,11 @@ describe("tool-continue", () => {
       },
       { sessions: store },
     );
+    expect(start.content_blocks?.[0]).toMatchObject({ name: "fetch_x" });
 
     // The SDK would invoke this; drive it manually to assert it resolves.
+    // The handler parks under the BARE tool name; the prefixed tool_use must
+    // still pair with it via the matcher (name normalized before registering).
     const registered = toolMock.mock.results[0].value as { handler: (a: unknown, e: unknown) => Promise<unknown> };
     const handlerPromise = registered.handler({ a: 1 }, {});
 
