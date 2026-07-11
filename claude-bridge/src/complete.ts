@@ -20,6 +20,16 @@ export function flattenMessages(
       for (const block of m.content as Array<Record<string, unknown>>) {
         if (block.type === "text") {
           blocks.push({ type: "text", text: prefix + String(block.text) });
+        } else if (block.type === "tool_use") {
+          blocks.push({
+            type: "text",
+            text: `${prefix}[tool_use ${String(block.id)}] ${String(block.name)} ${JSON.stringify(block.input ?? {})}`,
+          });
+        } else if (block.type === "tool_result") {
+          blocks.push({
+            type: "text",
+            text: `${prefix}[tool_result ${String(block.tool_use_id)}] ${JSON.stringify(block.content ?? null)}`,
+          });
         } else {
           blocks.push(block);
         }
