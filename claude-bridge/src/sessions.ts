@@ -7,11 +7,34 @@ export interface PendingTool {
   resolve: (result: { content: unknown; isError: boolean }) => void;
 }
 
+export interface ToolResult {
+  content: unknown;
+  isError: boolean;
+}
+
+/**
+ * Per-session runtime state that outlives a single HTTP call: the FIFO matcher
+ * that pairs parked MCP tool-handler invocations with observed tool_use blocks,
+ * and the resolver that closes the SDK prompt input stream. Populated by the
+ * bridge in tool mode; absent for plain (session-less) completions.
+ */
+export interface SessionRuntime {
+  matcher: {
+    /** Called when a tool_use block is observed on an assistant message. */
+    registerPending: (block: { id: string; name: string }) => void;
+    /** Called by an MCP tool handler; resolves once the continue call answers. */
+    takeHandlerSlot: (name: string) => Promise<ToolResult>;
+  };
+  /** Resolves the prompt generator's tail await so the SDK can shut down. */
+  closeInput: () => void;
+}
+
 export interface Session {
   id: string;
   abort: AbortController;
   iterator: AsyncIterator<Record<string, any>>;
   pending: Map<string, PendingTool>;
+  runtime?: SessionRuntime;
   createdAt: number;
   touchedAt: number;
 }
