@@ -127,10 +127,24 @@ fallback provider is called with the same overridden model, not with
 `fallback_model`, unless `fallback_model` was itself the effective model.
 See `RoutingDecision` for the exact precedence.
 
-Both attempts are recorded as separate rows in `llm_calls`: one for the
-primary provider/model and, if triggered, one for the fallback
-provider/model. This keeps per-provider cost and latency accounting exact
-even when a fallback occurred.
+For `/llm/complete` both attempts are recorded as separate rows in
+`llm_calls`: one for the primary provider/model and, if triggered, one for
+the fallback provider/model. This keeps per-provider cost and latency
+accounting exact even when a fallback occurred.
+
+### Fallback for agent runs
+
+The same fallback applies to **agent runs**: each turn of the agent loop
+resolves its rule and, on a retryable primary failure (429, ≥ 500, or an
+unsupported-operation error), retries that turn once against the rule's
+`(fallback_provider, fallback_model)`. This lets subscription-routed runs
+survive a claude-bridge outage by continuing on the configured API-key
+fallback (e.g. Bedrock). A `provider_fallback` run event records the
+switch. Only the provider that actually served the turn is written to
+`llm_calls` (one row per turn). Provider-specific session state (the
+subscription bridge's `session_id`) is **not** carried across a fallback —
+the session id is reset, so the fallback provider is never sent a session
+it did not issue.
 
 ## Reasoning effort
 

@@ -30,9 +30,23 @@ multi-image vision (`/llm/vision-multi`), tool use, and batch processing.
 
 Talks to the `claude-bridge` sidecar over plain HTTP (`POST /v1/complete`), which in
 turn calls the Claude Agent SDK authenticated with a Claude Max subscription token
-instead of a per-token API key. Supports text completion, vision, and multi-image
-vision (`/llm/vision-multi`). **No batch support** — batch traffic always stays on
-the `anthropic` (API-key) provider.
+instead of a per-token API key. Supports text completion, vision, multi-image
+vision (`/llm/vision-multi`), and tool use. **No batch support** — batch traffic
+always stays on the `anthropic` (API-key) provider.
+
+**Tool use (bridge sessions):** when `ProviderRequest.tools()` is non-empty, the
+provider forwards a `tools` array on `/v1/complete` containing only the wire-safe
+keys (`name`, `description`, `input_schema`) — Vistierie's internal `ToolDef` keys
+(`type`, `webhook_url`, `target_agent`, ...) are stripped and never sent to the
+bridge. The bridge may respond with `stop_reason: "tool_use"`, a Claude-style
+`content_blocks` array (including `{type: "tool_use", id, name, input}` entries),
+and a `session_id`. Vistierie surfaces both on `ProviderResponse` (`contentBlocks`,
+`sessionId`). `session_id` is transport-internal to the bridge conversation: to
+continue a tool-use turn, the caller passes it back via
+`ProviderRequest.metadata().get("provider_session_id")`, which the provider
+forwards as `session_id` on the next `/v1/complete` call. This requires a current
+`claude-bridge` image with tool-session support — an older bridge ignores the
+`tools`/`session_id` fields.
 
 On `/v1/complete` the bridge request accepts an optional `effort` field
 (`off`, `low`, `medium`, `high`, `max`), forwarded only for text completion

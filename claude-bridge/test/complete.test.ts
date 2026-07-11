@@ -47,6 +47,20 @@ describe("flattenMessages", () => {
     ]);
     expect(blocks).toEqual([]);
   });
+
+  it("renders tool_use blocks as text", () => {
+    const blocks = flattenMessages([
+      { role: "assistant", content: [{ type: "tool_use", id: "tu_1", name: "fetch_x", input: { a: 1 } }] },
+    ]);
+    expect(blocks).toEqual([{ type: "text", text: '[assistant]\n[tool_use tu_1] fetch_x {"a":1}' }]);
+  });
+
+  it("renders tool_result blocks as text", () => {
+    const blocks = flattenMessages([
+      { role: "user", content: [{ type: "tool_result", tool_use_id: "tu_1", content: { ok: true } }] },
+    ]);
+    expect(blocks).toEqual([{ type: "text", text: '[tool_result tu_1] {"ok":true}' }]);
+  });
 });
 
 describe("complete", () => {
