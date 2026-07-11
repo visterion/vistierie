@@ -39,6 +39,13 @@ public record BudgetStatusResponse(
         return new BudgetStatusResponse(null, null, null, null, 0L, 0L, null, null, false, false, false, false);
     }
 
+    /** Status for an agent without a configured budget policy: real usage, no caps. */
+    public static BudgetStatusResponse usageOnly(long dailyUsageMicros, long monthlyUsageMicros) {
+        return new BudgetStatusResponse(null, null, null, null,
+                dailyUsageMicros, monthlyUsageMicros,
+                null, null, false, false, false, false);
+    }
+
     private static Long remaining(Long capMicros, long usageMicros) {
         if (capMicros == null) return null;
         long remaining = capMicros - usageMicros;

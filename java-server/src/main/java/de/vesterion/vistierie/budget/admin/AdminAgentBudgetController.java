@@ -41,12 +41,10 @@ public class AdminAgentBudgetController {
                         .id(),
                 agent
         ).orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "agent not found: " + agent));
+        var current = usage.usageForAgent(resolved.id(), Instant.now());
         return budgets.findByAgentId(resolved.id())
-                .map(policy -> {
-                    var current = usage.usageForAgent(resolved.id(), Instant.now());
-                    return BudgetStatusResponse.fromPolicy(policy, current.dailyMicros(), current.monthlyMicros());
-                })
-                .orElseGet(BudgetStatusResponse::empty);
+                .map(policy -> BudgetStatusResponse.fromPolicy(policy, current.dailyMicros(), current.monthlyMicros()))
+                .orElseGet(() -> BudgetStatusResponse.usageOnly(current.dailyMicros(), current.monthlyMicros()));
     }
 
     @PatchMapping
@@ -61,12 +59,10 @@ public class AdminAgentBudgetController {
         try {
             var req = BudgetPatchRequest.fromJson(body);
             budgets.patch(resolved.id(), req);
+            var current = usage.usageForAgent(resolved.id(), Instant.now());
             return budgets.findByAgentId(resolved.id())
-                    .map(policy -> {
-                        var current = usage.usageForAgent(resolved.id(), Instant.now());
-                        return BudgetStatusResponse.fromPolicy(policy, current.dailyMicros(), current.monthlyMicros());
-                    })
-                    .orElseGet(BudgetStatusResponse::empty);
+                    .map(policy -> BudgetStatusResponse.fromPolicy(policy, current.dailyMicros(), current.monthlyMicros()))
+                    .orElseGet(() -> BudgetStatusResponse.usageOnly(current.dailyMicros(), current.monthlyMicros()));
         } catch (IllegalArgumentException | DataIntegrityViolationException e) {
             throw new ResponseStatusException(BAD_REQUEST, e.getMessage());
         }
