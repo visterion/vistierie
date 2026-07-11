@@ -200,4 +200,27 @@ class AdminAgentBudgetControllerTest extends PostgresTestBase {
                                 """))
                 .andExpect(status().isBadRequest());
     }
+
+    @Test
+    void getWithoutPolicyStillReportsUsage() throws Exception {
+        insertCall(600L, Instant.now().minusSeconds(60));
+        insertCall(200L, Instant.now().minusSeconds(120));
+
+        var fetched = mvc.perform(get("/admin/tenants/" + tenantName + "/agents/" + agentName + "/budget")
+                        .header("Authorization", ADMIN_HEADER))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        var node = mapper.readTree(fetched);
+        assertThat(node.path("daily_cap_micros").isNull()).isTrue();
+        assertThat(node.path("monthly_cap_micros").isNull()).isTrue();
+        assertThat(node.path("daily_warn_percent").isNull()).isTrue();
+        assertThat(node.path("monthly_warn_percent").isNull()).isTrue();
+        assertThat(node.path("daily_usage_micros").asLong()).isEqualTo(800L);
+        assertThat(node.path("monthly_usage_micros").asLong()).isEqualTo(800L);
+        assertThat(node.path("daily_remaining_micros").isNull()).isTrue();
+        assertThat(node.path("monthly_remaining_micros").isNull()).isTrue();
+        assertThat(node.path("daily_warned").asBoolean()).isFalse();
+        assertThat(node.path("daily_blocked").asBoolean()).isFalse();
+    }
 }
