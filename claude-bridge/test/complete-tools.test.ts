@@ -86,6 +86,130 @@ describe("tool-start", () => {
     const opts = queryMock.mock.calls[0][0].options;
     expect(opts.allowedTools).toEqual(["mcp__vistierie__fetch_x"]);
     expect(opts.mcpServers).toHaveProperty("vistierie");
+    // Built-in tools must be disabled entirely (`tools` is the availability
+    // filter; `allowedTools` is only the permission auto-allow list).
+    expect(opts.tools).toEqual([]);
+  });
+
+  it("resolves a handler invoked BEFORE the assistant message is observed (reverse-order handshake)", async () => {
+    // Gate the stream so the pump cannot observe the assistant tool_use until
+    // the test has already invoked the MCP handler.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let i = 0;
+    queryMock.mockReturnValue({
+      [Symbol.asyncIterator]() {
+        return {
+          next: async () => {
+            if (i === 0) {
+              i++;
+              await gate;
+              return {
+                done: false,
+                value: {
+                  type: "assistant",
+                  message: { content: [{ type: "tool_use", id: "tu_1", name: "fetch_x", input: {} }] },
+                },
+              };
+            }
+            if (i === 1) {
+              i++;
+              return { done: false, value: { type: "result", subtype: "success", result: "fin", usage } };
+            }
+            return { done: true, value: undefined };
+          },
+        };
+      },
+    });
+
+    const store = new SessionStore();
+    const startP = complete(
+      {
+        model: "m",
+        tools: [{ name: "fetch_x", input_schema: { type: "object", properties: {} } }],
+        messages: [{ role: "user", content: "go" }],
+      },
+      { sessions: store },
+    );
+
+    // The tool is registered synchronously during complete(); invoke its
+    // handler now — before the pump has seen the tool_use block.
+    const registered = toolMock.mock.results[0].value as { handler: (a: unknown, e: unknown) => Promise<unknown> };
+    const handlerPromise = registered.handler({}, {});
+    release();
+
+    const start = await startP;
+    expect(start.stop_reason).toBe("tool_use");
+
+    const cont = await complete(
+      {
+        model: "m",
+        session_id: start.session_id,
+        messages: [{ role: "user", content: [{ type: "tool_result", tool_use_id: "tu_1", content: "reverse-ok" }] }],
+      },
+      { sessions: store },
+    );
+    expect(cont.text).toBe("fin");
+
+    await expect(handlerPromise).resolves.toEqual({
+      content: [{ type: "text", text: "reverse-ok" }],
+      isError: false,
+    });
+  });
+
+  it("associates two same-name tool_use blocks FIFO with their handlers", async () => {
+    queryMock.mockReturnValue(
+      sdkStream([
+        {
+          type: "assistant",
+          message: {
+            content: [
+              { type: "tool_use", id: "tu_1", name: "fetch_x", input: { n: 1 } },
+              { type: "tool_use", id: "tu_2", name: "fetch_x", input: { n: 2 } },
+            ],
+          },
+        },
+        { type: "result", subtype: "success", result: "fin", usage },
+      ]),
+    );
+
+    const store = new SessionStore();
+    const start = await complete(
+      {
+        model: "m",
+        tools: [{ name: "fetch_x", input_schema: { type: "object", properties: {} } }],
+        messages: [{ role: "user", content: "go" }],
+      },
+      { sessions: store },
+    );
+    expect(start.content_blocks).toHaveLength(2);
+
+    // Two handler invocations for the same tool name, in emission order.
+    const registered = toolMock.mock.results[0].value as { handler: (a: unknown, e: unknown) => Promise<unknown> };
+    const first = registered.handler({ n: 1 }, {});
+    const second = registered.handler({ n: 2 }, {});
+
+    await complete(
+      {
+        model: "m",
+        session_id: start.session_id,
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "tool_result", tool_use_id: "tu_1", content: "result-for-1" },
+              { type: "tool_result", tool_use_id: "tu_2", content: "result-for-2" },
+            ],
+          },
+        ],
+      },
+      { sessions: store },
+    );
+
+    await expect(first).resolves.toEqual({ content: [{ type: "text", text: "result-for-1" }], isError: false });
+    await expect(second).resolves.toEqual({ content: [{ type: "text", text: "result-for-2" }], isError: false });
   });
 });
 
@@ -224,6 +348,114 @@ describe("plain mode regression", () => {
     const opts = queryMock.mock.calls[0][0].options;
     expect(opts.maxTurns).toBe(1);
     expect(opts.mcpServers).toBeUndefined();
+  });
+});
+
+describe("pump error handling", () => {
+  it("closes the session when the SDK iterator rejects mid-pump", async () => {
+    let i = 0;
+    queryMock.mockReturnValue({
+      [Symbol.asyncIterator]() {
+        return {
+          next: async () => {
+            if (i === 0) {
+              i++;
+              return {
+                done: false,
+                value: {
+                  type: "assistant",
+                  message: { content: [{ type: "tool_use", id: "tu_1", name: "fetch_x", input: {} }] },
+                },
+              };
+            }
+            throw new Error("stream exploded");
+          },
+        };
+      },
+    });
+
+    const store = new SessionStore();
+    const start = await complete(
+      {
+        model: "m",
+        tools: [{ name: "fetch_x", input_schema: { type: "object", properties: {} } }],
+        messages: [{ role: "user", content: "go" }],
+      },
+      { sessions: store },
+    );
+    expect(store.size()).toBe(1);
+
+    await expect(
+      complete(
+        {
+          model: "m",
+          session_id: start.session_id,
+          messages: [{ role: "user", content: [{ type: "tool_result", tool_use_id: "tu_1", content: "x" }] }],
+        },
+        { sessions: store },
+      ),
+    ).rejects.toMatchObject({ status: 500, code: "sdk_error" });
+    // The dead session must not linger; the caller's retry takes the replay path.
+    expect(store.size()).toBe(0);
+  });
+});
+
+describe("concurrent continue (session_busy)", () => {
+  it("rejects a second continue while a pump is in flight with 409", async () => {
+    let i = 0;
+    queryMock.mockReturnValue({
+      [Symbol.asyncIterator]() {
+        return {
+          next: () => {
+            if (i === 0) {
+              i++;
+              return Promise.resolve({
+                done: false,
+                value: {
+                  type: "assistant",
+                  message: { content: [{ type: "tool_use", id: "tu_1", name: "fetch_x", input: {} }] },
+                },
+              });
+            }
+            return new Promise<never>(() => {}); // hang: keeps the first continue pumping
+          },
+        };
+      },
+    });
+
+    const store = new SessionStore();
+    const start = await complete(
+      {
+        model: "m",
+        tools: [{ name: "fetch_x", input_schema: { type: "object", properties: {} } }],
+        messages: [{ role: "user", content: "go" }],
+      },
+      { sessions: store },
+    );
+
+    const contReq = {
+      model: "m",
+      session_id: start.session_id,
+      messages: [
+        { role: "user", content: [{ type: "tool_result", tool_use_id: "tu_1", content: "x" }] },
+      ],
+    };
+
+    // First continue starts pumping and blocks on the hanging iterator.
+    const p1 = complete(contReq, { sessions: store, timeoutMs: 100 });
+    p1.catch(() => {}); // settled below; avoid unhandled rejection ordering issues
+    await new Promise((r) => setImmediate(r)); // let the pump start
+
+    // Second concurrent continue on the same session → 409, session untouched.
+    await expect(complete(contReq, { sessions: store })).rejects.toMatchObject({
+      status: 409,
+      code: "session_busy",
+    });
+    expect(store.size()).toBe(1);
+
+    // The first continue times out and tears the session down.
+    await expect(p1).rejects.toMatchObject({ status: 504, code: "timeout" });
+    expect(store.size()).toBe(0);
   });
 });
 

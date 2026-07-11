@@ -35,6 +35,8 @@ export interface Session {
   iterator: AsyncIterator<Record<string, any>>;
   pending: Map<string, PendingTool>;
   runtime?: SessionRuntime;
+  /** True while an HTTP call is pumping this session's iterator (guards double-pump). */
+  busy: boolean;
   createdAt: number;
   touchedAt: number;
 }
@@ -62,7 +64,7 @@ export class SessionStore {
   }
 
   create(
-    s: Omit<Session, "id" | "createdAt" | "touchedAt">
+    s: Omit<Session, "id" | "busy" | "createdAt" | "touchedAt">
   ): Session {
     if (this.sessions.size >= this.cap) {
       throw new BridgeError(
@@ -78,6 +80,8 @@ export class SessionStore {
       abort: s.abort,
       iterator: s.iterator,
       pending: s.pending,
+      runtime: s.runtime,
+      busy: false,
       createdAt: now,
       touchedAt: now,
     };
