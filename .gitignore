@@ -2,6 +2,7 @@ docs/
 CLAUDE.md
 AGENTS.md
 TODO.md
+.mcp.json
 target/
 node_modules/
 dist/
