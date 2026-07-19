@@ -192,7 +192,14 @@ async function completePlain(
   const options: Options = {
     model: req.model,
     systemPrompt: req.system ?? "",
-    maxTurns: 1,
+    // Plain completions have no tools (allowedTools: []), so the model cannot take
+    // agentic tool turns — the only turns the SDK/CLI consumes are the model's own
+    // thinking/effort steps. maxTurns:1 was too low: reasoning/high-effort completions
+    // spend the single turn thinking and abort before emitting the result ("Reached
+    // maximum number of turns (1)"), which surfaced as a 502 and forced a metered
+    // fallback. A small bound clears the thinking steps without enabling any loop.
+    // See docs/bugs/2026-07-19-claude-bridge-maxturns-plain-path.md
+    maxTurns: 8,
     allowedTools: [],
     settingSources: [],
     abortController: controller,
