@@ -100,7 +100,11 @@ describe("complete", () => {
     const opts = queryMock.mock.calls[0][0].options;
     expect(opts.model).toBe("claude-opus-4-8");
     expect(opts.systemPrompt).toBe("be brief");
-    expect(opts.maxTurns).toBe(1);
+    // maxTurns must be > 1: reasoning/high-effort plain completions spend the first
+    // turn thinking and abort at maxTurns:1 before emitting a result ("Reached maximum
+    // number of turns (1)"), forcing a metered fallback. allowedTools:[] forbids any
+    // tool loop, so a small bound is safe. See docs/bugs/2026-07-19-claude-bridge-maxturns-plain-path.md
+    expect(opts.maxTurns).toBe(8);
     expect(opts.allowedTools).toEqual([]);
   });
 
