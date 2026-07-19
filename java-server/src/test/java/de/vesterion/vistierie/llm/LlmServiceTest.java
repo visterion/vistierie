@@ -20,7 +20,10 @@ import de.vesterion.vistierie.routing.RoutingResolver;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import java.time.Instant;
 import java.util.List;
@@ -36,6 +39,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+@ExtendWith(OutputCaptureExtension.class)
 class LlmServiceTest {
 
     private final RoutingResolver routing = mock(RoutingResolver.class);
@@ -437,6 +441,40 @@ class LlmServiceTest {
         assertThat(res.response().text()).isEqualTo("ok");
         assertThat(res.response().cost_micros()).isGreaterThan(0L);
         assertThat(res.response().llm_call_id()).isNotBlank();
+    }
+
+    @Test void completeOkPathLogsProviderModelTokensAndCost(CapturedOutput output) {
+        when(routing.resolve(eq(tenantName), eq("test_realm"), eq("test_purpose"), eq(null)))
+                .thenReturn(new RoutingDecision("anthropic", "claude-haiku-4-5", false));
+        when(providers.get("anthropic")).thenReturn(provider);
+        when(provider.complete(any())).thenReturn(new ProviderResponse(
+                "ok", "end_turn", new Usage(10, 20, 0, 0), "claude-haiku-4-5"));
+
+        svc.complete(completeReq());
+
+        assertThat(output.getOut()).contains("LLM call")
+                .contains("status=ok")
+                .contains("provider=anthropic")
+                .contains("model=claude-haiku-4-5")
+                .contains("in=10")
+                .contains("out=20");
+    }
+
+    @Test void completeProvider5xxLogsFailureWarning(CapturedOutput output) {
+        when(routing.resolve(any(), any(), any(), any()))
+                .thenReturn(new RoutingDecision("anthropic", "claude-haiku-4-5", false));
+        when(providers.get("anthropic")).thenReturn(provider);
+        when(provider.complete(any())).thenThrow(
+                new LlmProvider.ProviderException(503, "overloaded", "down"));
+
+        assertThatThrownBy(() -> svc.complete(completeReq()))
+                .isInstanceOf(LlmProvider.ProviderException.class);
+
+        assertThat(output.getOut()).contains("LLM call FAILED")
+                .contains("provider=anthropic")
+                .contains("model=claude-haiku-4-5")
+                .contains("status=error")
+                .contains("error=overloaded");
     }
 
     @Test void apiProviderCallHasNullShadowCost() {
