@@ -355,7 +355,10 @@ describe("plain mode regression", () => {
     expect(store.size()).toBe(0);
     expect(createSdkMcpServerMock).not.toHaveBeenCalled();
     const opts = queryMock.mock.calls[0][0].options;
-    expect(opts.maxTurns).toBe(1);
+    // Plain path uses a small (>1) turn bound so thinking/effort completions can emit a
+    // result; allowedTools:[] still forbids any tool loop. See
+    // docs/bugs/2026-07-19-claude-bridge-maxturns-plain-path.md
+    expect(opts.maxTurns).toBe(8);
     expect(opts.mcpServers).toBeUndefined();
   });
 });
