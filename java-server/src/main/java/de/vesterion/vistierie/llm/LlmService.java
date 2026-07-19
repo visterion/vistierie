@@ -214,6 +214,11 @@ public class LlmService {
                 if (shadow != null) {
                     metrics.recordShadowCost(providerName, model, ctx.endpoint(), shadow);
                 }
+                log.info("LLM call id={} tenant={} agent={} purpose={} endpoint={} provider={} model={} "
+                                + "in={} out={} cost=${} shadow={} dur={}ms status=ok",
+                        id, ctx.tenantName(), ctx.agentName(), ctx.purpose(), ctx.endpoint(),
+                        providerName, model, pRes.usage().inputTokens(), pRes.usage().outputTokens(),
+                        usd(cost), shadow == null ? "-" : usd(shadow), dur);
                 return new InvocationResult(new LlmResponse(pRes.text(), pRes.stopReason(),
                         pRes.usage(), providerName, model, cost, id), ctx.budget());
             } catch (LlmProvider.ProviderException e) {
@@ -250,6 +255,15 @@ public class LlmService {
                 providerName, model, ctx.endpoint(),
                 0, 0, 0, 0, 0, null, dur, status, errorCode, null, null), pReq, null);
         metrics.record(providerName, model, ctx.endpoint(), status, dur, 0);
+        log.warn("LLM call FAILED id={} tenant={} agent={} purpose={} endpoint={} provider={} model={} "
+                        + "status={} error={} dur={}ms",
+                id, ctx.tenantName(), ctx.agentName(), ctx.purpose(), ctx.endpoint(),
+                providerName, model, status, errorCode, dur);
+    }
+
+    /** Formats a micros cost value as a decimal USD string, e.g. {@code 1500000} -> {@code "1.500000"}. */
+    private static String usd(long micros) {
+        return String.format("%.6f", micros / 1_000_000.0);
     }
 
     private static boolean shouldFallback(RuntimeException e) {

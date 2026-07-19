@@ -54,3 +54,8 @@ vistierie:
   audit:
     body-retention-days: 30
 
+logging:
+  level:
+    de.vesterion.vistierie.llm: ${VISTIERIE_LOG_LLM:INFO}
+    de.vesterion.vistierie.agent.runner: ${VISTIERIE_LOG_AGENT:INFO}
+

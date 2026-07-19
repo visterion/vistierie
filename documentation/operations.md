@@ -203,6 +203,30 @@ GROUP BY purpose
 ORDER BY eur DESC;
 ```
 
+### Per-call logs (`docker logs`)
+
+Beyond the audit table and Prometheus, every LLM call now emits one line to the
+service log, so `docker logs vistierie` shows model, tokens, cost and — crucially —
+whether the call ran on the free subscription or a metered provider, without a DB
+query:
+
+```
+LLM call id=… tenant=… agent=… purpose=… endpoint=complete provider=claude-subscription model=… in=1200 out=180 cost=$0.000000 shadow=0.013800 dur=920ms status=ok
+LLM call FAILED id=… tenant=… purpose=… provider=claude-subscription model=… status=error error=… dur=…ms
+LLM turn run=… turn=2 provider=… model=… in=… out=… cost=$… shadow=… stop_reason=…
+```
+
+Read `cost` vs `shadow`: a subscription call is `cost=$0` with a non-null `shadow`
+(what it *would* have cost metered — your realized saving); a metered call shows a
+real `cost` and `shadow=-`. A subscription `provider` on the FAILED/`error` line, or
+metered calls appearing where you expect subscription, means the subscription path
+is falling back (see the claude-bridge section and `vistierie_llm_fallback_total`).
+
+Log levels are env-tunable (default `INFO`): `VISTIERIE_LOG_LLM` for the gateway
+(`de.vesterion.vistierie.llm`) and `VISTIERIE_LOG_AGENT` for agent-run turns
+(`de.vesterion.vistierie.agent.runner`). Set `WARN` to quiet the per-call lines or
+`DEBUG` for more detail.
+
 ---
 
 ## Backup and restore ordering

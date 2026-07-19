@@ -259,6 +259,11 @@ public class AgentRunner {
                 // one. (end_turn responses return null, which is fine — the run ends.)
                 if (fellBack) providerSessionId = null;
                 else if (pRes.sessionId() != null) providerSessionId = pRes.sessionId();
+                log.info("LLM turn run={} turn={} provider={} model={} in={} out={} cost=${} shadow={} "
+                                + "stop_reason={}",
+                        runId, turn, usedProvider, usedModel,
+                        pRes.usage().inputTokens(), pRes.usage().outputTokens(),
+                        usd(cost), shadow == null ? "-" : usd(shadow), pRes.stopReason());
             } catch (BudgetException e) {
                 runs.markTerminal(runId, "failed", null, e.code() + ": " + e.getMessage(), null);
                 return;
@@ -456,6 +461,11 @@ public class AgentRunner {
         } catch (PriceTable.UnknownModelException e) {
             return null;
         }
+    }
+
+    /** Formats a micros cost value as a decimal USD string, e.g. {@code 1500000} -> {@code "1.500000"}. */
+    private static String usd(long micros) {
+        return String.format("%.6f", micros / 1_000_000.0);
     }
 
     private String summarize(String text) {
