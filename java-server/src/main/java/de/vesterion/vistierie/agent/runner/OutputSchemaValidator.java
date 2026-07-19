@@ -31,36 +31,38 @@ public class OutputSchemaValidator {
     public OutputSchemaValidator(JsonSchemas schemas) { this.schemas = schemas; }
 
     public JsonNode parseAndValidate(String text, JsonNode schema) {
-        JsonNode parsed = null;
-        String firstError = null;
-        String stage = null;
+        String firstParseError = null;
+        String firstSchemaError = null;
+        boolean anyParsed = false;
 
         for (Candidate cand : candidates(text)) {
+            JsonNode node;
             try {
-                JsonNode node = mapper.readTree(cand.value());
-                if (node == null || node.isMissingNode()) continue;
-                parsed = node;
-                stage = cand.stage();
-                break;
+                node = mapper.readTree(cand.value());
             } catch (Exception e) {
-                if (firstError == null) firstError = e.getMessage();
+                if (firstParseError == null) firstParseError = e.getMessage();
+                continue;
+            }
+            if (node == null || node.isMissingNode()) continue;
+            anyParsed = true;
+
+            var errors = schemas.validate(schema, node);
+            if (errors.isEmpty()) {
+                if (!"raw".equals(cand.stage())) {
+                    log.debug("output normalized via {}", cand.stage());
+                }
+                return node;
+            }
+            if (firstSchemaError == null) {
+                firstSchemaError = errors.stream().map(Object::toString)
+                        .reduce((a, b) -> a + "; " + b).orElse("");
             }
         }
 
-        if (parsed == null) {
-            throw new SchemaViolation("parse: " + firstError);
+        if (anyParsed) {
+            throw new SchemaViolation(firstSchemaError);
         }
-        if (!"raw".equals(stage)) {
-            log.debug("output normalized via {}", stage);
-        }
-
-        var errors = schemas.validate(schema, parsed);
-        if (!errors.isEmpty()) {
-            var msg = errors.stream().map(Object::toString)
-                    .reduce((a, b) -> a + "; " + b).orElse("");
-            throw new SchemaViolation(msg);
-        }
-        return parsed;
+        throw new SchemaViolation("parse: " + firstParseError);
     }
 
     private record Candidate(String stage, String value) {}

@@ -92,4 +92,26 @@ class OutputSchemaValidatorTest {
             .isInstanceOf(OutputSchemaValidator.SchemaViolation.class)
             .hasMessageNotContaining("parse:");
     }
+
+    @Test void strayArrayBeforeObjectSkipped() throws Exception {
+        // Live voievod repro: prose with a stray empty array before an un-fenced
+        // object output. Old code selected the stray [] (parses) and failed the
+        // object schema; new code skips it and returns the valid object.
+        var schema = M.readTree(
+            "{\"type\":\"object\",\"required\":[\"verdicts\"],\"properties\":"
+            + "{\"verdicts\":{\"type\":\"array\"}}}");
+        var text = "The clusters call returned an empty array (clusters: []).\n"
+            + "No corroboration possible.\n\n{ \"verdicts\": [] }";
+        var out = v.parseAndValidate(text, schema);
+        assertThat(out.has("verdicts")).isTrue();
+        assertThat(out.path("verdicts").isArray()).isTrue();
+    }
+
+    @Test void strayObjectFailingSchemaSkipped() throws Exception {
+        // A stray object that parses but fails the schema must not terminate the
+        // search when a later candidate validates.
+        var schema = M.readTree(NUM_SCHEMA);
+        var out = v.parseAndValidate("context {\"foo\":1} then {\"x\":1}", schema);
+        assertThat(out.path("x").asInt()).isEqualTo(1);
+    }
 }
