@@ -15,6 +15,23 @@ describe("mapSdkError", () => {
     }
   });
 
+  it("maps the weekly-limit prose to 429 subscription_exhausted", () => {
+    const e = mapSdkError(new Error("You've hit your weekly limit · resets 9am (UTC)"));
+    expect(e.status).toBe(429);
+    expect(e.code).toBe("subscription_exhausted");
+  });
+
+  it("does NOT classify unrelated 'limit' prose as a quota error", () => {
+    for (const msg of [
+      "the attacker breached your perimeter defense limit",
+      "We hit your target. Then a hard limit appeared",
+      "reached your goal; the sky is the limit",
+    ]) {
+      const e = mapSdkError(new Error(msg));
+      expect(e.code).not.toBe("subscription_exhausted");
+    }
+  });
+
   it("maps auth errors to 500 auth_expired", () => {
     for (const msg of [
       "OAuth token has expired",
