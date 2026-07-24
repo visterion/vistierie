@@ -55,6 +55,7 @@ fully flushed whenever tenant auth state changes (tenant create, kill, clear-kil
 | `vistierie.claude-subscription.enabled` | `CLAUDE_SUBSCRIPTION_ENABLED` | `false` | Set to `true` to enable the `claude-subscription` provider |
 | `vistierie.claude-subscription.base-url` | `CLAUDE_BRIDGE_URL` | `http://claude-bridge:8091` | Base URL of the `claude-bridge` sidecar |
 | `vistierie.claude-subscription.timeout-seconds` | — | `300` | HTTP read timeout, in seconds |
+| `vistierie.claude-subscription.cooldown-seconds` | `CLAUDE_SUBSCRIPTION_COOLDOWN_SECONDS` | `3600` | On a `subscription_exhausted` 429, opens a global in-memory cooldown for this many seconds; while open, calls whose primary provider is `claude-subscription` skip it and route straight to the configured fallback instead of re-attempting. Resets on restart. `0` or negative disables the cooldown (each call re-attempts + fails over per-call). |
 
 ---
 
