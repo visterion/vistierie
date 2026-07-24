@@ -81,6 +81,10 @@ and reachable at `base-url`.
 - Any other bridge/SDK failure (e.g. `auth_expired`, transport errors, malformed
   response) is surfaced as `ProviderException(502, <code>, ...)` so it behaves like
   a normal upstream outage for routing/fallback purposes.
+- A `subscription_exhausted` 429 also opens the global cooldown described in
+  `cooldown-seconds` below: further calls whose primary provider is
+  `claude-subscription` skip the bridge entirely and go straight to the
+  fallback provider until the cooldown elapses.
 
 **Timeout / cancellation:** The bridge bounds each SDK query at
 `BRIDGE_QUERY_TIMEOUT_MS` (default `290000` ms — just under the Java 300s read
@@ -96,6 +100,7 @@ it. A timeout is surfaced as HTTP `504` `{"error":{"code":"timeout",...}}`.
 | `vistierie.claude-subscription.enabled` | `CLAUDE_SUBSCRIPTION_ENABLED` | `false` | yes (to enable) |
 | `vistierie.claude-subscription.base-url` | `CLAUDE_BRIDGE_URL` | `http://claude-bridge:8091` | no |
 | `vistierie.claude-subscription.timeout-seconds` | — | `300` | no |
+| `vistierie.claude-subscription.cooldown-seconds` | `CLAUDE_SUBSCRIPTION_COOLDOWN_SECONDS` | `3600` | no |
 | _(bridge sidecar)_ query timeout | `BRIDGE_QUERY_TIMEOUT_MS` | `290000` | no |
 
 **Typical pairing:** a routing rule targets `claude-subscription` as the primary
