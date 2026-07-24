@@ -109,10 +109,11 @@ function resultToResponse(msg: Record<string, any>, model: string): CompleteResp
     const outputTokens = msg.usage?.output_tokens ?? 0;
     // A Max usage-limit reply arrives as a "success" result with 0 output tokens + limit
     // prose. Surface as 429 so Vistierie fails over to Bedrock instead of passing the limit
-    // text through (which fails the consumer's schema parse). output_tokens===0 guards
-    // against real content that merely mentions limits (tokens > 0). Placed in the shared
-    // resultToResponse so BOTH the plain and session/tool completion paths are covered.
-    if (outputTokens === 0 && QUOTA.test(text)) {
+    // text through (which fails the consumer's schema parse). msg.usage?.output_tokens===0
+    // (present-and-zero) guards against real content that merely mentions limits (tokens > 0)
+    // and against a missing/degenerate usage object being misread as zero. Placed in the
+    // shared resultToResponse so BOTH the plain and session/tool completion paths are covered.
+    if (msg.usage?.output_tokens === 0 && QUOTA.test(text)) {
       throw new BridgeError(429, "subscription_exhausted", text);
     }
     return {
