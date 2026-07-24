@@ -10,7 +10,7 @@ import {
   type ToolDefWire,
 } from "./types.js";
 import type { PendingTool, Session, SessionRuntime, SessionStore, ToolResult } from "./sessions.js";
-import { mapSdkError } from "./errors.js";
+import { mapSdkError, QUOTA } from "./errors.js";
 
 /**
  * Flatten the (opaque) Vistierie message history into one content-block list
@@ -105,13 +105,23 @@ function applyModelKnobs(options: Options, req: CompleteRequest): void {
 /** Map an SDK `result` message to the wire response (throws on error subtype). */
 function resultToResponse(msg: Record<string, any>, model: string): CompleteResponse {
   if (msg.subtype === "success") {
+    const text = String(msg.result ?? "");
+    const outputTokens = msg.usage?.output_tokens ?? 0;
+    // A Max usage-limit reply arrives as a "success" result with 0 output tokens + limit
+    // prose. Surface as 429 so Vistierie fails over to Bedrock instead of passing the limit
+    // text through (which fails the consumer's schema parse). output_tokens===0 guards
+    // against real content that merely mentions limits (tokens > 0). Placed in the shared
+    // resultToResponse so BOTH the plain and session/tool completion paths are covered.
+    if (outputTokens === 0 && QUOTA.test(text)) {
+      throw new BridgeError(429, "subscription_exhausted", text);
+    }
     return {
-      text: String(msg.result ?? ""),
+      text,
       stop_reason: "end_turn",
       model,
       usage: {
         input_tokens: msg.usage?.input_tokens ?? 0,
-        output_tokens: msg.usage?.output_tokens ?? 0,
+        output_tokens: outputTokens,
         cache_creation_input_tokens: msg.usage?.cache_creation_input_tokens ?? 0,
         cache_read_input_tokens: msg.usage?.cache_read_input_tokens ?? 0,
       },

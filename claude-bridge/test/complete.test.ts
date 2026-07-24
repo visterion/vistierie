@@ -108,6 +108,32 @@ describe("complete", () => {
     expect(opts.allowedTools).toEqual([]);
   });
 
+  it("maps a usage-limit success result (0 output tokens) to a 429", async () => {
+    queryMock.mockReturnValue(sdkStream([
+      { type: "result", subtype: "success", result: "You've reached your usage limit. Try again later.",
+        usage: { input_tokens: 10, output_tokens: 0 } },
+    ]));
+    await expect(complete({ model: "claude-opus-4-8", messages: [{ role: "user", content: "hi" }] }))
+      .rejects.toMatchObject({ status: 429, code: "subscription_exhausted" });
+  });
+
+  it("does NOT flag a real completion that merely mentions rate limits (output tokens > 0)", async () => {
+    queryMock.mockReturnValue(sdkStream([
+      { type: "result", subtype: "success", result: "The API rate limit is 100/min.",
+        usage: { input_tokens: 10, output_tokens: 42 } },
+    ]));
+    const res = await complete({ model: "claude-opus-4-8", messages: [{ role: "user", content: "hi" }] });
+    expect(res.text).toBe("The API rate limit is 100/min.");
+  });
+
+  it("does NOT flag a 0-token completion whose text does not match the quota pattern", async () => {
+    queryMock.mockReturnValue(sdkStream([
+      { type: "result", subtype: "success", result: "", usage: { input_tokens: 10, output_tokens: 0 } },
+    ]));
+    const res = await complete({ model: "claude-opus-4-8", messages: [{ role: "user", content: "hi" }] });
+    expect(res.text).toBe("");
+  });
+
   it("throws BridgeError on error result", async () => {
     queryMock.mockReturnValue(sdkStream([
       { type: "result", subtype: "error_during_execution", errors: ["Claude AI usage limit reached"] },

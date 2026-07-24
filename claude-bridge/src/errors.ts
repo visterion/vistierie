@@ -1,6 +1,6 @@
 import { BridgeError } from "./types.js";
 
-const QUOTA = /usage limit|rate.?limit|limit reached|out of (quota|credits)/i;
+export const QUOTA = /usage limit|rate.?limit|limit reached|out of (quota|credits)/i;
 const AUTH = /oauth|bearer token|token.*(expired|invalid)|invalid.*token|authentication|unauthorized/i;
 
 export function mapSdkError(err: unknown): BridgeError {
