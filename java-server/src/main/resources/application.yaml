@@ -38,6 +38,7 @@ vistierie:
     enabled: ${CLAUDE_SUBSCRIPTION_ENABLED:false}
     base-url: ${CLAUDE_BRIDGE_URL:http://claude-bridge:8091}
     timeout-seconds: 300
+    cooldown-seconds: ${CLAUDE_SUBSCRIPTION_COOLDOWN_SECONDS:3600}
   providers:
     openai:
       base-url: https://api.openai.com/v1

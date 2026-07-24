@@ -11,10 +11,12 @@ import de.vesterion.vistierie.llm.dto.MultiVisionRequest;
 import de.vesterion.vistierie.llm.dto.VisionRequest;
 import de.vesterion.vistierie.pricing.PriceTable;
 import de.vesterion.vistierie.pricing.Usage;
+import de.vesterion.vistierie.provider.ClaudeSubscriptionProvider;
 import de.vesterion.vistierie.provider.LlmProvider;
 import de.vesterion.vistierie.provider.ProviderRegistry;
 import de.vesterion.vistierie.provider.ProviderRequest;
 import de.vesterion.vistierie.provider.ProviderResponse;
+import de.vesterion.vistierie.provider.SubscriptionCooldown;
 import de.vesterion.vistierie.routing.RoutingDecision;
 import de.vesterion.vistierie.routing.RoutingResolver;
 import org.junit.jupiter.api.AfterEach;
@@ -51,6 +53,7 @@ class LlmServiceTest {
     private final LlmMetrics metrics = mock(LlmMetrics.class);
     private final AgentRepository agents = mock(AgentRepository.class);
     private final BudgetEnforcer budgets = mock(BudgetEnforcer.class);
+    private final SubscriptionCooldown cooldown = new SubscriptionCooldown(3600);
 
     private final UUID tenantId = UUID.randomUUID();
     private final String tenantName = "tn-x";
@@ -58,7 +61,7 @@ class LlmServiceTest {
     private final Agent agent = new Agent(agentId, tenantId, "writer", "sys", "test_purpose",
             null, null, 5, 60, "wt", false, 1, Instant.now(), Instant.now(), null, null, null, null, null, null, null);
 
-    private final LlmService svc = new LlmService(routing, providers, prices, recorder, kill, metrics, agents, budgets);
+    private final LlmService svc = new LlmService(routing, providers, prices, recorder, kill, metrics, agents, budgets, cooldown);
 
     @BeforeEach void setContext() {
         RequestContext.set(new RequestContext.Principal(tenantId, tenantName, false));
@@ -475,6 +478,71 @@ class LlmServiceTest {
                 .contains("model=claude-haiku-4-5")
                 .contains("status=error")
                 .contains("error=overloaded");
+    }
+
+    @Test void skipsSubscriptionStraightToFallbackWhileCooling() {
+        cooldown.open(Instant.now());
+        var sub = mock(LlmProvider.class);
+        var fb = mock(LlmProvider.class);
+        when(providers.get(ClaudeSubscriptionProvider.NAME)).thenReturn(sub);
+        when(providers.get("bedrock")).thenReturn(fb);
+        when(routing.resolve(any(), any(), any(), any())).thenReturn(new RoutingDecision(
+                ClaudeSubscriptionProvider.NAME, "claude-opus-4-8", true, "bedrock", "eu.anthropic.claude-sonnet-4-6"));
+        when(fb.complete(any())).thenReturn(new ProviderResponse(
+                "ok", "end_turn", new Usage(1, 1, 0, 0), "eu.anthropic.claude-sonnet-4-6"));
+
+        svc.complete(completeReq());
+
+        verify(sub, never()).complete(any());
+        verify(fb).complete(any());
+        verify(metrics).recordFallback(ClaudeSubscriptionProvider.NAME, "bedrock", "subscription_cooldown");
+    }
+
+    @Test void subscription429OpensCooldownAndFallsOver() {
+        var sub = mock(LlmProvider.class);
+        var fb = mock(LlmProvider.class);
+        when(providers.get(ClaudeSubscriptionProvider.NAME)).thenReturn(sub);
+        when(providers.get("bedrock")).thenReturn(fb);
+        when(routing.resolve(any(), any(), any(), any())).thenReturn(new RoutingDecision(
+                ClaudeSubscriptionProvider.NAME, "claude-opus-4-8", true, "bedrock", "eu.anthropic.claude-sonnet-4-6"));
+        when(sub.complete(any())).thenThrow(new LlmProvider.ProviderException(429, "subscription_exhausted", "limit"));
+        when(fb.complete(any())).thenReturn(new ProviderResponse(
+                "ok", "end_turn", new Usage(1, 1, 0, 0), "eu.anthropic.claude-sonnet-4-6"));
+
+        svc.complete(completeReq());
+
+        assertThat(cooldown.cooling(Instant.now())).isTrue();
+        verify(fb).complete(any());
+    }
+
+    @Test void non_subscription_provider_429_does_not_open_cooldown() {
+        // Isolates the provider-name conjunct: errorCode matches but provider isn't claude-subscription.
+        var bed = mock(LlmProvider.class);
+        when(providers.get("bedrock")).thenReturn(bed);
+        when(routing.resolve(any(), any(), any(), any())).thenReturn(new RoutingDecision(
+                "bedrock", "eu.anthropic.claude-sonnet-4-6", true, null, null));
+        when(bed.complete(any())).thenThrow(new LlmProvider.ProviderException(429, "subscription_exhausted", "x"));
+
+        assertThatThrownBy(() -> svc.complete(completeReq())).isInstanceOf(LlmProvider.ProviderException.class);
+        assertThat(cooldown.cooling(Instant.now())).isFalse();
+    }
+
+    @Test void subscription_non_exhausted_429_does_not_open_cooldown() {
+        // Isolates the errorCode conjunct: provider matches but errorCode isn't subscription_exhausted.
+        var sub = mock(LlmProvider.class);
+        var fb = mock(LlmProvider.class);
+        when(providers.get(ClaudeSubscriptionProvider.NAME)).thenReturn(sub);
+        when(providers.get("bedrock")).thenReturn(fb);
+        when(routing.resolve(any(), any(), any(), any())).thenReturn(new RoutingDecision(
+                ClaudeSubscriptionProvider.NAME, "claude-opus-4-8", true, "bedrock", "eu.anthropic.claude-sonnet-4-6"));
+        when(sub.complete(any())).thenThrow(new LlmProvider.ProviderException(429, "rate_limit_exceeded", "rl"));
+        when(fb.complete(any())).thenReturn(new ProviderResponse(
+                "ok", "end_turn", new Usage(1, 1, 0, 0), "eu.anthropic.claude-sonnet-4-6"));
+
+        svc.complete(completeReq());
+
+        assertThat(cooldown.cooling(Instant.now())).isFalse();
+        verify(fb).complete(any());
     }
 
     @Test void apiProviderCallHasNullShadowCost() {
