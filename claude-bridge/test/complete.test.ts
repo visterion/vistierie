@@ -117,6 +117,31 @@ describe("complete", () => {
       .rejects.toMatchObject({ status: 429, code: "subscription_exhausted" });
   });
 
+  it("maps the captured weekly-limit success (0 output tokens) to a 429", async () => {
+    queryMock.mockReturnValue(sdkStream([
+      { type: "result", subtype: "success", result: "You've hit your weekly limit · resets 9am (UTC)",
+        usage: { input_tokens: 10, output_tokens: 0 } },
+    ]));
+    await expect(complete({ model: "claude-opus-4-8", messages: [{ role: "user", content: "hi" }] }))
+      .rejects.toMatchObject({ status: 429, code: "subscription_exhausted" });
+  });
+
+  it("does NOT flag a QUOTA-matching success that has no usage object", async () => {
+    queryMock.mockReturnValue(sdkStream([
+      { type: "result", subtype: "success", result: "you've reached your position limit" },
+    ]));
+    const res = await complete({ model: "claude-opus-4-8", messages: [{ role: "user", content: "hi" }] });
+    expect(res.text).toBe("you've reached your position limit");
+  });
+
+  it("does NOT flag a QUOTA-matching success whose usage lacks output_tokens", async () => {
+    queryMock.mockReturnValue(sdkStream([
+      { type: "result", subtype: "success", result: "you've reached your position limit", usage: {} },
+    ]));
+    const res = await complete({ model: "claude-opus-4-8", messages: [{ role: "user", content: "hi" }] });
+    expect(res.text).toBe("you've reached your position limit");
+  });
+
   it("does NOT flag a real completion that merely mentions rate limits (output tokens > 0)", async () => {
     queryMock.mockReturnValue(sdkStream([
       { type: "result", subtype: "success", result: "The API rate limit is 100/min.",
