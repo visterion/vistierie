@@ -16,12 +16,14 @@ import de.vesterion.vistierie.provider.LlmProvider;
 import de.vesterion.vistierie.provider.ProviderRegistry;
 import de.vesterion.vistierie.provider.ProviderRequest;
 import de.vesterion.vistierie.provider.ProviderResponse;
+import de.vesterion.vistierie.provider.SubscriptionCooldown;
 import de.vesterion.vistierie.routing.RoutingDecision;
 import de.vesterion.vistierie.routing.RoutingResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.util.UUID;
 
 @Service
@@ -37,10 +39,12 @@ public class LlmService {
     private final LlmMetrics metrics;
     private final AgentRepository agents;
     private final BudgetEnforcer budgets;
+    private final SubscriptionCooldown cooldown;
 
     public LlmService(RoutingResolver routing, ProviderRegistry providers,
                       PriceTable prices, LlmCallRecorder recorder, KillSwitchService kill,
-                      LlmMetrics metrics, AgentRepository agents, BudgetEnforcer budgets) {
+                      LlmMetrics metrics, AgentRepository agents, BudgetEnforcer budgets,
+                      SubscriptionCooldown cooldown) {
         this.routing = routing;
         this.providers = providers;
         this.prices = prices;
@@ -49,6 +53,7 @@ public class LlmService {
         this.metrics = metrics;
         this.agents = agents;
         this.budgets = budgets;
+        this.cooldown = cooldown;
     }
 
     public record InvocationResult(LlmResponse response, BudgetEnforcer.BudgetCheckResult budget) {}
@@ -166,6 +171,12 @@ public class LlmService {
     private InvocationResult invoke(CallContext ctx, RoutingDecision decision,
                                     java.util.function.Function<String, ProviderRequest> reqForModel,
                                     ProviderCall call) {
+        if (ClaudeSubscriptionProvider.NAME.equals(decision.provider())
+                && decision.fallbackProvider() != null
+                && cooldown.cooling(Instant.now())) {
+            metrics.recordFallback(decision.provider(), decision.fallbackProvider(), "subscription_cooldown");
+            return attempt(ctx, decision.fallbackProvider(), decision.fallbackModel(), reqForModel, call);
+        }
         try {
             return attempt(ctx, decision.provider(), decision.model(), reqForModel, call);
         } catch (RuntimeException e) {
@@ -222,6 +233,13 @@ public class LlmService {
                 return new InvocationResult(new LlmResponse(pRes.text(), pRes.stopReason(),
                         pRes.usage(), providerName, model, cost, id), ctx.budget());
             } catch (LlmProvider.ProviderException e) {
+                // Open here (not in invoke's catch) — attempt() is the single choke point for BOTH
+                // primary and fallback provider calls, so a subscription 429 is caught wherever it occurs.
+                if (ClaudeSubscriptionProvider.NAME.equals(providerName)
+                        && e.statusCode() == 429
+                        && "subscription_exhausted".equals(e.errorCode())) {
+                    cooldown.open(Instant.now());
+                }
                 recordFailure(ctx, id, providerName, model, pReq, start,
                         e.statusCode() >= 500 ? "error" : "rate_limited", e.errorCode());
                 throw e;
