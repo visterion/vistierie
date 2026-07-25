@@ -1,0 +1,18 @@
+# Overlay: attaches Vistierie to consumer networks.
+#
+# The base docker-compose.yml is deliberately standalone so anyone can run the
+# stack without pre-existing infrastructure. Deployments that co-locate Vistierie
+# with its consumers add this file:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.consumers.yml up -d
+#
+# The named networks must already exist (they are created by the consumer stacks).
+services:
+  vistierie:
+    networks:
+      - vistierie-net
+      - hivemem-net
+
+networks:
+  hivemem-net:
+    external: true
