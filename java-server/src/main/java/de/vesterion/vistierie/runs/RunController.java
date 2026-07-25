@@ -9,11 +9,13 @@ import de.vesterion.vistierie.runs.dto.CreateRunRequest;
 import de.vesterion.vistierie.runs.dto.RunCreatedResponse;
 import de.vesterion.vistierie.runs.dto.RunDetail;
 import de.vesterion.vistierie.runs.dto.RunEventDto;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.context.request.async.DeferredResult;
 
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 
@@ -104,10 +106,29 @@ public class RunController {
         return deferred;
     }
 
+    /**
+     * Tenant-scoped Lauf-Liste, neueste zuerst.
+     *
+     * <p>Alle vier Parameter sind optional; ohne sie ist das Verhalten bitgleich
+     * zur Fassung vor der Paginierung (die 100 neuesten Läufe). Die Antwort bleibt
+     * bewusst ein blankes Array statt eines {@code {items,total,…}}-Envelopes wie
+     * bei {@code /admin/runs} — Dracul und HiveMem parsen hier auf Array, ein
+     * Envelope wäre ein Breaking Change über drei Repos.
+     *
+     * <p>{@code from} inklusiv, {@code to} exklusiv. Clamping wie bei
+     * {@code /admin/runs}: limit &gt; 200 → 200, limit &lt; 1 → Default, offset &lt; 0 → 0.
+     */
     @GetMapping("/runs")
-    public List<RunDetail> list() {
+    public List<RunDetail> list(
+            @RequestParam(defaultValue = "100") int limit,
+            @RequestParam(defaultValue = "0") int offset,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to) {
+        if (limit > 200) limit = 200;
+        if (limit < 1) limit = 100;
+        if (offset < 0) offset = 0;
         var tenantId = RequestContext.requireTenantId();
-        return runs.findByTenant(tenantId, 100).stream().map(this::toDetail).toList();
+        return runs.findByTenant(tenantId, limit, offset, from, to).stream().map(this::toDetail).toList();
     }
 
     @GetMapping("/runs/{id}/events")
