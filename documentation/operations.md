@@ -95,8 +95,8 @@ deployments.
 
 On unprivileged LXC containers (Proxmox/PVE) the kernel denies Unix-domain
 socket creation, which breaks Postgres `pg_ctl` socket init and the JDK NIO
-`UnixDispatcher`. Layer the `docker-compose.lxc.yml` override, which marks both
-services `privileged: true`:
+`UnixDispatcher`. Layer the `docker-compose.lxc.yml` override, which marks all
+three services `privileged: true`:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.lxc.yml up -d
