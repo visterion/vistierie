@@ -273,25 +273,212 @@ provider the operator wired up for the call's `<tenant, realm, purpose>`.
 
 ## Quick start
 
+Ten minutes from a clean machine to an audited LLM call — with no provider
+credentials and no cost. Every command and response below is from an end-to-end
+run against `ghcr.io/visterion/vistierie:main`.
+
+**Prerequisites:** Docker with the Compose plugin. Nothing else — no JDK, no
+`htpasswd`, no Postgres.
+
+### 1. Clone and copy the env template
+
 ```bash
-docker run --rm -p 8090:8090 \
-  -e VISTIERIE_DB_URL=jdbc:postgresql://host.docker.internal:5432/vistierie \
-  -e VISTIERIE_DB_USER=vistierie \
-  -e VISTIERIE_DB_PASSWORD=vistierie \
-  -e VISTIERIE_ADMIN_TOKEN_HASH='<bcrypt-hash>' \
-  -e ANTHROPIC_API_KEY='sk-ant-...' \
-  -e OPENAI_API_KEY='sk-...' \
-  -e XAI_API_KEY='xai-...' \
-  ghcr.io/visterion/vistierie:main
+git clone https://github.com/visterion/vistierie.git
+cd vistierie
+cp .env.example .env
 ```
 
-Generate `VISTIERIE_ADMIN_TOKEN_HASH` first; see
-[generating the admin token hash](documentation/operations.md#generating-the-admin-token-hash).
-On Linux, `host.docker.internal` is not resolved by default; add
-`--add-host=host.docker.internal:host-gateway` to the `docker run` line (or
-point `VISTIERIE_DB_URL` at the Postgres host directly).
+### 2. Generate the admin token hash
 
-To use **AWS Bedrock** instead of (or alongside) direct provider APIs:
+Vistierie stores only the bcrypt hash of the admin bearer token. A throwaway
+container does the hashing, so nothing has to be installed:
+
+```bash
+ADMIN_TOKEN=demo-admin-token
+docker run --rm httpd:2.4-alpine htpasswd -bnBC 12 "" "$ADMIN_TOKEN" | tr -d ':\n'
+```
+
+```
+$2y$12$sEMQHI3H/GU8qRUjwAhcRu6rDnLlEKC1j.JG3UvmD1Wk/xZSsZkya
+```
+
+(The output has no trailing newline, so your prompt lands on the same line.)
+
+> [!IMPORTANT]
+> **Single-quote the hash in `.env`.** Compose interpolates `$name` sequences
+> in `.env` values, so an unquoted hash is silently truncated — compose only
+> warns `The "…" variable is not set. Defaulting to a blank string.` and every
+> `/admin/` call then fails with 401. Quote generated passwords too.
+>
+> ```dotenv
+> VISTIERIE_DB_PASSWORD='<generated-password>'
+> VISTIERIE_ADMIN_TOKEN_HASH='$2y$12$sEMQHI3H/GU8qRUjwAhcRu6rDnLlEKC1j.JG3UvmD1Wk/xZSsZkya'
+> ```
+
+### 3. Run without any provider credentials
+
+Set this in `.env` for the first run — `MockProvider` then serves deterministic
+canned responses, makes no outbound calls, and registers under the provider name
+`anthropic`, so routing rules are identical to a real deployment:
+
+```dotenv
+VISTIERIE_MOCK_LLM=true
+```
+
+### 4. Start the stack
+
+```bash
+docker compose up -d
+```
+
+```
+ Container vistierie-db  Healthy
+ Container vistierie     Started
+```
+
+Wait for readiness (about 10 s cold start, Flyway migrations included):
+
+```bash
+curl -s http://localhost:8090/actuator/health
+```
+
+```json
+{"groups":["liveness","readiness"],"status":"UP"}
+```
+
+### 5. Create a tenant
+
+```bash
+curl -s -X POST http://localhost:8090/admin/tenants \
+  -H "Authorization: Bearer demo-admin-token" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"demo"}'
+```
+
+```json
+{"id":"53b565a4-acac-4b7a-a94b-d4564ef85f99","name":"demo","token":"918c5bbd69bc8396210a0a910112805eae17ad3ede151c99"}
+```
+
+**Capture the `token` now — it is returned once and cannot be recovered.**
+Tenant creation also auto-seeds a wildcard routing rule
+(`anthropic` / `claude-sonnet-4-6`), so no routing rule is needed for the first
+call. Export your own token for the next steps:
+
+```bash
+export T=<the token from the response above>
+```
+
+### 6. Optional: pin a model for one purpose
+
+Skip this and the seeded wildcard rule applies. The run below adds an explicit
+rule, which is why the responses further down report `claude-haiku-4-5` rather
+than the seeded `claude-sonnet-4-6`:
+
+```bash
+curl -s -X POST http://localhost:8090/admin/routing-rules \
+  -H "Authorization: Bearer demo-admin-token" \
+  -H "Content-Type: application/json" \
+  -d '{"tenant":"demo","realm":null,"purpose":"free_pick",
+       "provider":"anthropic","model":"claude-haiku-4-5",
+       "priority":200,"allow_override":false,"locked":false}'
+```
+
+```json
+{"id":"65e8f3cf-62d3-4e01-97eb-14ac74393887","realm":null,"purpose":"free_pick",
+ "provider":"anthropic","model":"claude-haiku-4-5","priority":200,
+ "allow_override":false,"locked":false}
+```
+
+### 7. Create an agent
+
+`/llm/complete` requires an existing `agent_name`, so an agent is a prerequisite
+even for the synchronous gateway. `tools` and `webhook_token` are mandatory —
+for a tool-less agent pass an empty list and a placeholder token:
+
+```bash
+curl -s -X POST http://localhost:8090/agents \
+  -H "Authorization: Bearer $T" -H "Content-Type: application/json" \
+  -d '{"name":"demo-agent","system_prompt":"You are a helpful assistant.",
+       "model_purpose":"free_pick","tools":[],"webhook_token":"unused-but-required"}'
+```
+
+```json
+{"id":"b3a00beb-29c2-4263-9a7a-695f866c9590","name":"demo-agent",
+ "model_purpose":"free_pick","tools":[],"max_turns":25,"paused":false,"version":1}
+```
+
+### 8. Set the tenant and agent budgets
+
+Both must exist, otherwise the call is rejected with
+`403 budget_missing_tenant`:
+
+```bash
+curl -s -X PATCH http://localhost:8090/admin/tenants/demo/budget \
+  -H "Authorization: Bearer demo-admin-token" -H "Content-Type: application/json" \
+  -d '{"daily_cap_micros":1000000,"monthly_cap_micros":10000000}'
+
+curl -s -X PATCH http://localhost:8090/admin/tenants/demo/agents/demo-agent/budget \
+  -H "Authorization: Bearer demo-admin-token" -H "Content-Type: application/json" \
+  -d '{"daily_cap_micros":500000,"monthly_cap_micros":5000000}'
+```
+
+```json
+{"daily_cap_micros":1000000,"monthly_cap_micros":10000000,
+ "daily_usage_micros":0,"monthly_usage_micros":0,
+ "daily_remaining_micros":1000000,"monthly_remaining_micros":10000000,
+ "daily_blocked":false,"monthly_blocked":false}
+```
+
+### 9. Make the call
+
+```bash
+curl -s -X POST http://localhost:8090/llm/complete \
+  -H "Authorization: Bearer $T" -H "Content-Type: application/json" \
+  -d '{"agent_name":"demo-agent","purpose":"free_pick","messages":[{"role":"user","content":"ping"}]}'
+```
+
+```json
+{"text":"[mock] ping","stop_reason":"end_turn",
+ "usage":{"inputTokens":42,"outputTokens":7,"cacheCreationInputTokens":0,"cacheReadInputTokens":0},
+ "provider":"anthropic","model":"claude-haiku-4-5","cost_micros":71,
+ "llm_call_id":"718E796DD30949A69681BB4FC66DC78C"}
+```
+
+### 10. Prove it was audited
+
+`/llm/complete` is the synchronous gateway and creates **no run row** — `/runs`
+stays empty. The audit trail is what proves the call:
+
+```bash
+curl -s "http://localhost:8090/admin/llm-calls?tenant=demo&limit=5" \
+  -H "Authorization: Bearer demo-admin-token"
+```
+
+```json
+{"limit":5,"offset":0,"items":[
+  {"id":"718E796DD30949A69681BB4FC66DC78C","tenant":"demo","run_id":null,
+   "purpose":"free_pick","realm":null,"provider":"anthropic","model":"claude-haiku-4-5",
+   "endpoint":"complete","input_tokens":42,"output_tokens":7,
+   "cost_micros":71,"duration_ms":8,"status":"ok","error_code":null,
+   "created_at":"2026-07-25T15:26:13.244105Z"}]}
+```
+
+The `id` is the `llm_call_id` from step 9, and the tenant budget's
+`daily_usage_micros` has moved to `71` — the same figure the response reported.
+
+### Switching to a real provider
+
+Put the key in `.env` (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `XAI_API_KEY`),
+set `VISTIERIE_MOCK_LLM=false`, and restart with `docker compose up -d`. The
+seeded wildcard rule already points at `anthropic` / `claude-sonnet-4-6`; change
+provider or model per `<tenant, realm, purpose>` with a routing rule — see
+[routing.md](documentation/routing.md).
+
+---
+
+### Alternative: AWS Bedrock
+
+Instead of (or alongside) direct provider APIs:
 
 ```bash
 docker run --rm -p 8090:8090 \
@@ -311,6 +498,8 @@ profile ID such as `eu.anthropic.claude-sonnet-4-6`. The SDK reads
 
 Long Bedrock calls that exceed the default 180s socket read timeout can be tuned
 via `vistierie.bedrock.read-timeout-seconds` (see configuration.md).
+
+### Alternative: Claude Max subscription
 
 To bill against a **Claude Max subscription** rather than a metered API key, run
 the [`claude-bridge`](claude-bridge/) sidecar and point Vistierie at it:
@@ -344,15 +533,15 @@ queries: [`documentation/operations.md`](documentation/operations.md).
 
 ## Documentation
 
-| | |
+**Start here, by what you are doing:**
+
+| I want to… | Read |
 |---|---|
-| [agents.md](documentation/agents.md) | Agent definition, tool format, subagent context shielding, scheduling |
-| [api.md](documentation/api.md) | REST endpoint reference (`/llm/*`, `/agents/*`, `/runs/*`, `/admin/*`) |
-| [architecture.md](documentation/architecture.md) | System overview, data model, request flow |
-| [routing.md](documentation/routing.md) | `<tenant, realm, purpose>` → `<provider, model>` resolution |
-| [providers.md](documentation/providers.md) | Anthropic, Claude subscription, Bedrock, OpenAI, xAI plugins, mock mode, adding providers |
-| [configuration.md](documentation/configuration.md) | All `vistierie.*` properties and env vars |
-| [operations.md](documentation/operations.md) | Tenants, kill switch, cost queries, cron caveats, backups |
+| Run Vistierie for my own services | [operations.md](documentation/operations.md) — tenants, backups, kill switch, cost queries · [configuration.md](documentation/configuration.md) — every property and env var |
+| Call it from my application | [api.md](documentation/api.md) — REST reference · [routing.md](documentation/routing.md) — how `<tenant, realm, purpose>` picks a provider |
+| Build agents on it | [agents.md](documentation/agents.md) — agent definition, tools, subagent context shielding, scheduling |
+| Add a provider or change internals | [architecture.md](documentation/architecture.md) — system overview, data model, request flow · [providers.md](documentation/providers.md) — provider plugins and how to add one · [CONTRIBUTING.md](CONTRIBUTING.md) |
+| Judge whether it fits at all | [Project values](#project-values) below — including what Vistierie deliberately is *not* · [SECURITY.md](SECURITY.md) — trust boundary |
 
 ---
 
