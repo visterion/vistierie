@@ -87,7 +87,7 @@ class RunRepositoryTest extends PostgresTestBase {
         return agentId;
     }
 
-    /** Legt n Läufe für den Tenant an, started_at absteigend im Minutenabstand ab `base`. */
+    /** Seeds n runs for the tenant, started_at descending in one-minute steps from `base`. */
     private java.util.List<String> seedRuns(UUID tenantId, UUID agentId, int n, java.time.Instant base) {
         var ids = new java.util.ArrayList<String>();
         for (int i = 0; i < n; i++) {
@@ -98,7 +98,7 @@ class RunRepositoryTest extends PostgresTestBase {
                     .params(java.sql.Timestamp.from(base.minusSeconds(60L * i)), runId).update();
             ids.add(runId);
         }
-        return ids; // ids.get(0) ist der NEUESTE
+        return ids; // ids.get(0) is the NEWEST
     }
 
     @Test void findByTenantPaginatesWithoutGapsOrDuplicates() {
@@ -112,7 +112,7 @@ class RunRepositoryTest extends PostgresTestBase {
             seen.addAll(runs.findByTenant(tenantId, 10, offset, null, null).stream().map(Run::id).toList());
         }
 
-        // Menge statt Anzahl: deckt Lücken UND Dubletten auf.
+        // set, not count: catches gaps AND duplicates.
         assertThat(seen).hasSize(25);
         assertThat(new java.util.HashSet<>(seen)).isEqualTo(expected);
     }
@@ -127,7 +127,7 @@ class RunRepositoryTest extends PostgresTestBase {
                 java.time.Instant.parse("2026-07-24T11:57:00Z"),
                 java.time.Instant.parse("2026-07-24T12:00:00Z"));
 
-        // from inklusiv, to EXKLUSIV (wie /admin/runs): 11:57, 11:58, 11:59 — nicht 12:00, nicht 11:56.
+        // from inclusive, to EXCLUSIVE (as in /admin/runs): 11:57, 11:58, 11:59 — not 12:00, not 11:56.
         assertThat(got).hasSize(3);
         assertThat(got).extracting(Run::startedAt).containsExactly(
                 java.time.Instant.parse("2026-07-24T11:59:00Z"),
@@ -141,13 +141,13 @@ class RunRepositoryTest extends PostgresTestBase {
         var base = java.time.Instant.parse("2026-07-24T12:00:00Z");
         var ids = seedRuns(tenantId, agentId, 5, base); // 12:00, 11:59, 11:58, 11:57, 11:56
 
-        // from auf die Zeit des DRITTEN Laufs, to offen — der "alle Läufe seit X"-Aufruf.
+        // from at the THIRD run's timestamp, to open-ended — the "all runs since X" call.
         var got = runs.findByTenant(tenantId, 100, 0,
                 java.time.Instant.parse("2026-07-24T11:58:00Z"), null);
 
-        // from ist inklusiv: der dritte Lauf gehört dazu, die zwei älteren nicht.
-        // IDs statt Anzahl — eine an die falsche Spaltenseite gebundene Grenze
-        // (etwa <= statt >=) liefert hier ebenfalls Zeilen, aber die falschen.
+        // from is inclusive: the third run belongs, the two older ones do not.
+        // IDs, not a count — a bound attached to the wrong side of the comparison
+        // (<= instead of >=, say) still returns rows here, just the wrong ones.
         assertThat(got).extracting(Run::id).containsExactly(ids.get(0), ids.get(1), ids.get(2));
     }
 
@@ -157,11 +157,11 @@ class RunRepositoryTest extends PostgresTestBase {
         var base = java.time.Instant.parse("2026-07-24T12:00:00Z");
         var ids = seedRuns(tenantId, agentId, 5, base); // 12:00, 11:59, 11:58, 11:57, 11:56
 
-        // to auf die Zeit des ZWEITEN Laufs, from offen.
+        // to at the SECOND run's timestamp, from open-ended.
         var got = runs.findByTenant(tenantId, 100, 0,
                 null, java.time.Instant.parse("2026-07-24T11:59:00Z"));
 
-        // to ist exklusiv: der zweite Lauf fehlt, die drei älteren sind da.
+        // to is exclusive: the second run is absent, the three older ones are present.
         assertThat(got).extracting(Run::id).containsExactly(ids.get(2), ids.get(3), ids.get(4));
     }
 
@@ -196,7 +196,7 @@ class RunRepositoryTest extends PostgresTestBase {
         var tenantId = UUID.randomUUID();
         var agentId = seedTenantWithAgent(tenantId);
         var base = java.time.Instant.parse("2026-07-24T12:00:00Z");
-        var ids = seedRuns(tenantId, agentId, 5, base); // ids.get(0) ist der neueste
+        var ids = seedRuns(tenantId, agentId, 5, base); // ids.get(0) is the newest
 
         var got = runs.findByTenant(tenantId, 2);
 
