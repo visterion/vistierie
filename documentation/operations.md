@@ -18,18 +18,45 @@ echo "$ADMIN_TOKEN"   # store this; you cannot recover it from the hash
 Then hash it. Vistierie uses Spring Security's `BCryptPasswordEncoder`, which
 accepts the `$2a$` / `$2b$` / `$2y$` variants, so any standard bcrypt tool works.
 
-With `htpasswd` (from `apache2-utils` / `httpd-tools`):
-
-```bash
-htpasswd -bnBC 12 "" "$ADMIN_TOKEN" | tr -d ':\n'
-# → $2y$12$....   use this value as VISTIERIE_ADMIN_TOKEN_HASH
-```
-
-No local tooling? Run `htpasswd` from a throwaway container instead:
+The only prerequisite is Docker, which you already need to run Vistierie — a
+throwaway `httpd` container does the hashing:
 
 ```bash
 docker run --rm httpd:2.4-alpine htpasswd -bnBC 12 "" "$ADMIN_TOKEN" | tr -d ':\n'
+# → $2y$12$....   use this value as VISTIERIE_ADMIN_TOKEN_HASH
 ```
+
+`tr -d ':\n'` strips the trailing newline as well, so the next shell prompt
+lands on the same line as the hash. That is expected; copy only the `$2y$…`
+part.
+
+If you already have `apache2-utils` / `httpd-tools` installed, the same command
+runs locally without a container (`htpasswd` is *not* part of a default
+Debian/Ubuntu install, so do not assume it is there):
+
+```bash
+htpasswd -bnBC 12 "" "$ADMIN_TOKEN" | tr -d ':\n'
+```
+
+> [!IMPORTANT]
+> **Single-quote the hash in `.env`.** Docker Compose interpolates `$name`
+> sequences in `.env` values, and a bcrypt salt is 22 random characters, so
+> almost every hash contains a `$` followed by letters. Unquoted, compose
+> replaces that sequence with an empty string — it only emits
+> `The "…" variable is not set. Defaulting to a blank string.`, the container
+> receives a corrupted hash, and **every `/admin/` call then fails with 401**
+> for no visible reason.
+>
+> ```dotenv
+> # wrong — silently mangled
+> VISTIERIE_ADMIN_TOKEN_HASH=$2y$12$sEMQHI3H/GU8qRUjwAhcRu6rDnLlEKC1j.JG3UvmD1Wk/xZSsZkya
+> # right
+> VISTIERIE_ADMIN_TOKEN_HASH='$2y$12$sEMQHI3H/GU8qRUjwAhcRu6rDnLlEKC1j.JG3UvmD1Wk/xZSsZkya'
+> ```
+>
+> The same applies to `VISTIERIE_DB_PASSWORD` when the generated password
+> contains a `$`. Verify with `docker compose config` (no warnings) or, once the
+> stack runs, `docker exec vistierie printenv VISTIERIE_ADMIN_TOKEN_HASH`.
 
 Set the result as `VISTIERIE_ADMIN_TOKEN_HASH`. Rotating the admin token means
 regenerating the hash and restarting the service.
@@ -39,32 +66,86 @@ regenerating the hash and restarting the service.
 ## Deployment with Docker Compose
 
 The repository ships a `docker-compose.yml` that runs Postgres and the Vistierie
-service on a private network. It joins the external `hivemem-net` so co-located
-consumers can reach it without exposing a public port.
+service on a private `vistierie-net`. The base stack is **standalone**: it needs
+no pre-existing networks or external infrastructure, so a fresh clone comes up
+with nothing but the two required variables below.
 
-Required environment variables (compose fails fast if unset):
+Start from `.env.example`, which lists every variable the stack reads. Compose
+picks up `.env` automatically, so this is the whole setup:
 
 ```bash
-export VISTIERIE_DB_PASSWORD=...        # Postgres password
-export VISTIERIE_ADMIN_TOKEN_HASH=...   # bcrypt hash of the admin bearer token
-export ANTHROPIC_API_KEY=...            # at least one provider key
-# optional: OPENAI_API_KEY, XAI_API_KEY, VISTIERIE_IMAGE, VISTIERIE_PORT
-
+cp .env.example .env
+$EDITOR .env
 docker compose up -d
 ```
 
+Two variables are required — compose fails fast if either is unset or empty:
+
+| Variable | Value |
+|----------|-------|
+| `VISTIERIE_DB_PASSWORD` | Postgres password, e.g. `openssl rand -base64 24` |
+| `VISTIERIE_ADMIN_TOKEN_HASH` | bcrypt hash of the admin bearer token (see above) |
+
+Everything else is optional. Provider credentials are passed through empty when
+unset, so you only fill in the ones you actually route to: `ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY`, `XAI_API_KEY`, the Bedrock variables (`BEDROCK_ENABLED`,
+`AWS_REGION`, the standard `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` /
+`AWS_SESSION_TOKEN` chain, or `AWS_BEARER_TOKEN_BEDROCK`), or the subscription
+sidecar (`CLAUDE_SUBSCRIPTION_ENABLED`, `CLAUDE_CODE_OAUTH_TOKEN`,
+`CLAUDE_BRIDGE_URL`, `CLAUDE_SUBSCRIPTION_COOLDOWN_SECONDS`).
+
+Other optional knobs: `VISTIERIE_IMAGE` and `CLAUDE_BRIDGE_IMAGE` to pin images,
+`VISTIERIE_PORT` for the published host port, `VISTIERIE_LOG_LLM` /
+`VISTIERIE_LOG_AGENT` for log levels, and the rarely-needed tuning block at the
+end of `.env.example`. `documentation/configuration.md` is the full reference.
+
+`.env` holds secrets and is gitignored (along with `.env.*`, except
+`.env.example`) — keep it out of version control.
+
+Set `VISTIERIE_MOCK_LLM=true` to bring the stack up with **no provider
+credentials at all** — `MockProvider` then serves deterministic canned responses
+and makes no outbound calls. It registers under the provider name `anthropic`, so
+routing rules are identical to a real deployment.
+
 The image defaults to `ghcr.io/visterion/vistierie:main`; pin a release tag via
 `VISTIERIE_IMAGE=ghcr.io/visterion/vistierie:v1.2.1` for reproducible deploys.
+
+### Co-located consumers
+
+Deployments that run Vistierie on the same host as its consumers layer the
+`docker-compose.consumers.yml` override, which attaches the `vistierie` service
+to the external `hivemem-net` in addition to `vistierie-net`. That lets consumers
+reach it over the Docker network without exposing a public port:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.consumers.yml up -d
+```
+
+The networks named in that override must already exist — they are created by the
+consumer stacks, not by Vistierie. Omit this file entirely for standalone
+deployments.
+
+> **Upgrading from a version where the base file joined `hivemem-net` directly:
+> add `-f docker-compose.consumers.yml`, otherwise the next `up -d` recreates the
+> container without that network and co-located consumers lose connectivity.**
 
 ### LXC / Proxmox hosts
 
 On unprivileged LXC containers (Proxmox/PVE) the kernel denies Unix-domain
 socket creation, which breaks Postgres `pg_ctl` socket init and the JDK NIO
-`UnixDispatcher`. Layer the `docker-compose.lxc.yml` override, which marks both
-services `privileged: true`:
+`UnixDispatcher`. Layer the `docker-compose.lxc.yml` override, which marks all
+three services `privileged: true`:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.lxc.yml up -d
+```
+
+The overrides compose freely; an LXC host with co-located consumers stacks both:
+
+```bash
+docker compose -f docker-compose.yml \
+  -f docker-compose.consumers.yml \
+  -f docker-compose.lxc.yml up -d
 ```
 
 Do **not** use this override on standard VM or bare-metal Docker hosts — it

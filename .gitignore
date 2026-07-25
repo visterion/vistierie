@@ -13,3 +13,7 @@ dist/
 .serena/
 .worktrees/
 .claude/
+.env
+.env.*
+!.env.example
+
