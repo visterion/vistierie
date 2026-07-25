@@ -135,6 +135,36 @@ class RunRepositoryTest extends PostgresTestBase {
                 java.time.Instant.parse("2026-07-24T11:57:00Z"));
     }
 
+    @Test void findByTenantAppliesFromOnly() {
+        var tenantId = UUID.randomUUID();
+        var agentId = seedTenantWithAgent(tenantId);
+        var base = java.time.Instant.parse("2026-07-24T12:00:00Z");
+        var ids = seedRuns(tenantId, agentId, 5, base); // 12:00, 11:59, 11:58, 11:57, 11:56
+
+        // from auf die Zeit des DRITTEN Laufs, to offen — der "alle Läufe seit X"-Aufruf.
+        var got = runs.findByTenant(tenantId, 100, 0,
+                java.time.Instant.parse("2026-07-24T11:58:00Z"), null);
+
+        // from ist inklusiv: der dritte Lauf gehört dazu, die zwei älteren nicht.
+        // IDs statt Anzahl — eine an die falsche Spaltenseite gebundene Grenze
+        // (etwa <= statt >=) liefert hier ebenfalls Zeilen, aber die falschen.
+        assertThat(got).extracting(Run::id).containsExactly(ids.get(0), ids.get(1), ids.get(2));
+    }
+
+    @Test void findByTenantAppliesToOnly() {
+        var tenantId = UUID.randomUUID();
+        var agentId = seedTenantWithAgent(tenantId);
+        var base = java.time.Instant.parse("2026-07-24T12:00:00Z");
+        var ids = seedRuns(tenantId, agentId, 5, base); // 12:00, 11:59, 11:58, 11:57, 11:56
+
+        // to auf die Zeit des ZWEITEN Laufs, from offen.
+        var got = runs.findByTenant(tenantId, 100, 0,
+                null, java.time.Instant.parse("2026-07-24T11:59:00Z"));
+
+        // to ist exklusiv: der zweite Lauf fehlt, die drei älteren sind da.
+        assertThat(got).extracting(Run::id).containsExactly(ids.get(2), ids.get(3), ids.get(4));
+    }
+
     @Test void findByTenantWithInvertedWindowIsEmpty() {
         var tenantId = UUID.randomUUID();
         var agentId = seedTenantWithAgent(tenantId);
