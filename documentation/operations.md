@@ -554,6 +554,12 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" \
      "https://vistierie/admin/cost?granularity=none&group_by=tenant" | jq .
 ```
 
+`from` and `to` must be **full instants** — date, time and zone, e.g.
+`2026-07-24T00:00:00Z`. That is what `date -u +%FT%TZ` above produces. A
+date-only value such as `from=2026-07-24` is valid ISO-8601 but is not an
+instant and is rejected with an opaque `400`. See
+[api.md](api.md#admincost) for the accepted formats.
+
 ---
 
 ## Privacy lock pattern

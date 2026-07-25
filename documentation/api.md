@@ -792,11 +792,33 @@ Cross-tenant cost rollup against `llm_calls`.
 
 | Param | Default | Description |
 |---|---|---|
-| `from`, `to` | last 7 days | ISO-8601, filter on `created_at` |
+| `from`, `to` | last 7 days | Full ISO-8601 **instant** (date + time + zone), filter on `created_at` |
 | `granularity` | `hour` | `hour` \| `day` \| `none` |
 | `group_by` | `` | comma list: any of `tenant`, `realm`, `purpose`, `provider`, `model`, `endpoint`, `status`, `agent` |
 | `tenant`, `realm`, `purpose`, `provider`, `model`, `endpoint` | – | exact filter |
 | `status` | – | repeatable filter (`?status=ok&status=error`) |
+
+`from` and `to` bind to `java.time.Instant`, so they need a **complete
+instant** — a date, a time, and a zone. A bare date is valid ISO-8601 but is
+**not** an instant and is rejected with an opaque `400`:
+
+| Value | Result |
+|---|---|
+| `from=2026-07-24` | `400` — date only, no time or zone |
+| `from=2026-07-24T00:00:00` | `400` — no zone |
+| `from=2026-07-24T00:00:00Z` | `200` |
+| `from=2026-07-24T00:00:00.000Z` | `200` — fractional seconds allowed |
+
+Working call:
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  "http://vistierie:8080/admin/cost?granularity=day&group_by=model&from=2026-07-24T00:00:00Z&to=2026-07-25T00:00:00Z"
+```
+
+As with `GET /runs`, a raw `+00:00` offset in a query string arrives as a
+space and yields `400` — use the `Z` suffix or percent-encode the offset
+(`%2B00:00`).
 
 Grouping by `agent` uses the agent name; calls without an attributed agent
 (`agent_id` is null, e.g. recorded before agent attribution existed) are
@@ -823,7 +845,7 @@ Response:
 }
 ```
 
-Status codes: 200, 400 (bad granularity / group_by), 401, 422 (response_too_large, narrow query, max 10 000 result rows).
+Status codes: 200, 400 (unparsable `from`/`to`, bad granularity / group_by), 401, 422 (response_too_large, narrow query, max 10 000 result rows).
 
 ---
 
