@@ -38,13 +38,21 @@ services:
       VISTIERIE_MOCK_LLM: ${VISTIERIE_MOCK_LLM:-false}
       BEDROCK_ENABLED: ${BEDROCK_ENABLED:-false}
       AWS_REGION: ${AWS_REGION:-}
-      # Read natively by the AWS SDK, not by application.yaml.
+      # Read natively by the AWS SDK, not by application.yaml: the standard
+      # credential chain, plus ABSK API-key auth.
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
       AWS_BEARER_TOKEN_BEDROCK: ${AWS_BEARER_TOKEN_BEDROCK:-}
       CLAUDE_SUBSCRIPTION_ENABLED: ${CLAUDE_SUBSCRIPTION_ENABLED:-false}
       CLAUDE_BRIDGE_URL: ${CLAUDE_BRIDGE_URL:-http://claude-bridge:8091}
       CLAUDE_SUBSCRIPTION_COOLDOWN_SECONDS: ${CLAUDE_SUBSCRIPTION_COOLDOWN_SECONDS:-3600}
       VISTIERIE_LOG_LLM: ${VISTIERIE_LOG_LLM:-INFO}
       VISTIERIE_LOG_AGENT: ${VISTIERIE_LOG_AGENT:-INFO}
+      # Tuning knobs documented in documentation/configuration.md.
+      VISTIERIE_AUTH_CACHE_POSITIVE_TTL_SECONDS: ${VISTIERIE_AUTH_CACHE_POSITIVE_TTL_SECONDS:-60}
+      VISTIERIE_AUTH_CACHE_NEGATIVE_TTL_SECONDS: ${VISTIERIE_AUTH_CACHE_NEGATIVE_TTL_SECONDS:-10}
+      VISTIERIE_AGENTS_SCHEDULER_TICK_MILLIS: ${VISTIERIE_AGENTS_SCHEDULER_TICK_MILLIS:-30000}
     depends_on:
       db:
         condition: service_healthy
@@ -60,6 +68,8 @@ services:
       # cannot be :?-required — compose interpolates even with the profile
       # inactive, which would break token-less deployments
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      BRIDGE_QUERY_TIMEOUT_MS: ${BRIDGE_QUERY_TIMEOUT_MS:-290000}
+      BRIDGE_SESSION_TTL_MS: ${BRIDGE_SESSION_TTL_MS:-300000}
     networks:
       - vistierie-net
     restart: unless-stopped

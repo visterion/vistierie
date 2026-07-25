@@ -14,4 +14,6 @@ dist/
 .worktrees/
 .claude/
 .env
+.env.*
+!.env.example
 
