@@ -84,9 +84,17 @@ public class StubLlmProvider implements LlmProvider {
         var queue = (hint != null && agentScripts.containsKey(hint)) ? agentScripts.get(hint) : defaultScript;
         var turn = queue.poll();
         if (turn == null) {
-            // Out of script — return a benign end_turn so tests don't hang
-            return new ProviderResponse("", "end_turn", new Usage(1, 1, 0, 0), req.model(),
-                    mapper.createArrayNode());
+            // Fail loudly. This used to return a benign empty end_turn "so tests don't hang",
+            // but an empty response is indistinguishable from a legitimate one: the caller
+            // just failed output-schema validation instead, reporting "output_schema: parse:
+            // null" against whichever test happened to be running. That masked the real
+            // problem — a concurrent run draining the queue that another test had scripted.
+            // No test depends on the old fallback, so an explicit error is strictly better.
+            throw new IllegalStateException(
+                    "StubLlmProvider out of script for agent=" + hint + ". Either the test scripted"
+                            + " fewer turns than the run consumed, or a concurrent run drained the"
+                            + " shared queue — scripts are per-context singletons, so background"
+                            + " work from other tests can steal turns.");
         }
         if (turn.toolUses().isEmpty()) {
             // Text-only turn (end_turn, or a truncated max_tokens turn). Emit one text block
