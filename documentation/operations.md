@@ -43,26 +43,37 @@ service on a private `vistierie-net`. The base stack is **standalone**: it needs
 no pre-existing networks or external infrastructure, so a fresh clone comes up
 with nothing but the two required variables below.
 
-Required environment variables (compose fails fast if unset):
+Start from `.env.example`, which lists every variable the stack reads. Compose
+picks up `.env` automatically, so this is the whole setup:
 
 ```bash
-export VISTIERIE_DB_PASSWORD=...        # Postgres password
-export VISTIERIE_ADMIN_TOKEN_HASH=...   # bcrypt hash of the admin bearer token
-
+cp .env.example .env
+$EDITOR .env
 docker compose up -d
 ```
 
-Everything else is optional. Provider credentials are passed through empty when
-unset, so you only set the ones you actually route to:
+Two variables are required — compose fails fast if either is unset or empty:
 
-```bash
-# providers — set at least one, or run without any (see VISTIERIE_MOCK_LLM)
-export ANTHROPIC_API_KEY=...
-export OPENAI_API_KEY=...
-export XAI_API_KEY=...
-# other optional knobs: VISTIERIE_IMAGE, VISTIERIE_PORT,
-# CLAUDE_SUBSCRIPTION_ENABLED, CLAUDE_BRIDGE_URL
-```
+| Variable | Value |
+|----------|-------|
+| `VISTIERIE_DB_PASSWORD` | Postgres password, e.g. `openssl rand -base64 24` |
+| `VISTIERIE_ADMIN_TOKEN_HASH` | bcrypt hash of the admin bearer token (see above) |
+
+Everything else is optional. Provider credentials are passed through empty when
+unset, so you only fill in the ones you actually route to: `ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY`, `XAI_API_KEY`, the Bedrock variables (`BEDROCK_ENABLED`,
+`AWS_REGION`, the standard `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` /
+`AWS_SESSION_TOKEN` chain, or `AWS_BEARER_TOKEN_BEDROCK`), or the subscription
+sidecar (`CLAUDE_SUBSCRIPTION_ENABLED`, `CLAUDE_CODE_OAUTH_TOKEN`,
+`CLAUDE_BRIDGE_URL`, `CLAUDE_SUBSCRIPTION_COOLDOWN_SECONDS`).
+
+Other optional knobs: `VISTIERIE_IMAGE` and `CLAUDE_BRIDGE_IMAGE` to pin images,
+`VISTIERIE_PORT` for the published host port, `VISTIERIE_LOG_LLM` /
+`VISTIERIE_LOG_AGENT` for log levels, and the rarely-needed tuning block at the
+end of `.env.example`. `documentation/configuration.md` is the full reference.
+
+`.env` holds secrets and is gitignored (along with `.env.*`, except
+`.env.example`) — keep it out of version control.
 
 Set `VISTIERIE_MOCK_LLM=true` to bring the stack up with **no provider
 credentials at all** — `MockProvider` then serves deterministic canned responses
