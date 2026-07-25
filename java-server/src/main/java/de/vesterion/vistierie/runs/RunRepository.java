@@ -75,20 +75,19 @@ public class RunRepository {
         return jdbc.sql(SELECT_BASE + " WHERE id = ?").param(id).query(this::map).optional();
     }
 
-    /** Neueste zuerst, die N letzten Läufe des Tenants. Bestandssignatur — delegiert. */
+    /** Newest first, the tenant's N most recent runs. Legacy signature — delegates. */
     public List<Run> findByTenant(UUID tenantId, int limit) {
         return findByTenant(tenantId, limit, 0, null, null);
     }
 
     /**
-     * Seitenweise Lauf-Liste eines Tenants, neueste zuerst, optional auf ein
-     * Zeitfenster eingeschränkt.
+     * Paged run list for a tenant, newest first, optionally restricted to a time
+     * window.
      *
-     * <p>{@code from} ist inklusiv, {@code to} exklusiv — dasselbe halboffene
-     * Intervall wie {@code AdminAuditRepository.findRuns}, damit zwei
-     * aufeinanderfolgende Fenster einen Lauf weder doppelt zählen noch verlieren.
-     * Ein invertiertes Fenster ({@code from > to}) liefert eine leere Liste; das
-     * ist ein leeres Fenster, kein Fehler.
+     * <p>{@code from} is inclusive, {@code to} exclusive — the same half-open
+     * interval as {@code AdminAuditRepository.findRuns}, so two consecutive windows
+     * neither double-count a run nor lose one. An inverted window
+     * ({@code from > to}) yields an empty list; that is an empty window, not an error.
      */
     public List<Run> findByTenant(UUID tenantId, int limit, int offset, Instant from, Instant to) {
         var sql = new StringBuilder(SELECT_BASE + " WHERE tenant_id = ?");

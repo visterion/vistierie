@@ -107,16 +107,16 @@ public class RunController {
     }
 
     /**
-     * Tenant-scoped Lauf-Liste, neueste zuerst.
+     * Tenant-scoped run list, newest first.
      *
-     * <p>Alle vier Parameter sind optional; ohne sie ist das Verhalten bitgleich
-     * zur Fassung vor der Paginierung (die 100 neuesten Läufe). Die Antwort bleibt
-     * bewusst ein blankes Array statt eines {@code {items,total,…}}-Envelopes wie
-     * bei {@code /admin/runs} — Dracul und HiveMem parsen hier auf Array, ein
-     * Envelope wäre ein Breaking Change über drei Repos.
+     * <p>All four parameters are optional; without them the behaviour is bit-identical
+     * to the pre-pagination version (the 100 newest runs). The response deliberately
+     * stays a bare array rather than an {@code {items,total,…}} envelope like
+     * {@code /admin/runs} — Dracul and HiveMem parse an array here, so an envelope
+     * would be a breaking change across three repos.
      *
-     * <p>{@code from} inklusiv, {@code to} exklusiv. Clamping wie bei
-     * {@code /admin/runs}: limit &gt; 200 → 200, limit &lt; 1 → Default, offset &lt; 0 → 0.
+     * <p>{@code from} is inclusive, {@code to} exclusive. Clamping as in
+     * {@code /admin/runs}: limit &gt; 200 → 200, limit &lt; 1 → default, offset &lt; 0 → 0.
      */
     @GetMapping("/runs")
     public List<RunDetail> list(
