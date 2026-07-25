@@ -39,22 +39,57 @@ regenerating the hash and restarting the service.
 ## Deployment with Docker Compose
 
 The repository ships a `docker-compose.yml` that runs Postgres and the Vistierie
-service on a private network. It joins the external `hivemem-net` so co-located
-consumers can reach it without exposing a public port.
+service on a private `vistierie-net`. The base stack is **standalone**: it needs
+no pre-existing networks or external infrastructure, so a fresh clone comes up
+with nothing but the two required variables below.
 
 Required environment variables (compose fails fast if unset):
 
 ```bash
 export VISTIERIE_DB_PASSWORD=...        # Postgres password
 export VISTIERIE_ADMIN_TOKEN_HASH=...   # bcrypt hash of the admin bearer token
-export ANTHROPIC_API_KEY=...            # at least one provider key
-# optional: OPENAI_API_KEY, XAI_API_KEY, VISTIERIE_IMAGE, VISTIERIE_PORT
 
 docker compose up -d
 ```
 
+Everything else is optional. Provider credentials are passed through empty when
+unset, so you only set the ones you actually route to:
+
+```bash
+# providers — set at least one, or run without any (see VISTIERIE_MOCK_LLM)
+export ANTHROPIC_API_KEY=...
+export OPENAI_API_KEY=...
+export XAI_API_KEY=...
+# other optional knobs: VISTIERIE_IMAGE, VISTIERIE_PORT,
+# CLAUDE_SUBSCRIPTION_ENABLED, CLAUDE_BRIDGE_URL
+```
+
+Set `VISTIERIE_MOCK_LLM=true` to bring the stack up with **no provider
+credentials at all** — `MockProvider` then serves deterministic canned responses
+and makes no outbound calls. It registers under the provider name `anthropic`, so
+routing rules are identical to a real deployment.
+
 The image defaults to `ghcr.io/visterion/vistierie:main`; pin a release tag via
 `VISTIERIE_IMAGE=ghcr.io/visterion/vistierie:v1.2.1` for reproducible deploys.
+
+### Co-located consumers
+
+Deployments that run Vistierie on the same host as its consumers layer the
+`docker-compose.consumers.yml` override, which attaches the `vistierie` service
+to the external `hivemem-net` in addition to `vistierie-net`. That lets consumers
+reach it over the Docker network without exposing a public port:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.consumers.yml up -d
+```
+
+The networks named in that override must already exist — they are created by the
+consumer stacks, not by Vistierie. Omit this file entirely for standalone
+deployments.
+
+> **Upgrading from a version where the base file joined `hivemem-net` directly:
+> add `-f docker-compose.consumers.yml`, otherwise the next `up -d` recreates the
+> container without that network and co-located consumers lose connectivity.**
 
 ### LXC / Proxmox hosts
 
@@ -65,6 +100,14 @@ services `privileged: true`:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.lxc.yml up -d
+```
+
+The overrides compose freely; an LXC host with co-located consumers stacks both:
+
+```bash
+docker compose -f docker-compose.yml \
+  -f docker-compose.consumers.yml \
+  -f docker-compose.lxc.yml up -d
 ```
 
 Do **not** use this override on standard VM or bare-metal Docker hosts — it
