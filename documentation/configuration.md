@@ -1,6 +1,8 @@
 # Configuration Reference
 
 All properties can be set via `application.yaml` or overridden by environment variables.
+When running the Docker Compose stack, set them in `.env` — `.env.example` lists every
+variable compose forwards to the containers.
 
 ---
 
@@ -55,6 +57,9 @@ fully flushed whenever tenant auth state changes (tenant create, kill, clear-kil
 | `vistierie.claude-subscription.enabled` | `CLAUDE_SUBSCRIPTION_ENABLED` | `false` | Set to `true` to enable the `claude-subscription` provider |
 | `vistierie.claude-subscription.base-url` | `CLAUDE_BRIDGE_URL` | `http://claude-bridge:8091` | Base URL of the `claude-bridge` sidecar |
 | `vistierie.claude-subscription.timeout-seconds` | — | `300` | HTTP read timeout, in seconds |
+| — | `BRIDGE_QUERY_TIMEOUT_MS` | `290000` | Sidecar-side cap on a single Agent SDK query, in ms. Keep it below `timeout-seconds` above so the bridge, not the caller, times out first |
+| — | `BRIDGE_SESSION_TTL_MS` | `300000` | Sidecar idle timeout for a resumable session, in ms (hard lifetime cap is a fixed 30 min) |
+| — | `CLAUDE_CODE_OAUTH_TOKEN` | — | Claude subscription OAuth token. Read by the `claude-bridge` sidecar, not by the Java service |
 | `vistierie.claude-subscription.cooldown-seconds` | `CLAUDE_SUBSCRIPTION_COOLDOWN_SECONDS` | `3600` | On a `subscription_exhausted` 429, opens a global in-memory cooldown for this many seconds; while open, calls whose primary provider is `claude-subscription` skip it and route straight to the configured fallback instead of re-attempting. Resets on restart. `0` or negative disables the cooldown (each call re-attempts + fails over per-call). |
 
 ---
@@ -69,6 +74,13 @@ Defined under `vistierie.providers.<name>`:
 | `api-key` | Required. Bearer token. Provider is skipped if blank |
 | `timeout-seconds` | HTTP read timeout, in seconds. Defaults to `60` if omitted (connect timeout is a fixed 5s). |
 
+Two are preconfigured in `application.yaml`:
+
+| Property | Env var | Default | Description |
+|----------|---------|---------|-------------|
+| `vistierie.providers.openai.api-key` | `OPENAI_API_KEY` | — | Required to enable the `openai` provider |
+| `vistierie.providers.xai.api-key` | `XAI_API_KEY` | — | Required to enable the `xai` provider |
+
 ---
 
 ## Amazon Bedrock Provider
@@ -79,7 +91,19 @@ Defined under `vistierie.providers.<name>`:
 | `vistierie.bedrock.region` | `AWS_REGION` | SDK default | AWS region for Bedrock calls |
 | `vistierie.bedrock.read-timeout-seconds` | — | `180` | HTTP socket (read) timeout in seconds for Bedrock Converse calls. The SDK default (~30s) is too short for long reasoning responses; tune this up for long-running calls. |
 
-Credentials use the standard AWS credential chain. No API key property.
+Credentials use the standard AWS credential chain — there is no `api-key` property.
+These are read natively by the AWS SDK, not through `application.yaml`, and are
+forwarded by the compose stack:
+
+| Env var | Description |
+|---------|-------------|
+| `AWS_ACCESS_KEY_ID` | Standard credential chain. Omit all three to use a shared credentials file, an EC2 instance profile or an ECS task role instead |
+| `AWS_SECRET_ACCESS_KEY` | — |
+| `AWS_SESSION_TOKEN` | Only for temporary (STS) credentials |
+| `AWS_BEARER_TOKEN_BEDROCK` | Alternative to the chain above: Bedrock API-key (ABSK) auth |
+
+A blank `AWS_REGION` is not "disabled" — the SDK then resolves the region from its
+own default chain (`AWS_DEFAULT_REGION`, shared config profile, instance metadata).
 
 ---
 
@@ -140,3 +164,24 @@ Operational rules:
 | Property | Env var | Default | Description |
 |----------|---------|---------|-------------|
 | `vistierie.mock-llm` | `VISTIERIE_MOCK_LLM` | `false` | Replace all LLM calls with a stub (for integration testing) |
+
+---
+
+## Logging
+
+| Property | Env var | Default | Description |
+|----------|---------|---------|-------------|
+| `logging.level.de.vesterion.vistierie.llm` | `VISTIERIE_LOG_LLM` | `INFO` | Log level for provider/LLM calls. One of `ERROR`, `WARN`, `INFO`, `DEBUG`, `TRACE` |
+| `logging.level.de.vesterion.vistierie.agent.runner` | `VISTIERIE_LOG_AGENT` | `INFO` | Log level for the agent runner |
+
+---
+
+## Deployment (Docker Compose only)
+
+These are consumed by `docker-compose.yml` itself, not by the application.
+
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `VISTIERIE_PORT` | `8090` | Host port the API is published on. Published on **all** host interfaces — prefix the compose port mapping with `127.0.0.1:` if the host is reachable from an untrusted network |
+| `VISTIERIE_IMAGE` | `ghcr.io/visterion/vistierie:main` | Pin a release tag instead of tracking `main` |
+| `CLAUDE_BRIDGE_IMAGE` | `ghcr.io/visterion/vistierie-claude-bridge:main` | Same, for the subscription sidecar |
