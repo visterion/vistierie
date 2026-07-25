@@ -244,6 +244,13 @@ large fields; `full` includes raw request messages and response content
 blocks. Drill into one tool call with
 `GET /runs/{id}/tool-calls/{toolUseId}`.
 
+**Listing.** `GET /runs` returns the tenant's runs as a bare JSON array,
+newest first. Page through them with `limit` (default 100, capped at 200) and
+`offset`, and narrow to a window on `started_at` with `from` (inclusive) and
+`to` (exclusive), both ISO-8601. Without parameters the endpoint returns the
+100 newest runs, unchanged. Use the `Z` suffix on those timestamps — a raw
+`+00:00` in a query string decodes to a space and is rejected with 400.
+
 **Search.** `GET /runs/search?q=<text>` runs full-text search over the
 tenant's completed runs (filters: `agent`, `status` (repeatable),
 `has_error`, `from`, `to`, `limit` ≤ 100 default 20, `offset`). The search

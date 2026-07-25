@@ -606,7 +606,37 @@ turns this into a long-poll that returns as soon as the run reaches
 
 ### `GET /runs`
 
-Lists the calling tenant's runs (newest first, capped).
+`GET /runs?limit=&offset=&from=&to=`
+
+Lists the calling tenant's runs, newest first, as a **bare JSON array** of the
+same objects `GET /runs/{run_id}` returns — not an `{items, total, …}` envelope
+like `/admin/runs`. All four parameters are optional; a call
+without any of them returns the 100 newest runs, exactly as before pagination
+existed.
+
+**Query parameters:**
+
+| Param | Default | Description |
+|---|---|---|
+| `limit` | `100` | Page size (clamped to 200; a value below 1 falls back to the default) |
+| `offset` | `0` | Pagination offset (negative values clamp to 0) |
+| `from` | – | ISO-8601 lower bound on `started_at`, **inclusive** |
+| `to` | – | ISO-8601 upper bound on `started_at`, **exclusive** |
+
+The half-open `[from, to)` window matches `/admin/runs`, so two adjacent
+windows neither double-count nor drop a run. An inverted window (`from > to`)
+is an empty window, not an error, and returns `[]`.
+
+Timestamps must carry a zone. Watch the encoding: a raw `+00:00` written into
+a query string arrives as a space and yields `400`, so use the `Z` suffix
+(`from=2026-07-01T00:00:00Z`) or percent-encode the offset (`%2B00:00`). A
+timestamp without any offset is rejected with `400` as well.
+
+| HTTP | Meaning |
+|---|---|
+| 200 | Success (`[]` if the offset is past the end) |
+| 400 | Unparsable `from`/`to` |
+| 401 | Missing or invalid bearer token |
 
 ### `GET /runs/{run_id}/events`
 
