@@ -12,3 +12,4 @@ dist/
 .DS_Store
 .serena/
 .worktrees/
+.claude/
