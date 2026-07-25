@@ -36,8 +36,15 @@ services:
       # MockProvider registers under the name "anthropic", so routing rules are
       # identical to a real deployment.
       VISTIERIE_MOCK_LLM: ${VISTIERIE_MOCK_LLM:-false}
+      BEDROCK_ENABLED: ${BEDROCK_ENABLED:-false}
+      AWS_REGION: ${AWS_REGION:-}
+      # Read natively by the AWS SDK, not by application.yaml.
+      AWS_BEARER_TOKEN_BEDROCK: ${AWS_BEARER_TOKEN_BEDROCK:-}
       CLAUDE_SUBSCRIPTION_ENABLED: ${CLAUDE_SUBSCRIPTION_ENABLED:-false}
       CLAUDE_BRIDGE_URL: ${CLAUDE_BRIDGE_URL:-http://claude-bridge:8091}
+      CLAUDE_SUBSCRIPTION_COOLDOWN_SECONDS: ${CLAUDE_SUBSCRIPTION_COOLDOWN_SECONDS:-3600}
+      VISTIERIE_LOG_LLM: ${VISTIERIE_LOG_LLM:-INFO}
+      VISTIERIE_LOG_AGENT: ${VISTIERIE_LOG_AGENT:-INFO}
     depends_on:
       db:
         condition: service_healthy
