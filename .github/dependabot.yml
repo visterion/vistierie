@@ -50,6 +50,15 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # Transitive via @modelcontextprotocol/sdk, which declares ^1.19.9. The only
+      # patched release is 2.x, so every attempted update resolves to a downgrade of
+      # @anthropic-ai/claude-agent-sdk and fails the whole Dependabot run. The advisory
+      # it chases (GHSA-frvp-7c67-39w9, serve-static path traversal) is Windows-only and
+      # unreachable here: the bridge runs Linux, serves no static files, and uses an
+      # in-process SDK MCP server rather than an HTTP transport -- dismissed as not_used.
+      # Drop this entry once @modelcontextprotocol/sdk moves to @hono/node-server 2.x.
+      - dependency-name: "@hono/node-server"
 
   - package-ecosystem: docker
     directory: /claude-bridge
