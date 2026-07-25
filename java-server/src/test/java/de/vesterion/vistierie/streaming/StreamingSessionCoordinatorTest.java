@@ -16,6 +16,7 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.ActiveProfiles;
 import tools.jackson.databind.ObjectMapper;
@@ -29,6 +30,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -320,5 +322,61 @@ class StreamingSessionCoordinatorTest extends PostgresTestBase {
         verifyNoInteractions(dispatcher);
         assertThat(sessionRepo.findOpenByAgent(agentId).get().lastPollAt())
                 .isEqualTo(now);
+    }
+
+    @Test
+    void secondOpenSessionForSameAgentIsRejectedByDatabase() {
+        var now = Instant.parse("2026-06-02T09:30:00Z");
+        sessionRepo.insertOpen(UUID.randomUUID(), tenantId, agentId, now, now.plusSeconds(30600));
+
+        // findOpenByAgent reads with .optional(), so a second open row would not merely be
+        // untidy -- every later lookup for this agent would throw until someone closed one.
+        assertThatThrownBy(() -> sessionRepo.insertOpen(
+                UUID.randomUUID(), tenantId, agentId, now, now.plusSeconds(30600)))
+                .isInstanceOf(DuplicateKeyException.class);
+    }
+
+    @Test
+    void closedSessionDoesNotBlockOpeningTheNextOne() {
+        var now = Instant.parse("2026-06-02T09:30:00Z");
+        var first = UUID.randomUUID();
+        sessionRepo.insertOpen(first, tenantId, agentId, now, now.plusSeconds(30600));
+        sessionRepo.markClosed(first);
+
+        // The uniqueness must be scoped to open sessions only, otherwise an agent could
+        // never run a second session.
+        var second = UUID.randomUUID();
+        sessionRepo.insertOpen(second, tenantId, agentId, now, now.plusSeconds(30600));
+
+        assertThat(sessionRepo.findOpenByAgent(agentId)).isPresent();
+        assertThat(sessionRepo.findOpenByAgent(agentId).get().id()).isEqualTo(second);
+    }
+
+    @Test
+    void handleTick_adoptsSessionOpenedConcurrently() {
+        var now = Instant.parse("2026-06-02T09:30:00Z");
+        MutableClockConfig.NOW.set(now);
+
+        // Model a competing opener that wins the race between our check and our insert:
+        // the row appears, then our own insert is rejected by the unique index.
+        var winner = UUID.randomUUID();
+        // Spy a plain instance: the injected bean is a Spring AOP proxy and cannot be spied.
+        var racingRepo = spy(new StreamingSessionRepository(jdbc));
+        doAnswer(inv -> {
+            sessionRepo.insertOpen(winner, tenantId, agentId, now, now.plusSeconds(30600));
+            throw new DuplicateKeyException("idx_streaming_sessions_open");
+        }).when(racingRepo).insertOpen(any(), any(), any(), any(), any());
+
+        var realPoller = mock(EventSourcePoller.class);
+        when(realPoller.poll(any(), any(), any(), any(), any(), any()))
+                .thenReturn(EventSourcePoller.PollResult.ok(List.of()));
+        var c = new StreamingSessionCoordinator(racingRepo, realPoller, dispatcher,
+                kill, budgets, mockTenants, Clock.fixed(now, ZoneOffset.UTC));
+
+        // Losing the race is normal concurrency, not an error: adopt the winner's session.
+        c.handleTick(streamingAgent, true);
+
+        assertThat(sessionRepo.findOpenByAgent(agentId)).isPresent();
+        assertThat(sessionRepo.findOpenByAgent(agentId).get().id()).isEqualTo(winner);
     }
 }
