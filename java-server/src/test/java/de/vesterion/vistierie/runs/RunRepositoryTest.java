@@ -5,6 +5,7 @@ import de.vesterion.vistierie.agents.AgentRepository;
 import de.vesterion.vistierie.tenants.TenantRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.JsonNodeFactory;
 
@@ -17,6 +18,7 @@ class RunRepositoryTest extends PostgresTestBase {
     @Autowired AgentRepository agents;
     @Autowired TenantRepository tenants;
     @Autowired ObjectMapper mapper;
+    @Autowired JdbcClient jdbc;
 
     @Test void insertAndUpdateLifecycle() throws Exception {
         var tenantId = UUID.randomUUID();
@@ -74,5 +76,100 @@ class RunRepositoryTest extends PostgresTestBase {
         runs.markTerminal("R1", "done", null, null, null);
         runs.markTerminal("R2", "done", null, null, null);
         assertThat(runs.hasOpenRun(agentId)).isFalse();
+    }
+
+    /** Creates a tenant plus one agent and returns the agent id. */
+    private UUID seedTenantWithAgent(UUID tenantId) {
+        tenants.insert(tenantId, "tn-" + tenantId, "h");
+        var agentId = UUID.randomUUID();
+        agents.insert(agentId, tenantId, "a", "p", "purpose",
+                JsonNodeFactory.instance.arrayNode(), null, 5, 60, "wt", false, null, null, null, null, null, null);
+        return agentId;
+    }
+
+    /** Legt n Läufe für den Tenant an, started_at absteigend im Minutenabstand ab `base`. */
+    private java.util.List<String> seedRuns(UUID tenantId, UUID agentId, int n, java.time.Instant base) {
+        var ids = new java.util.ArrayList<String>();
+        for (int i = 0; i < n; i++) {
+            var runId = "01J" + UUID.randomUUID().toString().replace("-", "").toUpperCase().substring(0, 23);
+            runs.insert(runId, tenantId, agentId, JsonNodeFactory.instance.objectNode(), 1, null,
+                    "manual", "queued", null, null, null);
+            jdbc.sql("UPDATE vistierie.runs SET started_at = ? WHERE id = ?")
+                    .params(java.sql.Timestamp.from(base.minusSeconds(60L * i)), runId).update();
+            ids.add(runId);
+        }
+        return ids; // ids.get(0) ist der NEUESTE
+    }
+
+    @Test void findByTenantPaginatesWithoutGapsOrDuplicates() {
+        var tenantId = UUID.randomUUID();
+        var agentId = seedTenantWithAgent(tenantId);
+        var base = java.time.Instant.parse("2026-07-24T12:00:00Z");
+        var expected = new java.util.HashSet<>(seedRuns(tenantId, agentId, 25, base));
+
+        var seen = new java.util.ArrayList<String>();
+        for (int offset = 0; offset < 30; offset += 10) {
+            seen.addAll(runs.findByTenant(tenantId, 10, offset, null, null).stream().map(Run::id).toList());
+        }
+
+        // Menge statt Anzahl: deckt Lücken UND Dubletten auf.
+        assertThat(seen).hasSize(25);
+        assertThat(new java.util.HashSet<>(seen)).isEqualTo(expected);
+    }
+
+    @Test void findByTenantAppliesHalfOpenWindow() {
+        var tenantId = UUID.randomUUID();
+        var agentId = seedTenantWithAgent(tenantId);
+        var base = java.time.Instant.parse("2026-07-24T12:00:00Z");
+        seedRuns(tenantId, agentId, 5, base); // 12:00, 11:59, 11:58, 11:57, 11:56
+
+        var got = runs.findByTenant(tenantId, 100, 0,
+                java.time.Instant.parse("2026-07-24T11:57:00Z"),
+                java.time.Instant.parse("2026-07-24T12:00:00Z"));
+
+        // from inklusiv, to EXKLUSIV (wie /admin/runs): 11:57, 11:58, 11:59 — nicht 12:00, nicht 11:56.
+        assertThat(got).hasSize(3);
+        assertThat(got).extracting(Run::startedAt).containsExactly(
+                java.time.Instant.parse("2026-07-24T11:59:00Z"),
+                java.time.Instant.parse("2026-07-24T11:58:00Z"),
+                java.time.Instant.parse("2026-07-24T11:57:00Z"));
+    }
+
+    @Test void findByTenantWithInvertedWindowIsEmpty() {
+        var tenantId = UUID.randomUUID();
+        var agentId = seedTenantWithAgent(tenantId);
+        seedRuns(tenantId, agentId, 3, java.time.Instant.parse("2026-07-24T12:00:00Z"));
+
+        var got = runs.findByTenant(tenantId, 100, 0,
+                java.time.Instant.parse("2026-07-24T13:00:00Z"),
+                java.time.Instant.parse("2026-07-24T11:00:00Z"));
+
+        assertThat(got).isEmpty();
+    }
+
+    @Test void findByTenantNeverLeaksAnotherTenant() {
+        var base = java.time.Instant.parse("2026-07-24T12:00:00Z");
+        var mine = UUID.randomUUID();
+        var myAgent = seedTenantWithAgent(mine);
+        var myIds = new java.util.HashSet<>(seedRuns(mine, myAgent, 3, base));
+
+        var theirs = UUID.randomUUID();
+        var theirAgent = seedTenantWithAgent(theirs);
+        seedRuns(theirs, theirAgent, 3, base);
+
+        var got = runs.findByTenant(mine, 100, 0, null, null);
+
+        assertThat(got).extracting(Run::id).containsExactlyInAnyOrderElementsOf(myIds);
+    }
+
+    @Test void findByTenantOldSignatureStillReturnsNewestFirst() {
+        var tenantId = UUID.randomUUID();
+        var agentId = seedTenantWithAgent(tenantId);
+        var base = java.time.Instant.parse("2026-07-24T12:00:00Z");
+        var ids = seedRuns(tenantId, agentId, 5, base); // ids.get(0) ist der neueste
+
+        var got = runs.findByTenant(tenantId, 2);
+
+        assertThat(got).extracting(Run::id).containsExactly(ids.get(0), ids.get(1));
     }
 }
