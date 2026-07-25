@@ -247,6 +247,10 @@ Postgres full-text document. Search a tenant's runs with
 `GET /runs/search?q=...` (filters: `agent`, `status`, `has_error`, `from`,
 `to`); operators search any tenant via `GET /admin/runs/search?tenant=...`.
 
+List a tenant's runs newest-first with `GET /runs` — a bare JSON array,
+paged via `limit` (default 100, max 200) and `offset`, optionally narrowed
+to an ISO-8601 window with `from` (inclusive) and `to` (exclusive).
+
 ---
 
 ## Synchronous LLM gateway
