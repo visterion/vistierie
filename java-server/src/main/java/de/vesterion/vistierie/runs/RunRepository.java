@@ -6,6 +6,8 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.sql.SQLException;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -73,9 +75,34 @@ public class RunRepository {
         return jdbc.sql(SELECT_BASE + " WHERE id = ?").param(id).query(this::map).optional();
     }
 
+    /** Neueste zuerst, die N letzten Läufe des Tenants. Bestandssignatur — delegiert. */
     public List<Run> findByTenant(UUID tenantId, int limit) {
-        return jdbc.sql(SELECT_BASE + " WHERE tenant_id = ? ORDER BY started_at DESC LIMIT ?")
-                .params(tenantId, limit).query(this::map).list();
+        return findByTenant(tenantId, limit, 0, null, null);
+    }
+
+    /**
+     * Seitenweise Lauf-Liste eines Tenants, neueste zuerst, optional auf ein
+     * Zeitfenster eingeschränkt.
+     *
+     * <p>{@code from} ist inklusiv, {@code to} exklusiv — dasselbe halboffene
+     * Intervall wie {@code AdminAuditRepository.findRuns}, damit zwei
+     * aufeinanderfolgende Fenster einen Lauf weder doppelt zählen noch verlieren.
+     * Ein invertiertes Fenster ({@code from > to}) liefert eine leere Liste; das
+     * ist ein leeres Fenster, kein Fehler.
+     */
+    public List<Run> findByTenant(UUID tenantId, int limit, int offset, Instant from, Instant to) {
+        var sql = new StringBuilder(SELECT_BASE + " WHERE tenant_id = ?");
+        var params = new ArrayList<Object>();
+        params.add(tenantId);
+        if (from != null) { sql.append(" AND started_at >= ?"); params.add(java.sql.Timestamp.from(from)); }
+        if (to != null)   { sql.append(" AND started_at <  ?"); params.add(java.sql.Timestamp.from(to)); }
+        sql.append(" ORDER BY started_at DESC LIMIT ? OFFSET ?");
+        params.add(limit);
+        params.add(offset);
+
+        var spec = jdbc.sql(sql.toString());
+        for (Object p : params) spec = spec.param(p);
+        return spec.query(this::map).list();
     }
 
     public List<Run> findByParent(String parentRunId) {
