@@ -481,6 +481,39 @@ Body:
 }
 ```
 
+**Fields:**
+
+| Field | Type | Required | Constraint |
+|---|---|---|---|
+| `name` | string | **yes** | Non-blank, matches `^[a-z0-9-]+$`, ≤ 64 chars |
+| `system_prompt` | string | **yes** | Non-blank |
+| `model_purpose` | string | **yes** | Non-blank; resolved by the routing rules |
+| `tools` | array | **yes** | Must be present — send `[]` for a tool-less agent. Each entry validated (see below) |
+| `webhook_token` | string | **yes** | Non-blank **even when the agent has no webhook tool** |
+| `output_schema` | object | no | Must parse as a JSON Schema when present |
+| `max_turns` | integer | no | Defaults to `25` |
+| `max_run_seconds` | integer | no | Defaults to `1800` |
+| `max_tokens` | integer | no | Per-turn output cap; runtime default `8192` |
+| `schedule` | string | no | Spring 6-field cron expression; empty/omitted means no schedule |
+| `completion_webhook` | string | no | URL called when a run finishes |
+| `completion_webhook_token` | string | no | Bearer token for `completion_webhook` |
+| `event_source_url` | string | no | Required when `session_duration_seconds` is set |
+| `session_duration_seconds` | integer | no | Must be `> 0`; also requires `event_source_url` **and** `schedule` |
+| `poll_interval_seconds` | integer | no | Streaming poll cadence |
+| `mcp_credentials` | object | no | Map `mcp_server_url -> bearer_token`; required if any `type: mcp` tool exists |
+
+> **Two easy traps.** `tools` is `@NotNull`, not merely optional: omitting it
+> fails validation, so a tool-less agent must send `"tools": []`. And
+> `webhook_token` is `@NotBlank` unconditionally — it must be a non-empty
+> string even for an agent that never calls a webhook.
+
+Per-tool validation (applied to every entry of `tools[]`): `name` must be
+non-blank; exactly one of `webhook_url`, `type: "subagent"`, `type: "mcp"`;
+`subagent` requires a `target_agent` that already exists in the same tenant;
+`webhook_url` and `mcp_server_url` must start with `http://` or `https://`;
+`mcp_auth_ref` is rejected in v1; `mcp_timeout_seconds` must be `> 0`;
+`input_schema` must parse as a JSON Schema.
+
 `max_tokens` is the per-turn output-token cap passed to the provider. It is
 optional — when omitted (`null`), the runtime default of **8192** applies. Set
 it higher for agents that emit large structured output (e.g. multi-page
@@ -759,11 +792,33 @@ Cross-tenant cost rollup against `llm_calls`.
 
 | Param | Default | Description |
 |---|---|---|
-| `from`, `to` | last 7 days | ISO-8601, filter on `created_at` |
+| `from`, `to` | last 7 days | Full ISO-8601 **instant** (date + time + zone), filter on `created_at` |
 | `granularity` | `hour` | `hour` \| `day` \| `none` |
 | `group_by` | `` | comma list: any of `tenant`, `realm`, `purpose`, `provider`, `model`, `endpoint`, `status`, `agent` |
 | `tenant`, `realm`, `purpose`, `provider`, `model`, `endpoint` | – | exact filter |
 | `status` | – | repeatable filter (`?status=ok&status=error`) |
+
+`from` and `to` bind to `java.time.Instant`, so they need a **complete
+instant** — a date, a time, and a zone. A bare date is valid ISO-8601 but is
+**not** an instant and is rejected with an opaque `400`:
+
+| Value | Result |
+|---|---|
+| `from=2026-07-24` | `400` — date only, no time or zone |
+| `from=2026-07-24T00:00:00` | `400` — no zone |
+| `from=2026-07-24T00:00:00Z` | `200` |
+| `from=2026-07-24T00:00:00.000Z` | `200` — fractional seconds allowed |
+
+Working call:
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  "http://vistierie:8080/admin/cost?granularity=day&group_by=model&from=2026-07-24T00:00:00Z&to=2026-07-25T00:00:00Z"
+```
+
+As with `GET /runs`, a raw `+00:00` offset in a query string arrives as a
+space and yields `400` — use the `Z` suffix or percent-encode the offset
+(`%2B00:00`).
 
 Grouping by `agent` uses the agent name; calls without an attributed agent
 (`agent_id` is null, e.g. recorded before agent attribution existed) are
@@ -790,7 +845,7 @@ Response:
 }
 ```
 
-Status codes: 200, 400 (bad granularity / group_by), 401, 422 (response_too_large, narrow query, max 10 000 result rows).
+Status codes: 200, 400 (unparsable `from`/`to`, bad granularity / group_by), 401, 422 (response_too_large, narrow query, max 10 000 result rows).
 
 ---
 
