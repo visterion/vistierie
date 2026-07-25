@@ -15,6 +15,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
@@ -26,6 +27,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -43,6 +45,7 @@ class RunQueryControllerTest extends PostgresTestBase {
     @Autowired RoutingRuleRepository routingRules;
     @Autowired RoutingResolver routingResolver;
     @Autowired OperationalBudgetFixtures budgetFixtures;
+    @Autowired JdbcClient jdbc;
 
     MockMvc mvc;
     String token;
@@ -125,5 +128,99 @@ class RunQueryControllerTest extends PostgresTestBase {
                 .andReturn();
         mvc.perform(asyncDispatch(resp))
                 .andExpect(status().isNotFound());
+    }
+
+    // --- /runs pagination -------------------------------------------------
+    // Das @BeforeEach-Fixture legt für jeden Test einen FRISCHEN Tenant an und
+    // erzeugt selbst keine Läufe. /runs ist tenant-scoped, die Erwartungswerte
+    // unten zählen also ausschließlich die hier geseedeten Läufe.
+
+    /** Ein Agent für den aktuellen Tenant; Name eindeutig, kein Schedule (kein Scheduler-Anlauf). */
+    private UUID seedAgent() {
+        var agentId = UUID.randomUUID();
+        agents.insert(agentId, tenantId, "seed-" + agentId, "p", "purpose",
+                mapper.createArrayNode(), null, 5, 60, "wt", false, null, null, null, null, null, null);
+        return agentId;
+    }
+
+    /**
+     * Legt n Läufe für den aktuellen Tenant an, started_at absteigend im Minutenabstand ab `base`.
+     * runs.insert setzt started_at auf now(); der Wert wird danach per SQL nachgezogen
+     * (gleiche Technik wie RunRepositoryTest.seedRuns).
+     */
+    private void seedRunsAtMinutes(String baseIso, int n) {
+        var base = Instant.parse(baseIso);
+        var agentId = seedAgent();
+        for (int i = 0; i < n; i++) {
+            var runId = "01J" + UUID.randomUUID().toString().replace("-", "").toUpperCase().substring(0, 23);
+            runs.insert(runId, tenantId, agentId, mapper.createObjectNode(), 1, null,
+                    "manual", "queued", null, null, null);
+            jdbc.sql("UPDATE vistierie.runs SET started_at = ? WHERE id = ?")
+                    .params(java.sql.Timestamp.from(base.minusSeconds(60L * i)), runId).update();
+        }
+    }
+
+    private void seedRunsForTenant(int n) {
+        seedRunsAtMinutes("2026-07-24T12:00:00Z", n);
+    }
+
+    @Test void runsDefaultsAreUnchangedWithoutParams() throws Exception {
+        seedRunsForTenant(120);
+        mvc.perform(get("/runs").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$.length()").value(100));
+    }
+
+    @Test void runsHonorsLimitAndOffsetWithoutGapsOrDuplicates() throws Exception {
+        seedRunsForTenant(25);
+        var ids = new java.util.HashSet<String>();
+        for (int offset = 0; offset < 30; offset += 10) {
+            var body = mvc.perform(get("/runs")
+                            .param("limit", "10").param("offset", String.valueOf(offset))
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andReturn().getResponse().getContentAsString();
+            for (var n : mapper.readTree(body)) ids.add(n.get("run_id").asText());
+        }
+        assertThat(ids).hasSize(25);   // Menge statt Anzahl: deckt Lücken UND Dubletten auf
+    }
+
+    @Test void runsClampsLimitAndOffset() throws Exception {
+        seedRunsForTenant(250);
+        mvc.perform(get("/runs").param("limit", "500")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(jsonPath("$.length()").value(200));   // > 200 -> 200
+        mvc.perform(get("/runs").param("limit", "0")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(jsonPath("$.length()").value(100));   // < 1 -> Default 100
+        mvc.perform(get("/runs").param("offset", "-5").param("limit", "3")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(jsonPath("$.length()").value(3));     // < 0 -> 0, kein Fehler
+    }
+
+    @Test void runsAppliesTimeWindow() throws Exception {
+        seedRunsAtMinutes("2026-07-24T12:00:00Z", 5); // 12:00, 11:59, 11:58, 11:57, 11:56
+        mvc.perform(get("/runs")
+                        .param("from", "2026-07-24T11:57:00Z")
+                        .param("to", "2026-07-24T12:00:00Z")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(3));     // from inklusiv, to exklusiv
+    }
+
+    @Test void runsRejectsUnparsableTimestamp() throws Exception {
+        mvc.perform(get("/runs").param("from", "gestern")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test void runsOffsetBeyondEndReturnsEmptyArray() throws Exception {
+        seedRunsForTenant(5);
+        mvc.perform(get("/runs").param("offset", "100")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$.length()").value(0));
     }
 }
