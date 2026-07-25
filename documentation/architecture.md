@@ -148,6 +148,8 @@ streaming_sessions
   last_poll_at  TIMESTAMPTZ   -- nullable
   status        TEXT
   created_at    TIMESTAMPTZ
+  UNIQUE (agent_id) WHERE status = 'open'   -- V15, partial: at most one open session
+                                            -- per agent; closed ones are unconstrained
 ```
 
 ---

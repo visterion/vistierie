@@ -8,6 +8,7 @@ import de.vesterion.vistierie.kill.KillSwitchService;
 import de.vesterion.vistierie.tenants.TenantRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 
@@ -74,7 +75,16 @@ public class StreamingSessionCoordinator {
             var closesAt = now.plusSeconds(durationSecs);
             log.info("streaming-bee: opening session {} for agent {} closes_at={}",
                     sessionId, agent.name(), closesAt);
-            sessions.insertOpen(sessionId, agent.tenantId(), agent.id(), now, closesAt);
+            try {
+                sessions.insertOpen(sessionId, agent.tenantId(), agent.id(), now, closesAt);
+            } catch (DuplicateKeyException e) {
+                // Another caller opened a session between our check above and this insert.
+                // The unique partial index makes that a rejected insert rather than a second
+                // open row, which would break every later findOpenByAgent for this agent.
+                // Losing the race is normal concurrency: adopt the winner's session.
+                log.info("streaming-bee: session for agent {} already opened concurrently,"
+                        + " adopting existing one", agent.name());
+            }
             existing = sessions.findOpenByAgent(agent.id());
         }
 
