@@ -274,11 +274,15 @@ provider the operator wired up for the call's `<tenant, realm, purpose>`.
 ## Quick start
 
 Ten minutes from a clean machine to an audited LLM call — with no provider
-credentials and no cost. Every command and response below is from an end-to-end
-run against `ghcr.io/visterion/vistierie:main`.
+credentials and no cost. Every command below was executed end to end against
+`ghcr.io/visterion/vistierie:main`, and every value shown is verbatim from that
+run; the JSON responses are **abridged for readability** — real responses carry
+additional fields.
 
-**Prerequisites:** Docker with the Compose plugin. Nothing else — no JDK, no
-`htpasswd`, no Postgres.
+**Prerequisites:** Docker with the Compose plugin, and `curl`. Nothing else — no
+JDK, no `htpasswd`, no Postgres. The first `docker compose up -d` pulls
+`ghcr.io/visterion/vistierie:main` and `postgres:17-alpine`, so the machine needs
+network access to `ghcr.io` and Docker Hub (no login: the image is public).
 
 ### 1. Clone and copy the env template
 
@@ -288,10 +292,22 @@ cd vistierie
 cp .env.example .env
 ```
 
-### 2. Generate the admin token hash
+### 2. Fill in `.env`
 
-Vistierie stores only the bcrypt hash of the admin bearer token. A throwaway
-container does the hashing, so nothing has to be installed:
+**(a) A Postgres password.** `.env.example` ships a placeholder — replace it, or
+you run the database with a value that is public knowledge:
+
+```bash
+openssl rand -base64 24
+```
+
+Set the result as `VISTIERIE_DB_PASSWORD` in `.env`. The database is created
+with this password on first start; changing it later means recreating the volume
+(`docker compose down -v`).
+
+**(b) The admin token hash.** Vistierie stores only the bcrypt hash of the admin
+bearer token. A throwaway container does the hashing, so nothing has to be
+installed:
 
 ```bash
 ADMIN_TOKEN=demo-admin-token
@@ -302,13 +318,16 @@ docker run --rm httpd:2.4-alpine htpasswd -bnBC 12 "" "$ADMIN_TOKEN" | tr -d ':\
 $2y$12$sEMQHI3H/GU8qRUjwAhcRu6rDnLlEKC1j.JG3UvmD1Wk/xZSsZkya
 ```
 
-(The output has no trailing newline, so your prompt lands on the same line.)
+Yours will differ — bcrypt salts are random. Set the hash you got as
+`VISTIERIE_ADMIN_TOKEN_HASH` in `.env`; the plaintext `$ADMIN_TOKEN` is what you
+send as `Authorization: Bearer …` later, so keep it. (The command prints no
+trailing newline, so your prompt lands on the same line as the hash.)
 
 > [!IMPORTANT]
-> **Single-quote the hash in `.env`.** Compose interpolates `$name` sequences
+> **Single-quote both values in `.env`.** Compose interpolates `$name` sequences
 > in `.env` values, so an unquoted hash is silently truncated — compose only
 > warns `The "…" variable is not set. Defaulting to a blank string.` and every
-> `/admin/` call then fails with 401. Quote generated passwords too.
+> `/admin/` call then fails with 401. A generated password can contain `$` too.
 >
 > ```dotenv
 > VISTIERIE_DB_PASSWORD='<generated-password>'
@@ -317,7 +336,8 @@ $2y$12$sEMQHI3H/GU8qRUjwAhcRu6rDnLlEKC1j.JG3UvmD1Wk/xZSsZkya
 
 ### 3. Run without any provider credentials
 
-Set this in `.env` for the first run — `MockProvider` then serves deterministic
+`.env.example` already contains this key set to `false` — **change that existing
+line** to `true` for the first run. `MockProvider` then serves deterministic
 canned responses, makes no outbound calls, and registers under the provider name
 `anthropic`, so routing rules are identical to a real deployment:
 
@@ -331,15 +351,29 @@ VISTIERIE_MOCK_LLM=true
 docker compose up -d
 ```
 
+On a clean machine this first pulls the images and creates the network and
+volume (output abridged; the network and volume names are prefixed with your
+directory name):
+
 ```
- Container vistierie-db  Healthy
- Container vistierie     Started
+ Image ghcr.io/visterion/vistierie:main  Pulled
+ Network vistierie_vistierie-net         Created
+ Volume vistierie_vistierie-pgdata       Created
+ Container vistierie-db                  Healthy
+ Container vistierie                     Started
+```
+
+Vistierie listens on `VISTIERIE_PORT` (default `8090`). Set it once — if you
+changed the port in `.env`, change it here too, and every command below follows:
+
+```bash
+export BASE_URL=http://localhost:8090
 ```
 
 Wait for readiness (about 10 s cold start, Flyway migrations included):
 
 ```bash
-curl -s http://localhost:8090/actuator/health
+curl -s "$BASE_URL/actuator/health"
 ```
 
 ```json
@@ -349,7 +383,7 @@ curl -s http://localhost:8090/actuator/health
 ### 5. Create a tenant
 
 ```bash
-curl -s -X POST http://localhost:8090/admin/tenants \
+curl -s -X POST "$BASE_URL/admin/tenants" \
   -H "Authorization: Bearer demo-admin-token" \
   -H "Content-Type: application/json" \
   -d '{"name":"demo"}'
@@ -375,7 +409,7 @@ rule, which is why the responses further down report `claude-haiku-4-5` rather
 than the seeded `claude-sonnet-4-6`:
 
 ```bash
-curl -s -X POST http://localhost:8090/admin/routing-rules \
+curl -s -X POST "$BASE_URL/admin/routing-rules" \
   -H "Authorization: Bearer demo-admin-token" \
   -H "Content-Type: application/json" \
   -d '{"tenant":"demo","realm":null,"purpose":"free_pick",
@@ -396,7 +430,7 @@ even for the synchronous gateway. `tools` and `webhook_token` are mandatory —
 for a tool-less agent pass an empty list and a placeholder token:
 
 ```bash
-curl -s -X POST http://localhost:8090/agents \
+curl -s -X POST "$BASE_URL/agents" \
   -H "Authorization: Bearer $T" -H "Content-Type: application/json" \
   -d '{"name":"demo-agent","system_prompt":"You are a helpful assistant.",
        "model_purpose":"free_pick","tools":[],"webhook_token":"unused-but-required"}'
@@ -413,11 +447,11 @@ Both must exist, otherwise the call is rejected with
 `403 budget_missing_tenant`:
 
 ```bash
-curl -s -X PATCH http://localhost:8090/admin/tenants/demo/budget \
+curl -s -X PATCH "$BASE_URL/admin/tenants/demo/budget" \
   -H "Authorization: Bearer demo-admin-token" -H "Content-Type: application/json" \
   -d '{"daily_cap_micros":1000000,"monthly_cap_micros":10000000}'
 
-curl -s -X PATCH http://localhost:8090/admin/tenants/demo/agents/demo-agent/budget \
+curl -s -X PATCH "$BASE_URL/admin/tenants/demo/agents/demo-agent/budget" \
   -H "Authorization: Bearer demo-admin-token" -H "Content-Type: application/json" \
   -d '{"daily_cap_micros":500000,"monthly_cap_micros":5000000}'
 ```
@@ -432,7 +466,7 @@ curl -s -X PATCH http://localhost:8090/admin/tenants/demo/agents/demo-agent/budg
 ### 9. Make the call
 
 ```bash
-curl -s -X POST http://localhost:8090/llm/complete \
+curl -s -X POST "$BASE_URL/llm/complete" \
   -H "Authorization: Bearer $T" -H "Content-Type: application/json" \
   -d '{"agent_name":"demo-agent","purpose":"free_pick","messages":[{"role":"user","content":"ping"}]}'
 ```
@@ -450,7 +484,7 @@ curl -s -X POST http://localhost:8090/llm/complete \
 stays empty. The audit trail is what proves the call:
 
 ```bash
-curl -s "http://localhost:8090/admin/llm-calls?tenant=demo&limit=5" \
+curl -s "$BASE_URL/admin/llm-calls?tenant=demo&limit=5" \
   -H "Authorization: Bearer demo-admin-token"
 ```
 
@@ -497,7 +531,8 @@ profile ID such as `eu.anthropic.claude-sonnet-4-6`. The SDK reads
 `AWS_BEARER_TOKEN_BEDROCK` natively for ABSK API key authentication.
 
 Long Bedrock calls that exceed the default 180s socket read timeout can be tuned
-via `vistierie.bedrock.read-timeout-seconds` (see configuration.md).
+via `vistierie.bedrock.read-timeout-seconds` (see
+[configuration.md](documentation/configuration.md)).
 
 ### Alternative: Claude Max subscription
 
