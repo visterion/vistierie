@@ -131,11 +131,11 @@ class RunQueryControllerTest extends PostgresTestBase {
     }
 
     // --- /runs pagination -------------------------------------------------
-    // Das @BeforeEach-Fixture legt für jeden Test einen FRISCHEN Tenant an und
-    // erzeugt selbst keine Läufe. /runs ist tenant-scoped, die Erwartungswerte
-    // unten zählen also ausschließlich die hier geseedeten Läufe.
+    // The @BeforeEach fixture creates a FRESH tenant per test and seeds no runs of
+    // its own. /runs is tenant-scoped, so the expectations below count exactly the
+    // runs seeded here and nothing else.
 
-    /** Ein Agent für den aktuellen Tenant; Name eindeutig, kein Schedule (kein Scheduler-Anlauf). */
+    /** One agent for the current tenant; unique name, no schedule (so the scheduler stays out). */
     private UUID seedAgent() {
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "seed-" + agentId, "p", "purpose",
@@ -144,9 +144,9 @@ class RunQueryControllerTest extends PostgresTestBase {
     }
 
     /**
-     * Legt n Läufe für den aktuellen Tenant an, started_at absteigend im Minutenabstand ab `base`.
-     * runs.insert setzt started_at auf now(); der Wert wird danach per SQL nachgezogen
-     * (gleiche Technik wie RunRepositoryTest.seedRuns).
+     * Seeds n runs for the current tenant, started_at descending in one-minute steps from `base`.
+     * runs.insert sets started_at to now(); the value is corrected afterwards via SQL
+     * (same technique as RunRepositoryTest.seedRuns).
      */
     private void seedRunsAtMinutes(String baseIso, int n) {
         var base = Instant.parse(baseIso);
@@ -183,7 +183,7 @@ class RunQueryControllerTest extends PostgresTestBase {
                     .andReturn().getResponse().getContentAsString();
             for (var n : mapper.readTree(body)) ids.add(n.get("run_id").asText());
         }
-        assertThat(ids).hasSize(25);   // Menge statt Anzahl: deckt Lücken UND Dubletten auf
+        assertThat(ids).hasSize(25);   // set, not count: catches gaps AND duplicates
     }
 
     @Test void runsClampsLimitAndOffset() throws Exception {
@@ -193,10 +193,10 @@ class RunQueryControllerTest extends PostgresTestBase {
                 .andExpect(jsonPath("$.length()").value(200));   // > 200 -> 200
         mvc.perform(get("/runs").param("limit", "0")
                         .header("Authorization", "Bearer " + token))
-                .andExpect(jsonPath("$.length()").value(100));   // < 1 -> Default 100
+                .andExpect(jsonPath("$.length()").value(100));   // < 1 -> default 100
         mvc.perform(get("/runs").param("offset", "-5").param("limit", "3")
                         .header("Authorization", "Bearer " + token))
-                .andExpect(jsonPath("$.length()").value(3));     // < 0 -> 0, kein Fehler
+                .andExpect(jsonPath("$.length()").value(3));     // < 0 -> 0, not an error
     }
 
     @Test void runsAppliesTimeWindow() throws Exception {
@@ -206,7 +206,7 @@ class RunQueryControllerTest extends PostgresTestBase {
                         .param("to", "2026-07-24T12:00:00Z")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(3));     // from inklusiv, to exklusiv
+                .andExpect(jsonPath("$.length()").value(3));     // from inclusive, to exclusive
     }
 
     @Test void runsRejectsUnparsableTimestamp() throws Exception {
