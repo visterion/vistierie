@@ -18,18 +18,45 @@ echo "$ADMIN_TOKEN"   # store this; you cannot recover it from the hash
 Then hash it. Vistierie uses Spring Security's `BCryptPasswordEncoder`, which
 accepts the `$2a$` / `$2b$` / `$2y$` variants, so any standard bcrypt tool works.
 
-With `htpasswd` (from `apache2-utils` / `httpd-tools`):
-
-```bash
-htpasswd -bnBC 12 "" "$ADMIN_TOKEN" | tr -d ':\n'
-# → $2y$12$....   use this value as VISTIERIE_ADMIN_TOKEN_HASH
-```
-
-No local tooling? Run `htpasswd` from a throwaway container instead:
+The only prerequisite is Docker, which you already need to run Vistierie — a
+throwaway `httpd` container does the hashing:
 
 ```bash
 docker run --rm httpd:2.4-alpine htpasswd -bnBC 12 "" "$ADMIN_TOKEN" | tr -d ':\n'
+# → $2y$12$....   use this value as VISTIERIE_ADMIN_TOKEN_HASH
 ```
+
+`tr -d ':\n'` strips the trailing newline as well, so the next shell prompt
+lands on the same line as the hash. That is expected; copy only the `$2y$…`
+part.
+
+If you already have `apache2-utils` / `httpd-tools` installed, the same command
+runs locally without a container (`htpasswd` is *not* part of a default
+Debian/Ubuntu install, so do not assume it is there):
+
+```bash
+htpasswd -bnBC 12 "" "$ADMIN_TOKEN" | tr -d ':\n'
+```
+
+> [!IMPORTANT]
+> **Single-quote the hash in `.env`.** Docker Compose interpolates `$name`
+> sequences in `.env` values, and a bcrypt salt is 22 random characters, so
+> almost every hash contains a `$` followed by letters. Unquoted, compose
+> replaces that sequence with an empty string — it only emits
+> `The "…" variable is not set. Defaulting to a blank string.`, the container
+> receives a corrupted hash, and **every `/admin/` call then fails with 401**
+> for no visible reason.
+>
+> ```dotenv
+> # wrong — silently mangled
+> VISTIERIE_ADMIN_TOKEN_HASH=$2y$12$sEMQHI3H/GU8qRUjwAhcRu6rDnLlEKC1j.JG3UvmD1Wk/xZSsZkya
+> # right
+> VISTIERIE_ADMIN_TOKEN_HASH='$2y$12$sEMQHI3H/GU8qRUjwAhcRu6rDnLlEKC1j.JG3UvmD1Wk/xZSsZkya'
+> ```
+>
+> The same applies to `VISTIERIE_DB_PASSWORD` when the generated password
+> contains a `$`. Verify with `docker compose config` (no warnings) or, once the
+> stack runs, `docker exec vistierie printenv VISTIERIE_ADMIN_TOKEN_HASH`.
 
 Set the result as `VISTIERIE_ADMIN_TOKEN_HASH`. Rotating the admin token means
 regenerating the hash and restarting the service.
