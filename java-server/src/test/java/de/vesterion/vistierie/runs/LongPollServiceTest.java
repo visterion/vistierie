@@ -80,9 +80,14 @@ class LongPollServiceTest extends PostgresTestBase {
                 .header("Authorization", "Bearer " + token)
                 .contentType(MediaType.APPLICATION_JSON))
                 .andReturn();
-        mvc.perform(asyncDispatch(pollResp))
+        var body = mvc.perform(asyncDispatch(pollResp))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("done"));
+                .andReturn().getResponse().getContentAsString();
+        // Assert on the parsed body rather than jsonPath: a failed run carries the reason
+        // in "error", and inlining the whole body makes a CI-only failure diagnosable.
+        assertThat(mapper.readTree(body).path("status").asText())
+                .as("run did not complete, body=%s", body)
+                .isEqualTo("done");
         long elapsed = System.currentTimeMillis() - t0;
         assertThat(elapsed).isLessThan(15_000);
     }
