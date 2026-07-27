@@ -2,6 +2,7 @@ package de.vesterion.vistierie.runs;
 
 import de.vesterion.vistierie.agent.runner.AgentDispatcher;
 import de.vesterion.vistierie.agents.AgentRepository;
+import de.vesterion.vistierie.agents.AgentService;
 import de.vesterion.vistierie.budget.BudgetEnforcer;
 import de.vesterion.vistierie.budget.BudgetException;
 import de.vesterion.vistierie.auth.RequestContext;
@@ -47,7 +48,7 @@ public class RunController {
         var tenantId = RequestContext.requireTenantId();
         var tenantName = RequestContext.requireTenantName();
         var a = agents.findByName(tenantId, name)
-                .orElseThrow(() -> new RuntimeException("agent not found: " + name));
+                .orElseThrow(() -> new AgentService.NotFound(name));
         if (a.paused()) {
             return ResponseEntity.status(HttpStatus.CONFLICT).build();
         }
@@ -161,5 +162,10 @@ public class RunController {
                 "tenant", e.tenant(),
                 "agent_name", e.agentName()
         ));
+    }
+
+    @ExceptionHandler(AgentService.NotFound.class)
+    public ResponseEntity<java.util.Map<String, String>> notFound(AgentService.NotFound e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(java.util.Map.of("error", e.getMessage()));
     }
 }

@@ -152,4 +152,23 @@ class RunControllerTest {
         var result = (org.springframework.http.ResponseEntity<?>) deferred.getResult();
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
+
+    /**
+     * Triggering a run for an agent name that doesn't exist must yield 404, not the
+     * default 500 a bare RuntimeException would produce. Callers (e.g. HiveMem's
+     * contradiction dispatcher) rely on 404/403/409 meaning "no run was created" so
+     * they can safely compensate and retry, versus a 5xx meaning "may have started".
+     */
+    @Test void triggerWithUnknownAgentReturns404() {
+        when(agents.findByName(tenantId, "does-not-exist")).thenReturn(Optional.empty());
+
+        var ex = org.junit.jupiter.api.Assertions.assertThrows(
+                de.vesterion.vistierie.agents.AgentService.NotFound.class,
+                () -> controller.trigger("does-not-exist",
+                        new de.vesterion.vistierie.runs.dto.CreateRunRequest(null, null, null)));
+
+        var response = controller.notFound(ex);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(response.getBody()).containsEntry("error", "agent not found: does-not-exist");
+    }
 }
