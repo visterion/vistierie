@@ -110,9 +110,10 @@ bcrypt-compares each one; results are memoised in an in-process cache
 Every LLM call writes a row to `vistierie.llm_calls` via `LlmCallRecorder` —
 **including calls that failed.** On a `ProviderException`, `LlmService` calls
 `recordFailure(...)` before rethrowing, storing status `rate_limited` for
-sub-500 status codes and `error` for 5xx, along with the provider's error code.
-Unsupported-operation failures are recorded as `error` /
-`unsupported_operation`.
+status 429 and `error` for every other status code, along with the provider's
+error code. Unsupported-operation failures are recorded as `error` /
+`unsupported_operation`. `AgentRunner` writes the same kind of failure row (via
+`recordTurnFailure`) for provider errors encountered inside an agent run.
 
 Each row carries the call id, tenant, agent, purpose, realm, provider, model,
 endpoint, input/output/cache token counts, cost in EUR-micros, duration, status,

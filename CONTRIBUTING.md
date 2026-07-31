@@ -140,7 +140,8 @@ public interface LlmProvider {
   multi-image or batch support still compiles and still starts.
 - Throw `LlmProvider.ProviderException(statusCode, errorCode, msg)` for upstream
   failures. `LlmService` catches it, records an audit row with the right status
-  (`rate_limited` for 4xx, `error` for 5xx) and surfaces the error consistently.
+  (`rate_limited` for status 429, `error` for everything else) and surfaces the
+  error consistently.
 
 **Registration is automatic.** `ProviderRegistry` takes `List<LlmProvider>` in
 its constructor and indexes every bean by `name()` at startup — there is no list
