@@ -447,6 +447,13 @@ describe("resultToResponse guard order", () => {
     await expect(ask()).rejects.toMatchObject({ status: 502, code: "upstream_api_error" });
   });
 
+  it("falls back to the code parsed from the text when the field is null", async () => {
+    // Ohne diesen Fall ueberlebt eine Mutation, die den Text-Code-Fallback ganz entfernt.
+    result({ result: "API Error: 529 Overloaded.", api_error_status: null, is_error: true,
+             usage: { input_tokens: 0, output_tokens: 0 } });
+    await expect(ask()).rejects.toMatchObject({ status: 529, code: "upstream_api_error" });
+  });
+
   // --- Stufe 3: Regex als Netz (CLI ohne is_error)
   it("falls back to the regex when neither field is present", async () => {
     result({ result: "API Error: 529 Overloaded.", usage: { input_tokens: 0, output_tokens: 0 } });
