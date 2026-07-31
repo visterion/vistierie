@@ -240,8 +240,10 @@ public class LlmService {
                         && "subscription_exhausted".equals(e.errorCode())) {
                     cooldown.open(Instant.now());
                 }
+                // sc == 429, nicht >= 500: seit dem upstream_api_error-Passthrough ist von diesem
+                // Provider erstmals ein 4xx != 429 erreichbar. Gilt fuer alle Provider gleichermassen.
                 recordFailure(ctx, id, providerName, model, pReq, start,
-                        e.statusCode() >= 500 ? "error" : "rate_limited", e.errorCode());
+                        e.statusCode() == 429 ? "rate_limited" : "error", e.errorCode());
                 throw e;
             } catch (UnsupportedOperationException e) {
                 recordFailure(ctx, id, providerName, model, pReq, start, "error", "unsupported_operation");

@@ -98,7 +98,8 @@ class AgentRunnerFallbackTest extends PostgresTestBase {
     }
 
     private String providerOf(String runId) {
-        return (String) jdbc.sql("SELECT provider FROM vistierie.llm_calls WHERE run_id = ?")
+        return (String) jdbc.sql(
+                "SELECT provider FROM vistierie.llm_calls WHERE run_id = ? AND status = 'ok'")
                 .param(runId).query().singleRow().get("provider");
     }
 
@@ -148,5 +149,21 @@ class AgentRunnerFallbackTest extends PostgresTestBase {
         Run r = runStore.get(runId);
         assertThat(r.status()).isEqualTo("failed");
         assertThat(r.error()).startsWith("internal_error:");
+    }
+
+    @Test void aFallbackRunLeavesExactlyOneErrorAndOneOkRow() throws Exception {
+        var tenantId = UUID.randomUUID();
+        tenants.insert(tenantId, "tn-" + tenantId, "h");
+        registerRoutingWithFallback(tenantId);
+        var agentId = newAgent(tenantId);
+        FailingPrimaryConfig.FAIL.set(new LlmProvider.ProviderException(500, "server_error", "boom"));
+        stub.script(StubLlmScripts.Turn.endTurn("done"));
+
+        var runId = runner.startRunSync(tenantId, agentId, "manual",
+                mapper.readTree("{}"), null, null, null);
+
+        var rows = jdbc.sql("SELECT status FROM vistierie.llm_calls WHERE run_id = ? ORDER BY status")
+                .param(runId).query().listOfRows();
+        assertThat(rows).extracting(r -> r.get("status")).containsExactly("error", "ok");
     }
 }
