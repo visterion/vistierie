@@ -183,8 +183,32 @@ class ClaudeSubscriptionProviderTest {
                 .withStatus(529)
                 .withBody("{\"error\":{\"code\":\"upstream_api_error\"}}")));
         assertThatThrownBy(() -> provider.complete(minimalReq()))
-                .isInstanceOfSatisfying(LlmProvider.ProviderException.class, e ->
-                    assertThat(e.statusCode()).isGreaterThanOrEqualTo(500));
+                .isInstanceOfSatisfying(LlmProvider.ProviderException.class, e -> {
+                    assertThat(e.statusCode()).isEqualTo(529);
+                    assertThat(e.errorCode()).isEqualTo("upstream_api_error");
+                });
+    }
+
+    @Test void upstreamApiError413IsPassedThrough() {
+        stubFor(post(urlEqualTo("/v1/complete")).willReturn(aResponse()
+                .withStatus(413)
+                .withBody("{\"error\":{\"code\":\"upstream_api_error\"}}")));
+        assertThatThrownBy(() -> provider.complete(minimalReq()))
+                .isInstanceOfSatisfying(LlmProvider.ProviderException.class, e -> {
+                    assertThat(e.statusCode()).isEqualTo(413);
+                    assertThat(e.errorCode()).isEqualTo("upstream_api_error");
+                });
+    }
+
+    @Test void upstreamApiError422IsPassedThrough() {
+        stubFor(post(urlEqualTo("/v1/complete")).willReturn(aResponse()
+                .withStatus(422)
+                .withBody("{\"error\":{\"code\":\"upstream_api_error\"}}")));
+        assertThatThrownBy(() -> provider.complete(minimalReq()))
+                .isInstanceOfSatisfying(LlmProvider.ProviderException.class, e -> {
+                    assertThat(e.statusCode()).isEqualTo(422);
+                    assertThat(e.errorCode()).isEqualTo("upstream_api_error");
+                });
     }
 
     @Test void upstreamApiError408IsFlattenedTo502SoItStaysFallbackEligible() {
@@ -198,15 +222,21 @@ class ClaudeSubscriptionProviderTest {
                     assertThat(e.statusCode()).isEqualTo(502));
     }
 
-    @Test void upstreamApiError401IsFlattenedTo502() {
+    @Test void upstreamApiError403IsFlattenedTo502() {
         // Ein abgelaufenes Max-OAuth-Token darf nicht jeden Run toeten — es soll auf Bedrock
         // ausweichen. Deshalb KEIN Pass-Through fuer 401/403.
+        // 403 statt 401: SimpleClientHttpRequestFactory/HttpURLConnection liefert den Body
+        // fuer 401 nicht zuverlaessig aus (code bleibt dann "bridge_error" und der Test
+        // beweist nichts ueber die Whitelist). Bei 403 kommt der Body an, code wird
+        // tatsaechlich "upstream_api_error" geparst und muss trotzdem auf 502 landen.
         stubFor(post(urlEqualTo("/v1/complete")).willReturn(aResponse()
-                .withStatus(401)
+                .withStatus(403)
                 .withBody("{\"error\":{\"code\":\"upstream_api_error\"}}")));
         assertThatThrownBy(() -> provider.complete(minimalReq()))
-                .isInstanceOfSatisfying(LlmProvider.ProviderException.class, e ->
-                    assertThat(e.statusCode()).isEqualTo(502));
+                .isInstanceOfSatisfying(LlmProvider.ProviderException.class, e -> {
+                    assertThat(e.statusCode()).isEqualTo(502);
+                    assertThat(e.errorCode()).isEqualTo("upstream_api_error");
+                });
     }
 
     @Test void nonStandardCodeIsFlattenedTo502() {
