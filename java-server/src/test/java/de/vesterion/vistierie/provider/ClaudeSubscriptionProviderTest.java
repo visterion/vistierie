@@ -139,6 +139,98 @@ class ClaudeSubscriptionProviderTest {
                 .withRequestBody(notMatching(".*target_agent.*")));
     }
 
+    @Test void upstreamApiError400IsPassedThrough() {
+        stubFor(post(urlEqualTo("/v1/complete")).willReturn(aResponse()
+                .withStatus(400)
+                .withBody("{\"error\":{\"code\":\"upstream_api_error\",\"message\":\"API Error: 400\"}}")));
+        assertThatThrownBy(() -> provider.complete(minimalReq()))
+                .isInstanceOfSatisfying(LlmProvider.ProviderException.class, e -> {
+                    assertThat(e.statusCode()).isEqualTo(400);
+                    assertThat(e.errorCode()).isEqualTo("upstream_api_error");
+                });
+    }
+
+    @Test void upstreamApiError429DoesNotBecomeSubscriptionExhausted() {
+        // Cooldown-Schutz: LlmService oeffnet den globalen Breaker nur fuer
+        // statusCode()==429 UND errorCode()=="subscription_exhausted".
+        stubFor(post(urlEqualTo("/v1/complete")).willReturn(aResponse()
+                .withStatus(429)
+                .withBody("{\"error\":{\"code\":\"upstream_api_error\"}}")));
+        assertThatThrownBy(() -> provider.complete(minimalReq()))
+                .isInstanceOfSatisfying(LlmProvider.ProviderException.class, e -> {
+                    assertThat(e.statusCode()).isEqualTo(429);
+                    assertThat(e.errorCode()).isEqualTo("upstream_api_error");
+                });
+    }
+
+    @Test void plain429StillOpensTheCooldownPath() {
+        // Invertierte Bedingung, nicht auf subscription_exhausted verengt: ein 429 mit
+        // unlesbarem Body (nginx-Fehlerseite -> code bleibt "bridge_error") muss weiterhin
+        // als Erschoepfung gelten. Heutiges Verhalten, bewusst erhalten.
+        stubFor(post(urlEqualTo("/v1/complete")).willReturn(aResponse()
+                .withStatus(429)
+                .withHeader("Content-Type", "text/html")
+                .withBody("<html>429</html>")));
+        assertThatThrownBy(() -> provider.complete(minimalReq()))
+                .isInstanceOfSatisfying(LlmProvider.ProviderException.class, e -> {
+                    assertThat(e.statusCode()).isEqualTo(429);
+                    assertThat(e.errorCode()).isEqualTo("subscription_exhausted");
+                });
+    }
+
+    @Test void upstreamApiError529IsPassedThroughAndStaysFallbackEligible() {
+        stubFor(post(urlEqualTo("/v1/complete")).willReturn(aResponse()
+                .withStatus(529)
+                .withBody("{\"error\":{\"code\":\"upstream_api_error\"}}")));
+        assertThatThrownBy(() -> provider.complete(minimalReq()))
+                .isInstanceOfSatisfying(LlmProvider.ProviderException.class, e ->
+                    assertThat(e.statusCode()).isGreaterThanOrEqualTo(500));
+    }
+
+    @Test void upstreamApiError408IsFlattenedTo502SoItStaysFallbackEligible() {
+        // shouldFallback ist `429 || >= 500`. Ein durchgereichter 408 waere NICHT
+        // fallback-faehig und wuerde einen transienten Gateway-Timeout zum Run-Abbruch machen.
+        stubFor(post(urlEqualTo("/v1/complete")).willReturn(aResponse()
+                .withStatus(408)
+                .withBody("{\"error\":{\"code\":\"upstream_api_error\"}}")));
+        assertThatThrownBy(() -> provider.complete(minimalReq()))
+                .isInstanceOfSatisfying(LlmProvider.ProviderException.class, e ->
+                    assertThat(e.statusCode()).isEqualTo(502));
+    }
+
+    @Test void upstreamApiError401IsFlattenedTo502() {
+        // Ein abgelaufenes Max-OAuth-Token darf nicht jeden Run toeten — es soll auf Bedrock
+        // ausweichen. Deshalb KEIN Pass-Through fuer 401/403.
+        stubFor(post(urlEqualTo("/v1/complete")).willReturn(aResponse()
+                .withStatus(401)
+                .withBody("{\"error\":{\"code\":\"upstream_api_error\"}}")));
+        assertThatThrownBy(() -> provider.complete(minimalReq()))
+                .isInstanceOfSatisfying(LlmProvider.ProviderException.class, e ->
+                    assertThat(e.statusCode()).isEqualTo(502));
+    }
+
+    @Test void nonStandardCodeIsFlattenedTo502() {
+        // LlmController.java:61 ruft fuer < 500 HttpStatus.valueOf(); ein 430 wuerde dort im
+        // ExceptionHandler selbst werfen und aus einer sauberen 502 einen 500 machen.
+        stubFor(post(urlEqualTo("/v1/complete")).willReturn(aResponse()
+                .withStatus(430)
+                .withBody("{\"error\":{\"code\":\"upstream_api_error\"}}")));
+        assertThatThrownBy(() -> provider.complete(minimalReq()))
+                .isInstanceOfSatisfying(LlmProvider.ProviderException.class, e ->
+                    assertThat(e.statusCode()).isEqualTo(502));
+    }
+
+    @Test void existingBridgeCodesKeepTheir502Mapping() {
+        stubFor(post(urlEqualTo("/v1/complete")).willReturn(aResponse()
+                .withStatus(409)
+                .withBody("{\"error\":{\"code\":\"session_busy\"}}")));
+        assertThatThrownBy(() -> provider.complete(minimalReq()))
+                .isInstanceOfSatisfying(LlmProvider.ProviderException.class, e -> {
+                    assertThat(e.statusCode()).isEqualTo(502);
+                    assertThat(e.errorCode()).isEqualTo("session_busy");
+                });
+    }
+
     @Test void completeMapsToolUseResponse() {
         var toolUseBody = """
                 {"text":"","stop_reason":"tool_use","model":"m",
