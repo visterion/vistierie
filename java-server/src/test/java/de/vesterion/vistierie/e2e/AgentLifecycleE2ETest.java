@@ -87,7 +87,10 @@ class AgentLifecycleE2ETest extends PostgresTestBase {
                 .contentType(MediaType.APPLICATION_JSON).content(createBody))
                 .andExpect(status().isCreated());
         var agentId = agentId("a");
-        seedOperationalBudget(tenants.findByName(tenantName).orElseThrow().id(), agentId, 100_000L, 50_000L);
+        // Caps sized above the pre-call budget reservation, which treats DEFAULT_MAX_TOKENS
+        // (32_768) as worst-case output tokens: 32_768/1e6 * 4_600_000 (claude-haiku-4-5 output
+        // rate) ~= 150_733 micros reserved before the stub call even runs.
+        seedOperationalBudget(tenants.findByName(tenantName).orElseThrow().id(), agentId, 1_000_000L, 500_000L);
 
         stub.script(StubLlmScripts.Turn.endTurn("{\"x\":\"yes\"}"));
         var triggerResp = mvc.perform(post("/agents/a/run")

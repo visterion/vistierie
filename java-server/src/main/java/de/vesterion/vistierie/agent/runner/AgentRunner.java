@@ -40,8 +40,17 @@ public class AgentRunner {
 
     private static final Logger log = LoggerFactory.getLogger(AgentRunner.class);
 
-    /** Per-turn output-token cap applied when an agent does not set its own {@code max_tokens}. */
-    static final int DEFAULT_MAX_TOKENS = 8192;
+    /**
+     * Per-turn output-token cap applied when an agent does not set its own {@code max_tokens}.
+     *
+     * <p>32k, nicht 8192: Opus 5 laeuft laut Modelltabelle der CLI mit
+     * {@code default_effort:"high"} und {@code adaptive_thinking}, und
+     * {@code max_output_tokens.default} ist dort 64000. {@code max_tokens} deckelt Thinking
+     * UND Antwort gemeinsam; mit 8192 wuerde ein denkender Turn abgeschnitten. Seit dem
+     * upstream_api_error-Guard wuerde daraus ein 502 und damit ein stiller, bezahlter
+     * Bedrock-Fallback — aus einem sichtbaren Bug eine unsichtbare Kostenstelle.
+     */
+    static final int DEFAULT_MAX_TOKENS = 32768;
 
     private final AgentRepository agents;
     private final RunStore runs;
