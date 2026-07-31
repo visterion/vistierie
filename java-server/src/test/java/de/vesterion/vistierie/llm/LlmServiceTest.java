@@ -429,10 +429,10 @@ class LlmServiceTest {
         assertThat(res.response().cost_micros()).isZero();
         var rows = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
         verify(recorder).insertWithBody(rows.capture(), any(), any());
-        // 1M input tokens of claude-opus-4-8 = 13_800_000 micros (PriceTable)
+        // 1M input tokens of claude-opus-4-8 = 4_600_000 micros (PriceTable, 5 $ @ 0,92)
         assertThat(rows.getValue().costMicros()).isZero();
-        assertThat(rows.getValue().shadowCostMicros()).isEqualTo(13_800_000L);
-        verify(metrics).recordShadowCost("claude-subscription", "claude-opus-4-8", "complete", 13_800_000L);
+        assertThat(rows.getValue().shadowCostMicros()).isEqualTo(4_600_000L);
+        verify(metrics).recordShadowCost("claude-subscription", "claude-opus-4-8", "complete", 4_600_000L);
     }
 
     @Test void subscriptionCallWithUnknownModelHasNullShadowCost() {
