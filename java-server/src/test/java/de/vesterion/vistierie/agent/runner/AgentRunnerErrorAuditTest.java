@@ -139,7 +139,7 @@ class AgentRunnerErrorAuditTest extends PostgresTestBase {
         assertThat(rows.get(0).get("error_code")).isEqualTo("upstream_api_error");
     }
 
-    @Test void a429IsLabelledRateLimitedAndA400IsNot() throws Exception {
+    @Test void a400IsLabelledError() throws Exception {
         var tenantId = UUID.randomUUID();
         tenants.insert(tenantId, "tn-" + tenantId, "h");
         registerRoutingNoFallback(tenantId);
@@ -157,6 +157,27 @@ class AgentRunnerErrorAuditTest extends PostgresTestBase {
         // NICHT "rate_limited": mit A1.2 ist erstmals ein 4xx != 429 erreichbar, und ein
         // invalid_request als rate_limited zu buchen vergiftet die Ratelimit-Dashboards.
         assertThat(row.get("status")).isEqualTo("error");
+    }
+
+    @Test void a429IsLabelledRateLimited() throws Exception {
+        var tenantId = UUID.randomUUID();
+        tenants.insert(tenantId, "tn-" + tenantId, "h");
+        registerRoutingNoFallback(tenantId);
+        var agentId = newAgent(tenantId);
+        FailingPrimaryConfig.FAIL.set(
+                new LlmProvider.ProviderException(429, "rate_limit_error", "API Error: 429"));
+
+        // kein Fallback konfiguriert -> Run scheitert, aber die Zeile muss trotzdem da sein
+        var runId = runner.startRunSync(tenantId, agentId, "manual",
+                mapper.readTree("{}"), null, null, null);
+
+        assertThat(statusOf(runId)).isEqualTo("failed");
+        var row = jdbc.sql("SELECT status FROM vistierie.llm_calls WHERE run_id = ?")
+                      .param(runId).query().singleRow();
+        // sc == 429 ist der einzige Statuscode, der als rate_limited gebucht wird — ohne diesen
+        // Test bliebe der 429-Zweig der Formel ungetestet (die 4xx-Ungleich-429-Tests decken nur
+        // den error-Zweig ab).
+        assertThat(row.get("status")).isEqualTo("rate_limited");
     }
 
     @Test void aFailingFallbackAlsoGetsItsOwnRow() throws Exception {

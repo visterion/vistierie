@@ -193,6 +193,27 @@ class LlmServiceTest {
         assertThat(captor.getValue().errorCode()).isEqualTo("rate_limit_error");
     }
 
+    @Test void completeProvider400RecordedAsError() {
+        // sc == 429, nicht >= 500: seit dem upstream_api_error-Passthrough ist von diesem
+        // Provider erstmals ein 4xx != 429 erreichbar. Ohne diesen Test bliebe eine Regression
+        // auf die alte ">= 500"-Formel unentdeckt, da alle uebrigen rate_limited-Assertions
+        // (:192, :272, :347) ausschliesslich 429 verwenden — dem einzigen Statuscode, bei dem
+        // beide Formeln uebereinstimmen.
+        when(routing.resolve(any(), any(), any(), any()))
+                .thenReturn(new RoutingDecision("anthropic", "claude-haiku-4-5", false));
+        when(providers.get("anthropic")).thenReturn(provider);
+        when(provider.complete(any())).thenThrow(
+                new LlmProvider.ProviderException(400, "upstream_api_error", "bad request"));
+
+        assertThatThrownBy(() -> svc.complete(completeReq()))
+                .isInstanceOf(LlmProvider.ProviderException.class);
+
+        var captor = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
+        verify(recorder).insertWithBody(captor.capture(), any(), eq(null));
+        assertThat(captor.getValue().status()).isEqualTo("error");
+        assertThat(captor.getValue().errorCode()).isEqualTo("upstream_api_error");
+    }
+
     private MultiVisionRequest multiVisionReq() {
         return new MultiVisionRequest("writer", "test_purpose", "test_realm",
                 List.of(new MultiVisionRequest.Image("base64", "image/png", "AAAA"),
