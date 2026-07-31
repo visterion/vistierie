@@ -10,7 +10,7 @@ import {
   type ToolDefWire,
 } from "./types.js";
 import type { PendingTool, Session, SessionRuntime, SessionStore, ToolResult } from "./sessions.js";
-import { mapSdkError, QUOTA } from "./errors.js";
+import { API_ERROR, AUTH, QUOTA, apiErrorFrom, clampApiStatus, mapSdkError } from "./errors.js";
 
 /**
  * Flatten the (opaque) Vistierie message history into one content-block list
@@ -107,15 +107,42 @@ function resultToResponse(msg: Record<string, any>, model: string): CompleteResp
   if (msg.subtype === "success") {
     const text = String(msg.result ?? "");
     const outputTokens = msg.usage?.output_tokens ?? 0;
-    // A Max usage-limit reply arrives as a "success" result with 0 output tokens + limit
-    // prose. Surface as 429 so Vistierie fails over to Bedrock instead of passing the limit
-    // text through (which fails the consumer's schema parse). msg.usage?.output_tokens===0
-    // (present-and-zero) guards against real content that merely mentions limits (tokens > 0)
-    // and against a missing/degenerate usage object being misread as zero. Placed in the
-    // shared resultToResponse so BOTH the plain and session/tool completion paths are covered.
-    if (msg.usage?.output_tokens === 0 && QUOTA.test(text)) {
+
+    // 1. Kontingent-Erschoepfung. Neu ist NUR der Praefix-Ausschluss: der transiente 429
+    //    der CLI traegt "API Error:" UND matcht QUOTA (sein Text enthaelt "not your usage
+    //    limit"), die echte Erschoepfung traegt den Praefix nie. Ohne den Ausschluss
+    //    oeffnet ein Anthropic-Lastabwurf den globalen, tenant-uebergreifenden Cooldown.
+    //    Die Erschoepfung traegt api_error_status:429 genauso wie der transiente Fall —
+    //    das Feld taugt hier NICHT als Diskriminator.
+    if (!API_ERROR.test(text) && msg.usage?.output_tokens === 0 && QUOTA.test(text)) {
       throw new BridgeError(429, "subscription_exhausted", text);
     }
+
+    // 2a. Auth behaelt seinen eigenen Code. Die CLI baut die Auth-Meldungen ueber `_u`,
+    //     sie kommen also als ERFOLGS-Result mit is_error:true an — nicht ueber
+    //     mapSdkError. Status 500 (nicht 401), damit shouldFallback (429 || >= 500)
+    //     greift: ein abgelaufenes Token soll auf Bedrock ausweichen, nicht den Run toeten.
+    if ((msg.api_error_status != null || msg.is_error === true) && AUTH.test(text)) {
+      throw new BridgeError(500, "auth_expired", text);
+    }
+
+    // 2b. Alle uebrigen API-Fehler, strukturell. `is_error` ist auf SDKResultSuccess nicht
+    //     optional und deckt auch die Klassen ohne Feld und ohne Praefix ab (Timeout,
+    //     High-Load, leeres Result). `is_error === true` gilt genau dann, wenn der
+    //     zurueckgegebene Text DER FEHLERTEXT ist — beide Result-Builder der CLI leiten
+    //     Flag und Text aus derselben Message ab. Eine echte Antwort kann hier nicht
+    //     gekapert werden.
+    if (msg.api_error_status != null || msg.is_error === true) {
+      const m = API_ERROR.exec(text);
+      throw new BridgeError(
+        clampApiStatus(msg.api_error_status ?? (m?.[1] ? Number(m[1]) : undefined)),
+        "upstream_api_error", text);
+    }
+
+    // 3. Regex allein — Sicherheitsnetz fuer CLI-Versionen ohne `is_error`.
+    const fromText = apiErrorFrom(text);
+    if (fromText) throw fromText;
+
     return {
       text,
       stop_reason: "end_turn",
