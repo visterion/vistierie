@@ -12,6 +12,7 @@ import de.vesterion.vistierie.routing.RoutingResolver;
 import de.vesterion.vistierie.runs.Run;
 import de.vesterion.vistierie.runs.RunStore;
 import de.vesterion.vistierie.tenants.TenantRepository;
+import de.vesterion.vistierie.transcript.RunTranscriptRepository;
 import de.vesterion.vistierie.testsupport.OperationalBudgetFixtures;
 import de.vesterion.vistierie.testsupport.StubLlmProvider;
 import de.vesterion.vistierie.testsupport.StubLlmScripts;
@@ -32,7 +33,6 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 
 /**
@@ -54,7 +54,13 @@ class AgentRunnerErrorAuditTest extends PostgresTestBase {
                 @Override public String name() { return "failing"; }
                 @Override public ProviderResponse complete(ProviderRequest req) {
                     var e = FAIL.get();
-                    if (e != null) throw e;
+                    if (e != null) {
+                        // A small, deliberate delay so the measured duration_ms (F1) is reliably
+                        // non-zero — an instant in-process throw can otherwise round to 0ms and
+                        // make the "real duration, not the 0 literal" assertion meaningless.
+                        try { Thread.sleep(5); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+                        throw e;
+                    }
                     throw new IllegalStateException("no failure scripted");
                 }
                 @Override public ProviderResponse vision(String m, int t, String mt, String b, String p) {
@@ -74,6 +80,7 @@ class AgentRunnerErrorAuditTest extends PostgresTestBase {
     @Autowired RoutingRuleRepository routingRules;
     @Autowired RoutingResolver routingResolver;
     @Autowired OperationalBudgetFixtures budgetFixtures;
+    @Autowired RunTranscriptRepository transcripts;
 
     // Spy (not mock): delegates to the real recorder by default, so every test's normal audit
     // rows still land in the DB. Only anAuditWriteFailureDoesNotSwallowTheProviderException
@@ -129,7 +136,7 @@ class AgentRunnerErrorAuditTest extends PostgresTestBase {
                 mapper.readTree("{}"), null, null, null);
 
         assertThat(statusOf(runId)).isEqualTo("done");
-        var rows = jdbc.sql("SELECT id, status, error_code, provider FROM vistierie.llm_calls "
+        var rows = jdbc.sql("SELECT id, status, error_code, provider, duration_ms FROM vistierie.llm_calls "
                           + "WHERE run_id = ? ORDER BY status").param(runId).query().listOfRows();
         assertThat(rows).hasSize(2);
         assertThat(rows).extracting(r -> r.get("status")).containsExactly("error", "ok");
@@ -137,6 +144,17 @@ class AgentRunnerErrorAuditTest extends PostgresTestBase {
         // DuplicateKeyException geworfen und einen geretteten Run in failed verwandelt.
         assertThat(rows.get(0).get("id")).isNotEqualTo(rows.get(1).get("id"));
         assertThat(rows.get(0).get("error_code")).isEqualTo("upstream_api_error");
+        // F1: duration_ms must come from the actual measurement, not the literal 0 the audit row
+        // used to carry for every failure.
+        assertThat((Number) rows.get(0).get("duration_ms")).isNotEqualTo(0);
+
+        // F1: the upstream error text must survive into llm_call_bodies.response_text — the same
+        // field the 2026-07-29 incident was diagnosed from. Before the fix this was NULL for
+        // every failure row.
+        var errorId = (String) rows.get(0).get("id");
+        var responseText = jdbc.sql("SELECT response_text FROM vistierie.llm_call_bodies WHERE call_id = ?")
+                .param(errorId).query(String.class).single();
+        assertThat(responseText).contains("API Error: 529");
     }
 
     @Test void a400IsLabelledError() throws Exception {
@@ -210,10 +228,11 @@ class AgentRunnerErrorAuditTest extends PostgresTestBase {
         stub.script(StubLlmScripts.Turn.endTurn("done"));
         // LlmCallRecorder.insertWithBody ist @Transactional. Ohne den nicht-fatalen Wrapper
         // wuerde ein DB-Schluckauf die urspruengliche ProviderException ERSETZEN und den noch
-        // moeglichen Fallback-Aufruf ueberspringen. isNull() matcht nur die Fehlerzeile (res ==
-        // null); die Erfolgszeile des Fallbacks bleibt unangetastet.
+        // moeglichen Fallback-Aufruf ueberspringen. any(String.class) matcht nur die Fehlerzeile
+        // (den String-Overload); die Erfolgszeile des Fallbacks (ProviderResponse-Overload)
+        // bleibt unangetastet.
         doThrow(new DataAccessResourceFailureException("db down"))
-                .when(recorder).insertWithBody(any(), any(), isNull());
+                .when(recorder).insertWithBody(any(), any(), any(String.class));
 
         var runId = runner.startRunSync(tenantId, agentId, "manual",
                 mapper.readTree("{}"), null, null, null);   // muss durchlaufen, nicht scheitern
@@ -238,5 +257,27 @@ class AgentRunnerErrorAuditTest extends PostgresTestBase {
         var row = jdbc.sql("SELECT error_code FROM vistierie.llm_calls "
                          + "WHERE run_id = ? AND status <> 'ok'").param(runId).query().singleRow();
         assertThat(row.get("error_code")).isEqualTo("unsupported_operation");
+    }
+
+    @Test void fallbackRescuedRunsTranscriptContainsOnlyTheSuccessfulTurn() throws Exception {
+        // F2: recordTurnFailure is the first code path that writes a non-'ok' llm_calls row WITH
+        // a run_id (LlmService.recordFailure always passes null for run_id on failure). Without
+        // "AND c.status = 'ok'" in RunTranscriptRepository.findCallsByRun, the failed primary
+        // attempt shows up as a phantom turn in the transcript alongside the real, successful one.
+        var tenantId = UUID.randomUUID();
+        tenants.insert(tenantId, "tn-" + tenantId, "h");
+        registerRoutingWithFallback(tenantId);
+        var agentId = newAgent(tenantId);
+        FailingPrimaryConfig.FAIL.set(
+                new LlmProvider.ProviderException(529, "upstream_api_error", "API Error: 529"));
+        stub.script(StubLlmScripts.Turn.endTurn("done"));
+
+        var runId = runner.startRunSync(tenantId, agentId, "manual",
+                mapper.readTree("{}"), null, null, null);
+
+        assertThat(statusOf(runId)).isEqualTo("done");
+        var calls = transcripts.findCallsByRun(runId);
+        assertThat(calls).hasSize(1);
+        assertThat(calls.get(0).responseText()).isEqualTo("done");
     }
 }

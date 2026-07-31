@@ -102,7 +102,7 @@ class LlmServiceTest {
         assertThat(res.response().llm_call_id()).isNotBlank();
 
         var captor = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
-        verify(recorder).insertWithBody(captor.capture(), any(), any());
+        verify(recorder).insertWithBody(captor.capture(), any(), any(ProviderResponse.class));
         var row = captor.getValue();
         assertThat(row.status()).isEqualTo("ok");
         assertThat(row.endpoint()).isEqualTo("complete");
@@ -171,7 +171,9 @@ class LlmServiceTest {
                 .isInstanceOf(LlmProvider.ProviderException.class);
 
         var captor = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
-        verify(recorder).insertWithBody(captor.capture(), any(), eq(null));
+        // F1: the failure row's response text is the ProviderException's message ("down") — the
+        // upstream error text that would otherwise be lost outside the application log.
+        verify(recorder).insertWithBody(captor.capture(), any(), eq("down"));
         var row = captor.getValue();
         assertThat(row.status()).isEqualTo("error");
         assertThat(row.errorCode()).isEqualTo("overloaded");
@@ -188,7 +190,7 @@ class LlmServiceTest {
                 .isInstanceOf(LlmProvider.ProviderException.class);
 
         var captor = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
-        verify(recorder).insertWithBody(captor.capture(), any(), eq(null));
+        verify(recorder).insertWithBody(captor.capture(), any(), eq("slow down"));
         assertThat(captor.getValue().status()).isEqualTo("rate_limited");
         assertThat(captor.getValue().errorCode()).isEqualTo("rate_limit_error");
     }
@@ -209,7 +211,7 @@ class LlmServiceTest {
                 .isInstanceOf(LlmProvider.ProviderException.class);
 
         var captor = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
-        verify(recorder).insertWithBody(captor.capture(), any(), eq(null));
+        verify(recorder).insertWithBody(captor.capture(), any(), eq("bad request"));
         assertThat(captor.getValue().status()).isEqualTo("error");
         assertThat(captor.getValue().errorCode()).isEqualTo("upstream_api_error");
     }
@@ -242,7 +244,7 @@ class LlmServiceTest {
         assertThat(captured.get(0).mediaType()).isEqualTo("image/png");
         assertThat(captured.get(1).mediaType()).isEqualTo("image/png");
         var captor = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
-        verify(recorder).insertWithBody(captor.capture(), any(), any());
+        verify(recorder).insertWithBody(captor.capture(), any(), any(ProviderResponse.class));
         assertThat(captor.getValue().endpoint()).isEqualTo("vision-multi");
         assertThat(captor.getValue().status()).isEqualTo("ok");
         assertThat(captor.getValue().agentId()).isEqualTo(agentId);
@@ -274,7 +276,7 @@ class LlmServiceTest {
                 .isInstanceOf(LlmProvider.ProviderException.class);
 
         var captor = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
-        verify(recorder).insertWithBody(captor.capture(), any(), eq(null));
+        verify(recorder).insertWithBody(captor.capture(), any(), eq("boom"));
         assertThat(captor.getValue().status()).isEqualTo("error");
     }
 
@@ -289,7 +291,7 @@ class LlmServiceTest {
                 .isInstanceOf(LlmProvider.ProviderException.class);
 
         var captor = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
-        verify(recorder).insertWithBody(captor.capture(), any(), eq(null));
+        verify(recorder).insertWithBody(captor.capture(), any(), eq("slow down"));
         assertThat(captor.getValue().status()).isEqualTo("rate_limited");
         assertThat(captor.getValue().endpoint()).isEqualTo("vision-multi");
         assertThat(captor.getValue().errorCode()).isEqualTo("rate_limit_error");
@@ -308,7 +310,7 @@ class LlmServiceTest {
 
         assertThat(res.response().text()).isEqualTo("a cat");
         var captor = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
-        verify(recorder).insertWithBody(captor.capture(), any(), any());
+        verify(recorder).insertWithBody(captor.capture(), any(), any(ProviderResponse.class));
         assertThat(captor.getValue().endpoint()).isEqualTo("vision");
         assertThat(captor.getValue().status()).isEqualTo("ok");
         assertThat(captor.getValue().agentId()).isEqualTo(agentId);
@@ -341,7 +343,7 @@ class LlmServiceTest {
                 .isInstanceOf(LlmProvider.ProviderException.class);
 
         var captor = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
-        verify(recorder).insertWithBody(captor.capture(), any(), eq(null));
+        verify(recorder).insertWithBody(captor.capture(), any(), eq("boom"));
         assertThat(captor.getValue().status()).isEqualTo("error");
     }
 
@@ -362,12 +364,16 @@ class LlmServiceTest {
         assertThat(res.response().provider()).isEqualTo("anthropic");
         assertThat(res.response().model()).isEqualTo("claude-haiku-4-5");
         verify(metrics).recordFallback("claude-subscription", "anthropic", "rate_limited");
-        // two audit rows: failed primary + successful fallback
-        var rows = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
-        verify(recorder, org.mockito.Mockito.times(2)).insertWithBody(rows.capture(), any(), any());
-        assertThat(rows.getAllValues().get(0).status()).isEqualTo("rate_limited");
-        assertThat(rows.getAllValues().get(1).status()).isEqualTo("ok");
-        assertThat(rows.getAllValues().get(0).id()).isNotEqualTo(rows.getAllValues().get(1).id());
+        // two audit rows: failed primary (String overload, F1: carries the upstream message) +
+        // successful fallback (ProviderResponse overload). The overloads are distinct methods to
+        // Mockito, so each is captured/verified separately.
+        var failRow = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
+        verify(recorder).insertWithBody(failRow.capture(), any(), eq("limit"));
+        var okRow = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
+        verify(recorder).insertWithBody(okRow.capture(), any(), any(ProviderResponse.class));
+        assertThat(failRow.getValue().status()).isEqualTo("rate_limited");
+        assertThat(okRow.getValue().status()).isEqualTo("ok");
+        assertThat(failRow.getValue().id()).isNotEqualTo(okRow.getValue().id());
     }
 
     @Test void no4xxFallback() {
@@ -428,7 +434,7 @@ class LlmServiceTest {
 
         assertThat(res.response().cost_micros()).isZero();
         var rows = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
-        verify(recorder).insertWithBody(rows.capture(), any(), any());
+        verify(recorder).insertWithBody(rows.capture(), any(), any(ProviderResponse.class));
         // 1M input tokens of claude-opus-4-8 = 4_600_000 micros (PriceTable, 5 $ @ 0,92)
         assertThat(rows.getValue().costMicros()).isZero();
         assertThat(rows.getValue().shadowCostMicros()).isEqualTo(4_600_000L);
@@ -445,7 +451,7 @@ class LlmServiceTest {
         var res = svc.complete(completeReq());
         assertThat(res.response().cost_micros()).isZero();
         var rows = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
-        verify(recorder).insertWithBody(rows.capture(), any(), any());
+        verify(recorder).insertWithBody(rows.capture(), any(), any(ProviderResponse.class));
         assertThat(rows.getValue().shadowCostMicros()).isNull();
     }
 
@@ -458,7 +464,7 @@ class LlmServiceTest {
         when(provider.complete(any())).thenReturn(new ProviderResponse(
                 "ok", "end_turn", new Usage(10, 20, 0, 0), "claude-haiku-4-5"));
         org.mockito.Mockito.doThrow(new RuntimeException("db down"))
-                .when(recorder).insertWithBody(any(), any(), any());
+                .when(recorder).insertWithBody(any(), any(), any(ProviderResponse.class));
 
         var res = svc.complete(completeReq());
 
@@ -576,7 +582,7 @@ class LlmServiceTest {
         var res = svc.complete(completeReq());
         assertThat(res.response().cost_micros()).isGreaterThan(0);
         var rows = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
-        verify(recorder).insertWithBody(rows.capture(), any(), any());
+        verify(recorder).insertWithBody(rows.capture(), any(), any(ProviderResponse.class));
         assertThat(rows.getValue().shadowCostMicros()).isNull();
     }
 }

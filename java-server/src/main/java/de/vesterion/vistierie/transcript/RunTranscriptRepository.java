@@ -32,7 +32,7 @@ public class RunTranscriptRepository {
                        b.request_json, b.response_text, b.response_content_json
                 FROM vistierie.llm_calls c
                 LEFT JOIN vistierie.llm_call_bodies b ON b.call_id = c.id
-                WHERE c.run_id = ?
+                WHERE c.run_id = ? AND c.status = 'ok'
                 ORDER BY c.created_at, c.id
                 """).param(runId).query(this::map).list();
     }
