@@ -6,6 +6,7 @@ import de.vesterion.vistierie.audit.LlmCallRecorder;
 import de.vesterion.vistierie.budget.BudgetEnforcer;
 import de.vesterion.vistierie.budget.BudgetException;
 import de.vesterion.vistierie.kill.KillSwitchService;
+import de.vesterion.vistierie.llm.LlmMetrics;
 import de.vesterion.vistierie.pricing.PriceTable;
 import de.vesterion.vistierie.provider.ClaudeSubscriptionProvider;
 import de.vesterion.vistierie.provider.LlmProvider;
@@ -40,8 +41,17 @@ public class AgentRunner {
 
     private static final Logger log = LoggerFactory.getLogger(AgentRunner.class);
 
-    /** Per-turn output-token cap applied when an agent does not set its own {@code max_tokens}. */
-    static final int DEFAULT_MAX_TOKENS = 8192;
+    /**
+     * Per-turn output-token cap applied when an agent does not set its own {@code max_tokens}.
+     *
+     * <p>32k, nicht 8192: Opus 5 laeuft laut Modelltabelle der CLI mit
+     * {@code default_effort:"high"} und {@code adaptive_thinking}, und
+     * {@code max_output_tokens.default} ist dort 64000. {@code max_tokens} deckelt Thinking
+     * UND Antwort gemeinsam; mit 8192 wuerde ein denkender Turn abgeschnitten. Seit dem
+     * upstream_api_error-Guard wuerde daraus ein 502 und damit ein stiller, bezahlter
+     * Bedrock-Fallback — aus einem sichtbaren Bug eine unsichtbare Kostenstelle.
+     */
+    static final int DEFAULT_MAX_TOKENS = 32768;
 
     private final AgentRepository agents;
     private final RunStore runs;
@@ -60,6 +70,7 @@ public class AgentRunner {
     private final ObjectMapper mapper;
     private final RunToolCallRepository toolCalls;
     private final Clock clock;
+    private final LlmMetrics metrics;
 
     public AgentRunner(AgentRepository agents, RunStore runs,
                        RoutingResolver routing, ProviderRegistry providers,
@@ -72,7 +83,8 @@ public class AgentRunner {
                        ExecutorService subagentExecutor,
                        ObjectMapper mapper,
                        RunToolCallRepository toolCalls,
-                       Clock clock) {
+                       Clock clock,
+                       LlmMetrics metrics) {
         this.agents = agents;
         this.runs = runs;
         this.routing = routing;
@@ -90,6 +102,7 @@ public class AgentRunner {
         this.mapper = mapper;
         this.toolCalls = toolCalls;
         this.clock = clock;
+        this.metrics = metrics;
     }
 
     /** Synchronous run starter — used in tests; production path enqueues. */
@@ -223,9 +236,15 @@ public class AgentRunner {
             try (var res = budgets.reserveOrThrow(run.tenantId(), tenantName,
                     run.agentId(), agentName, estimate)) {
                 boolean fellBack = false;
+                long primaryStart = System.nanoTime();
                 try {
                     pRes = provider.complete(providerReq);
                 } catch (RuntimeException e) {
+                    // ZUERST protokollieren, fuer JEDEN Ausgang. Eine Zeile "vor dem throw"
+                    // erfasste nur den Zweig ohne Fallback; bei geglaecktem Fallback bliebe
+                    // der Primary-Fehler unprotokolliert und die Spur waere trotz Fix weg.
+                    recordTurnFailure(runId, run.tenantId(), run.agentId(), modelPurpose,
+                                      providerName, decision.model(), providerReq, e, primaryStart);
                     // Mirror LlmService: on a retryable primary failure with a configured fallback,
                     // retry once against the fallback provider. Never send the bridge session id
                     // cross-provider — sessions are bridge-specific.
@@ -239,7 +258,16 @@ public class AgentRunner {
                     usedReq = new ProviderRequest(usedModel, maxTokens, null, systemPrompt,
                             toMessagesList(messages), toolsList, null,
                             Map.of("agent_name", agentName));
-                    pRes = providers.get(usedProvider).complete(usedReq);
+                    // Neuer Try: :242 lag in KEINEM Try, ein Fallback-Fehler flog direkt aus
+                    // executeInternal heraus und blieb unprotokolliert.
+                    long fallbackStart = System.nanoTime();
+                    try {
+                        pRes = providers.get(usedProvider).complete(usedReq);
+                    } catch (RuntimeException fe) {
+                        recordTurnFailure(runId, run.tenantId(), run.agentId(), modelPurpose,
+                                          usedProvider, usedModel, usedReq, fe, fallbackStart);
+                        throw fe;
+                    }
                     fellBack = true;
                 }
                 // Subscription calls are free: real cost 0, the equivalent API-key cost logged as a
@@ -442,6 +470,51 @@ public class AgentRunner {
             return prices.costMicros(model, new de.vesterion.vistierie.pricing.Usage(0, maxTokens, 0, 0));
         } catch (PriceTable.UnknownModelException e) {
             return 0L;
+        }
+    }
+
+    /**
+     * Schreibt eine Fehlerzeile fuer einen gescheiterten Turn — das Gegenstueck zu
+     * {@code LlmService.recordFailure}.
+     *
+     * <p>Drei Eigenschaften sind nicht verhandelbar:
+     * <ul>
+     *   <li><b>Eigene ULID.</b> {@code llm_calls.id} ist Primaerschluessel; eine Fehlerzeile
+     *       mit der {@code callId} der Erfolgszeile haette bei geglaecktem Fallback eine
+     *       DuplicateKeyException erzeugt und einen geretteten Run in {@code failed}
+     *       verwandelt.</li>
+     *   <li><b>{@code runId} mitgeben.</b> LlmService.recordFailure uebergibt hier
+     *       {@code null, null}; woertlich kopiert entstuende eine Forensik-Zeile, die sich
+     *       nicht mit dem Run verknuepfen laesst — wertlos fuer genau ihren Zweck.</li>
+     *   <li><b>Nicht-fatal.</b> Ein DB-Fehler hier darf die urspruengliche
+     *       Provider-Exception nicht ersetzen und den Fallback nicht ueberspringen.</li>
+     * </ul>
+     */
+    private void recordTurnFailure(String runId, UUID tenantId, UUID agentId, String purpose,
+                                   String providerName, String model,
+                                   ProviderRequest req, RuntimeException e, long start) {
+        try {
+            int sc = e instanceof LlmProvider.ProviderException pe ? pe.statusCode() : 500;
+            String code = e instanceof LlmProvider.ProviderException pe2 ? pe2.errorCode()
+                        : e instanceof UnsupportedOperationException ? "unsupported_operation"
+                        : "internal_error";
+            // sc == 429, NICHT sc >= 500: mit dem Provider-Passthrough ist erstmals ein 4xx
+            // ausser 429 erreichbar, und ein 400 als rate_limited zu buchen vergiftet die
+            // Ratelimit-Dashboards.
+            String status = sc == 429 ? "rate_limited" : "error";
+            int durationMs = (int) ((System.nanoTime() - start) / 1_000_000);
+            // e.getMessage() carries the bridge's upstream response body for a ProviderException
+            // (LlmProvider.ProviderException, see LlmProvider.java) — the same text that diagnosed
+            // the 2026-07-29 incident. Without it the row is forensically useless.
+            recorder.insertWithBody(new LlmCallRecorder.Row(
+                    newUlid(), tenantId, agentId, purpose, null,
+                    providerName, model, "complete",
+                    0, 0, 0, 0, 0L, null, durationMs, status, code, runId, null), req, e.getMessage());
+            metrics.record(providerName, model, "complete", status, durationMs, 0);
+        } catch (RuntimeException auditEx) {
+            // must degrade to "no audit row" — mirrors LlmService:210-223
+            log.warn("run {} audit write failed for provider {}: {}", runId, providerName,
+                     auditEx.toString());
         }
     }
 

@@ -34,11 +34,20 @@ public class PriceTable {
     // converted USD→EUR at the same fixed 0.92 rate. Verify against the upstream
     // provider pricing page when adding new models.
     private static final Map<String, Rates> RATES = Map.ofEntries(
-            // Anthropic
-            Map.entry("claude-haiku-4-5",  new Rates(   920_000,  4_600_000,  1_150_000,    92_000)),
-            Map.entry("claude-sonnet-4-6", new Rates( 2_760_000, 13_800_000,  3_450_000,   276_000)),
-            Map.entry("claude-opus-4-7",   new Rates(13_800_000, 69_000_000, 17_250_000, 1_380_000)),
-            Map.entry("claude-opus-4-8",   new Rates(13_800_000, 69_000_000, 17_250_000, 1_380_000)),
+            // Anthropic. Cache-Write ist 2x (1-Stunden-TTL) — die Claude-CLI fordert
+            // ausschliesslich diese TTL an (nachgemessen: 3.735.545 Tokens auf
+            // ephemeral_1h, 0 auf ephemeral_5m). Ein kuenftiger Aufrufer mit 5-Min-TTL
+            // waere hier um Faktor 1,6 zu hoch bepreist. Cache-Read ist 0,1x.
+            Map.entry("claude-haiku-4-5",  new Rates(   920_000,  4_600_000,  1_840_000,    92_000)),
+            Map.entry("claude-sonnet-4-6", new Rates( 2_760_000, 13_800_000,  5_520_000,   276_000)),
+            Map.entry("claude-opus-4-7",   new Rates( 4_600_000, 23_000_000,  9_200_000,   460_000)),
+            Map.entry("claude-opus-4-8",   new Rates( 4_600_000, 23_000_000,  9_200_000,   460_000)),
+            Map.entry("claude-opus-5",     new Rates( 4_600_000, 23_000_000,  9_200_000,   460_000)),
+            // Sonnet 5 zum REGULAERPREIS 3 $/15 $. Bis 2026-08-31 gilt ein Einfuehrungspreis
+            // von 2 $/10 $; PriceTable kennt keine Gueltigkeitszeitraeume, und ein zum 1.9.
+            // still veraltender Sonderpreis waere schlechter als eine fuer einen Monat um
+            // 50 % zu hohe Shadow-Cost. Fehlerrichtung bewusst konservativ.
+            Map.entry("claude-sonnet-5",   new Rates( 2_760_000, 13_800_000,  5_520_000,   276_000)),
             // OpenAI — no cache_creation cost; only cache_read discount.
             Map.entry("gpt-4o",            new Rates( 2_300_000,  9_200_000,          0, 1_150_000)),
             Map.entry("gpt-4o-mini",       new Rates(   138_000,    552_000,          0,    69_000)),

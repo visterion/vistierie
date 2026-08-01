@@ -321,3 +321,161 @@ describe("max_tokens passthrough", () => {
     expect(opts.env).toBeUndefined();
   });
 });
+
+describe("resultToResponse guard order", () => {
+  const ask = () => complete({ model: "claude-opus-4-8", messages: [{ role: "user", content: "hi" }] });
+  const result = (extra: Record<string, unknown>) =>
+    queryMock.mockReturnValue(sdkStream([{ type: "result", subtype: "success", ...extra }]));
+
+  // --- Stufe 1: Kontingent. Die Erschoepfung traegt api_error_status:429 GENAUSO wie ein
+  // transienter Upstream-429 — das Feld trennt sie nicht. Nur der Praefix trennt.
+  it("weekly limit stays subscription_exhausted despite api_error_status 429", async () => {
+    result({ result: "You've hit your weekly limit · resets 9am (UTC)",
+             api_error_status: 429, is_error: true,
+             usage: { input_tokens: 0, output_tokens: 0 } });
+    await expect(ask()).rejects.toMatchObject({ status: 429, code: "subscription_exhausted" });
+  });
+
+  it("session limit stays subscription_exhausted", async () => {
+    result({ result: "You've hit your session limit · resets 3pm",
+             api_error_status: 429, is_error: true,
+             usage: { input_tokens: 0, output_tokens: 0 } });
+    await expect(ask()).rejects.toMatchObject({ status: 429, code: "subscription_exhausted" });
+  });
+
+  it("out-of-usage-credits is subscription_exhausted", async () => {
+    result({ result: "You're out of usage credits. Run /usage-credits to keep using Opus",
+             api_error_status: 429, is_error: true,
+             usage: { input_tokens: 0, output_tokens: 0 } });
+    await expect(ask()).rejects.toMatchObject({ status: 429, code: "subscription_exhausted" });
+  });
+
+  // DAS Gatter: dieser Text matcht QUOTA ("not your usage limit"), traegt aber den Praefix.
+  // Ohne den Ausschluss oeffnete ein Anthropic-Lastabwurf den globalen Cooldown fuer 1h.
+  it("transient 429 with prefix is upstream_api_error, NOT subscription_exhausted", async () => {
+    result({ result: "API Error: Server is temporarily limiting requests (not your usage limit) · " +
+                     "this may be a temporary capacity issue.",
+             api_error_status: 429, is_error: true,
+             usage: { input_tokens: 0, output_tokens: 0 } });
+    await expect(ask()).rejects.toMatchObject({ status: 429, code: "upstream_api_error" });
+  });
+
+  it("a real answer merely mentioning limits is not a quota case", async () => {
+    result({ result: "You've hit your weekly limit · resets 9am (UTC)",
+             api_error_status: 429, is_error: true,
+             usage: { input_tokens: 10, output_tokens: 120 } });
+    await expect(ask()).rejects.toMatchObject({ status: 429, code: "upstream_api_error" });
+  });
+
+  // --- Stufe 2a: Auth. Die CLI baut diese Meldungen ueber `_u`, sie kommen also als
+  // ERFOLGS-Result an und erreichen mapSdkError nie.
+  it("auth errors keep auth_expired on the success path", async () => {
+    result({ result: "Authentication error · Your credentials have expired · Please run /login",
+             api_error_status: 401, is_error: true,
+             usage: { input_tokens: 0, output_tokens: 0 } });
+    await expect(ask()).rejects.toMatchObject({ status: 500, code: "auth_expired" });
+  });
+
+  // --- Stufe 2b: strukturell
+  it("529 reference case (the five prod transcripts)", async () => {
+    result({ result: "API Error: 529 Overloaded. This is a server-side issue, usually temporary",
+             api_error_status: 529, is_error: true,
+             usage: { input_tokens: 0, output_tokens: 0 } });
+    await expect(ask()).rejects.toMatchObject({ status: 529, code: "upstream_api_error" });
+  });
+
+  it("passes a 400 through", async () => {
+    result({ result: "API Error: 400 bad request", api_error_status: 400, is_error: true,
+             usage: { input_tokens: 0, output_tokens: 0 } });
+    await expect(ask()).rejects.toMatchObject({ status: 400, code: "upstream_api_error" });
+  });
+
+  // Falle: ein truthy-Test statt `!= null` faellt hier durch.
+  it("api_error_status 0 clamps to 502 and still throws", async () => {
+    result({ result: "weird", api_error_status: 0, is_error: true,
+             usage: { input_tokens: 0, output_tokens: 0 } });
+    await expect(ask()).rejects.toMatchObject({ status: 502, code: "upstream_api_error" });
+  });
+
+  it.each([99, 600, 529.5])("clamps implausible api_error_status %p to 502", async (s) => {
+    result({ result: "weird", api_error_status: s, is_error: true,
+             usage: { input_tokens: 0, output_tokens: 0 } });
+    await expect(ask()).rejects.toMatchObject({ status: 502 });
+  });
+
+  // Die `aie`-Klasse: der String "No response requested." erreicht `result` NIE, er steht in
+  // der Filtermenge `_mt`. Sie kommt als "" an — oder als veralteter JSON-Blob aus einem
+  // frueheren Turn, und DER geht heute durch die Schema-Pruefung.
+  it("is_error with an empty result throws", async () => {
+    result({ result: "", api_error_status: 429, is_error: true,
+             usage: { input_tokens: 0, output_tokens: 0 } });
+    await expect(ask()).rejects.toMatchObject({ status: 429, code: "upstream_api_error" });
+  });
+
+  it("is_error with stale structured output throws instead of returning a wrong answer", async () => {
+    result({ result: '{"symbol":"AAPL","confidence":0.9}', api_error_status: 429, is_error: true,
+             usage: { input_tokens: 0, output_tokens: 0 } });
+    await expect(ask()).rejects.toMatchObject({ status: 429, code: "upstream_api_error" });
+  });
+
+  // Klassen ohne Feld UND ohne Praefix — heute stille Falsch-Erfolge.
+  it("catches a timeout that carries neither field nor prefix", async () => {
+    result({ result: "Request timed out", api_error_status: null, is_error: true,
+             usage: { input_tokens: 0, output_tokens: 0 } });
+    await expect(ask()).rejects.toMatchObject({ status: 502, code: "upstream_api_error" });
+  });
+
+  it("catches the high-load message", async () => {
+    result({ result: "Opus is experiencing high load, please use /model to switch to Sonnet",
+             api_error_status: null, is_error: true,
+             usage: { input_tokens: 0, output_tokens: 0 } });
+    await expect(ask()).rejects.toMatchObject({ status: 502, code: "upstream_api_error" });
+  });
+
+  it("catches max_output_tokens (Befund-1 row, verbatim)", async () => {
+    result({ result: "API Error: Claude's response exceeded the 16 output token maximum. " +
+                     "To configure this behavior, set the CLAUDE_CODE_MAX_OUTPUT_TOKENS environment variable.",
+             api_error_status: null, is_error: true,
+             usage: { input_tokens: 40, output_tokens: 64, cache_read_input_tokens: 52755 } });
+    await expect(ask()).rejects.toMatchObject({ status: 502, code: "upstream_api_error" });
+  });
+
+  it("catches the context-window variant", async () => {
+    result({ result: "API Error: The model has reached its context window limit.",
+             api_error_status: null, is_error: true,
+             usage: { input_tokens: 0, output_tokens: 0 } });
+    await expect(ask()).rejects.toMatchObject({ status: 502, code: "upstream_api_error" });
+  });
+
+  it("falls back to the code parsed from the text when the field is null", async () => {
+    // Ohne diesen Fall ueberlebt eine Mutation, die den Text-Code-Fallback ganz entfernt.
+    result({ result: "API Error: 529 Overloaded.", api_error_status: null, is_error: true,
+             usage: { input_tokens: 0, output_tokens: 0 } });
+    await expect(ask()).rejects.toMatchObject({ status: 529, code: "upstream_api_error" });
+  });
+
+  // --- Stufe 3: Regex als Netz (CLI ohne is_error)
+  it("falls back to the regex when neither field is present", async () => {
+    result({ result: "API Error: 529 Overloaded.", usage: { input_tokens: 0, output_tokens: 0 } });
+    await expect(ask()).rejects.toMatchObject({ status: 529, code: "upstream_api_error" });
+  });
+
+  it("tolerates a leading newline on the regex path", async () => {
+    result({ result: "\nAPI Error: 529 Overloaded.", usage: { input_tokens: 0, output_tokens: 0 } });
+    await expect(ask()).rejects.toMatchObject({ status: 529 });
+  });
+
+  // --- Regression: kein Verhaltenswechsel fuer heute funktionierende Eingaben
+  it("passes a real answer containing API Error: mid-text through as success", async () => {
+    result({ result: 'Der Report nannte "API Error: 529" als Ursache.',
+             usage: { input_tokens: 10, output_tokens: 40 } });
+    const res = await ask();
+    expect(res.text).toContain("API Error: 529");
+    expect(res.usage.output_tokens).toBe(40);
+  });
+
+  it("passes a plain answer through untouched", async () => {
+    result({ result: "AAPL looks fine.", usage: { input_tokens: 10, output_tokens: 5 } });
+    expect((await ask()).text).toBe("AAPL looks fine.");
+  });
+});

@@ -98,7 +98,7 @@ class LlmCallRecorderBodyTest extends PostgresTestBase {
         var req = new ProviderRequest("m", 16, null, null,
                 List.of(Map.of("role","user","content","x")), null, null, null);
 
-        recorder.insertWithBody(row(callId), req, null);
+        recorder.insertWithBody(row(callId), req, (ProviderResponse) null);
 
         var body = bodies.findByCallId(callId).orElseThrow();
         assertThat(body.responseText()).isNull();
@@ -116,7 +116,7 @@ class LlmCallRecorderBodyTest extends PostgresTestBase {
                 new ProviderResponse("a", "end_turn", new Usage(0,0,0,0), "m"));
 
         try {
-            recorder.insertWithBody(row(callId), req, null);
+            recorder.insertWithBody(row(callId), req, (ProviderResponse) null);
         } catch (Exception expected) { /* ignore — duplicate PK on llm_calls */ }
 
         assertThat(bodies.findByCallId(callId)).isPresent();

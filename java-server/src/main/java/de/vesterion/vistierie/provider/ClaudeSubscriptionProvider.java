@@ -96,10 +96,17 @@ public class ClaudeSubscriptionProvider implements LlmProvider {
                             int status = rs.getStatusCode().value();
                             // 429 = subscription quota (fallback trigger, rate_limited);
                             // everything else = bridge/SDK failure → 502 (fallback trigger, error)
-                            if (status == 429) {
+                            if (status == 429 && !"upstream_api_error".equals(code)) {
+                                // Invertiert, NICHT auf subscription_exhausted verengt: ein 429 mit
+                                // unlesbarem Body (Proxy-Fehlerseite -> code bleibt "bridge_error")
+                                // oeffnet weiterhin den Cooldown. Nur ein ausdruecklich markierter
+                                // upstream_api_error tut es nicht mehr.
                                 throw new ProviderException(429, "subscription_exhausted", raw);
                             }
-                            throw new ProviderException(502, code, raw);
+                            if ("upstream_api_error".equals(code)) {
+                                throw new ProviderException(passthroughStatus(status), code, raw);
+                            }
+                            throw new ProviderException(502, code, raw);   // alles Bisherige unveraendert
                         }
                     })
                     .body(JsonNode.class);
@@ -114,6 +121,23 @@ public class ClaudeSubscriptionProvider implements LlmProvider {
             }
             throw new ProviderException(502, "transport_error", e.getMessage());
         }
+    }
+
+    /**
+     * 4xx nur aus einer engen Whitelist durchreichen, alles andere auf 502.
+     *
+     * <p>KEIN 408 und kein 401/403: {@code shouldFallback} ist {@code 429 || >= 500}
+     * (AgentRunner:452, LlmService:297). Ein durchgereichter 408 oder 401 waere damit nicht
+     * mehr fallback-faehig — ein transienter Gateway-Timeout bzw. ein abgelaufenes
+     * OAuth-Token wuerde jeden Run toeten, wo er heute sauber auf Bedrock ausweicht.
+     *
+     * <p>Ein blosser Bereichs-Clamp genuegt nicht: LlmController:61 ruft fuer Werte &lt; 500
+     * {@code HttpStatus.valueOf()}, und das wirft bei jedem nicht-standardisierten Code
+     * (430, 450, …) im ExceptionHandler selbst.
+     */
+    private static int passthroughStatus(int s) {
+        if (s >= 500) return s;                       // Controller mappt >=500 ohne valueOf
+        return switch (s) { case 400, 413, 422, 429 -> s; default -> 502; };
     }
 
     private ProviderResponse parse(JsonNode resp) {

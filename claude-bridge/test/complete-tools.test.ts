@@ -487,3 +487,22 @@ describe("session cap", () => {
     ).rejects.toMatchObject({ status: 503, code: "session_limit" });
   });
 });
+
+describe("resultToResponse guard order on session/tool path", () => {
+  it("throws on an api-error result and leaves no session behind", async () => {
+    // Der Guard sitzt in resultToResponse, das BEIDE Pfade bedient (complete.ts:224 plain,
+    // :508 session/tool). Dieser Test beweist, dass der Tool-Pfad mitgedeckt ist.
+    queryMock.mockReturnValue(sdkStream([
+      { type: "result", subtype: "success",
+        result: "API Error: 529 Overloaded.", api_error_status: 529, is_error: true,
+        usage: { input_tokens: 0, output_tokens: 0 } },
+    ]));
+    const store = new SessionStore();
+    await expect(complete({
+      model: "claude-opus-4-8",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [{ name: "noop", description: "noop", input_schema: { type: "object" } }],
+    }, { sessions: store })).rejects.toMatchObject({ status: 529, code: "upstream_api_error" });
+    expect(store.size()).toBe(0);
+  });
+});

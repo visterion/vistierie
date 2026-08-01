@@ -54,4 +54,55 @@ class PriceTableTest {
         var cached = table.costMicros("gpt-4o", new Usage(0, 0, 0, 1_000_000));
         assertThat(cached * 2L).isEqualTo(fresh);
     }
+
+    @Test
+    void opus5HasTheCurrentRates() {
+        var t = new PriceTable(1.0);
+        // 5 $ In / 25 $ Out bei fixem Kurs 0,92
+        assertThat(t.costMicros("claude-opus-5", new Usage(1_000_000, 0, 0, 0))).isEqualTo(4_600_000L);
+        assertThat(t.costMicros("claude-opus-5", new Usage(0, 1_000_000, 0, 0))).isEqualTo(23_000_000L);
+    }
+
+    @Test
+    void sonnet5IsPricedAtAll() {
+        // Vorher fehlte das Modell komplett — 751 Calls ohne Shadow-Cost, obwohl es die
+        // Prioritaets-1000-Default-Regel ALLER drei Tenants ist.
+        var t = new PriceTable(1.0);
+        assertThat(t.costMicros("claude-sonnet-5", new Usage(1_000_000, 0, 0, 0))).isEqualTo(2_760_000L);
+        assertThat(t.costMicros("claude-sonnet-5", new Usage(0, 1_000_000, 0, 0))).isEqualTo(13_800_000L);
+    }
+
+    @Test
+    void opus47And48UseTheCorrectedRatesIncludingCacheRead() {
+        var t = new PriceTable(1.0);
+        for (String m : new String[]{"claude-opus-4-7", "claude-opus-4-8"}) {
+            assertThat(t.costMicros(m, new Usage(1_000_000, 0, 0, 0))).isEqualTo(4_600_000L);
+            assertThat(t.costMicros(m, new Usage(0, 1_000_000, 0, 0))).isEqualTo(23_000_000L);
+            // DAS ist die Falle: die Runde-6-Fassung nannte nur den Cache-WRITE-Wert.
+            // Cache-Read ist 0,1x = 0,50 $ = 460_000, nicht 1_380_000.
+            assertThat(t.costMicros(m, new Usage(0, 0, 0, 1_000_000))).isEqualTo(460_000L);
+        }
+    }
+
+    @Test
+    void everyAnthropicCacheWriteIsTwiceTheInputRate() {
+        // Die deployte CLI nutzt AUSSCHLIESSLICH die 1-Stunden-TTL (3,74 Mio Tokens gegen 0 auf
+        // 5 Min). Anthropic berechnet die mit 2x, nicht 1,25x. Die Tabelle stand durchgehend
+        // auf 1,25x — Altbestand-Bug im gesamten Block.
+        var t = new PriceTable(1.0);
+        for (String m : new String[]{"claude-haiku-4-5", "claude-sonnet-4-6",
+                                     "claude-opus-4-7", "claude-opus-4-8",
+                                     "claude-opus-5", "claude-sonnet-5"}) {
+            long in = t.costMicros(m, new Usage(1_000_000, 0, 0, 0));
+            long cw = t.costMicros(m, new Usage(0, 0, 1_000_000, 0));
+            assertThat(cw).as("cache-write for %s", m).isEqualTo(in * 2);
+        }
+    }
+
+    @Test
+    void bedrockPrefixedOpus5Normalizes() {
+        var t = new PriceTable(1.0);
+        assertThat(t.costMicros("eu.anthropic.claude-opus-5", new Usage(1_000_000, 0, 0, 0)))
+                .isEqualTo(4_600_000L);
+    }
 }

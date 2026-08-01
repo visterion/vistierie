@@ -240,11 +240,16 @@ public class LlmService {
                         && "subscription_exhausted".equals(e.errorCode())) {
                     cooldown.open(Instant.now());
                 }
+                // sc == 429, nicht >= 500: seit dem upstream_api_error-Passthrough ist von diesem
+                // Provider erstmals ein 4xx != 429 erreichbar. Gilt fuer alle Provider gleichermassen.
+                // e.getMessage() carries the bridge's upstream response body — the same forensic
+                // text AgentRunner.recordTurnFailure now preserves for the agent-run path.
                 recordFailure(ctx, id, providerName, model, pReq, start,
-                        e.statusCode() >= 500 ? "error" : "rate_limited", e.errorCode());
+                        e.statusCode() == 429 ? "rate_limited" : "error", e.errorCode(), e.getMessage());
                 throw e;
             } catch (UnsupportedOperationException e) {
-                recordFailure(ctx, id, providerName, model, pReq, start, "error", "unsupported_operation");
+                recordFailure(ctx, id, providerName, model, pReq, start, "error",
+                        "unsupported_operation", e.getMessage());
                 throw e;
             }
         }
@@ -266,12 +271,13 @@ public class LlmService {
     }
 
     private void recordFailure(CallContext ctx, String id, String providerName, String model,
-                               ProviderRequest pReq, long start, String status, String errorCode) {
+                               ProviderRequest pReq, long start, String status, String errorCode,
+                               String responseText) {
         var dur = (int) ((System.nanoTime() - start) / 1_000_000);
         recorder.insertWithBody(new LlmCallRecorder.Row(
                 id, ctx.tenantId(), ctx.agentId(), ctx.purpose(), ctx.realm(),
                 providerName, model, ctx.endpoint(),
-                0, 0, 0, 0, 0, null, dur, status, errorCode, null, null), pReq, null);
+                0, 0, 0, 0, 0, null, dur, status, errorCode, null, null), pReq, responseText);
         metrics.record(providerName, model, ctx.endpoint(), status, dur, 0);
         log.warn("LLM call FAILED id={} tenant={} agent={} purpose={} endpoint={} provider={} model={} "
                         + "status={} error={} dur={}ms",

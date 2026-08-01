@@ -55,6 +55,20 @@ public class LlmCallRecorder {
         bodyRepo.insert(row.id(), node, responseText, contentBlocks, Instant.now());
     }
 
+    /**
+     * Failure-path variant: no {@link ProviderResponse} exists (the call never returned one), but
+     * the upstream error text — e.g. a {@code ProviderException} message carrying the bridge's
+     * response body — is still forensically valuable and would otherwise be lost outside the
+     * application log. There are no content blocks for a failure row.
+     */
+    @Transactional
+    public void insertWithBody(Row row, ProviderRequest req, String responseText) {
+        insert(row);
+        var redacted = redactor.redact(req);
+        var node = json.valueToTree(redacted);
+        bodyRepo.insert(row.id(), node, responseText, null, Instant.now());
+    }
+
     public void insert(Row r) {
         jdbc.sql("""
                 INSERT INTO vistierie.llm_calls
