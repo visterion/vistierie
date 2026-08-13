@@ -174,29 +174,38 @@ In a standard (non-batch) run, what happens with it depends on the schema's
   `submit_result` tool whose `input_schema` is the `output_schema` verbatim.
   The agent should deliver its result by calling `submit_result` instead of
   answering with text. The call's `input` is validated against
-  `output_schema` and becomes the run's `output`; a violation fails the run
-  with an `output_schema: submit_result: ...` error. Don't declare
-  `submit_result` yourself in the agent's `tools` — Vistierie adds it
-  automatically, and it is an **output channel**, not an executable tool:
-  it is intercepted before dispatch and never sent to any HTTP/MCP/subagent
-  tool backend.
+  `output_schema` and becomes the run's `output`. You **cannot** declare
+  `submit_result` yourself: the name is reserved and registering a tool with
+  it is rejected at validation. Vistierie adds it automatically, and it is
+  an **output channel**, not an executable tool: it is intercepted before
+  dispatch and never sent to any HTTP/MCP/subagent tool backend.
 - Any other schema (or no schema at all) is unaffected: the agent is not
   offered `submit_result`, and Vistierie parses the model's final text
   against the `output_schema` exactly as before this feature. An agent with
   no schema at all still gets `{"text": "..."}`.
 
-If the model ends a turn without calling `submit_result`, Vistierie doesn't
-fail the run immediately: it sends up to two follow-up turns asking the
-model to call the tool, then falls back to parsing the model's final
-assistant text as the `output_schema`-typed result. The follow-up is
-skipped once the run is on its last available turn, so the fallback is
-always reachable within `max_turns`. Each follow-up consumes one of the
-run's `max_turns`, so on an agent with a tight budget the nudges eat turns
-that would otherwise go to tool calls.
+**The text path is tried first, not last.** A model that simply answers
+with schema-conforming text ends its run in one turn exactly as it always
+did — no follow-up, no extra provider call. Vistierie asks for
+`submit_result` only when a delivery actually fails:
 
-The delivery path is visible in `run_events`: `submit_result_nudged`
-(carries the attempt number), `submit_result_fallback`, and
-`submit_result_received` when the tool call is accepted.
+- an `end_turn` whose text does not satisfy the `output_schema`, or
+- a `submit_result` call whose `input` does not satisfy it — the validation
+  errors are handed back as that call's `tool_result` so the model can
+  correct itself.
+
+Both share **one run-global budget of two follow-up turns**; after that the
+run fails with the latest `output_schema: ...` (respectively
+`output_schema: submit_result: ...`) error. A follow-up is skipped once the
+run is on its last available turn, so the failure is always reported inside
+`max_turns` rather than as `max_turns_exceeded`. Each follow-up consumes one
+of the run's `max_turns`.
+
+The delivery path is visible in `run_events`: `submit_result_received` when
+a valid tool call is accepted, `submit_result_nudged` for each follow-up
+(carries the attempt number, the turn, and a `reason` naming which delivery
+failed), and `submit_result_fallback` when the run completed through the
+text path instead of the tool.
 
 Batched runs are single-turn and tool-free, so `submit_result` is never
 offered there — a batch item's output is always parsed from its text (see
@@ -266,7 +275,10 @@ when the timeout fires, the client should re-poll.
 
 Each run records a stream of events: `turn_started`, `tool_dispatched`,
 `tool_returned`, `tool_failed`, `subagent_spawned`, `subagent_finished`,
-`turn_finished`, `error`, `webhook_sent`, `webhook_failed`.
+`turn_finished`, `error`, `webhook_sent`, `webhook_failed`,
+`provider_fallback`, and — for agents with an object-typed `output_schema` —
+`submit_result_received`, `submit_result_nudged`, `submit_result_fallback`
+(see [Structured output](#structured-output-output_schema-and-submit_result)).
 
 ```bash
 curl -H "Authorization: Bearer $TOK" \
