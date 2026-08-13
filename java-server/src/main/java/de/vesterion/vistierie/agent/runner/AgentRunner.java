@@ -217,11 +217,18 @@ public class AgentRunner {
             var provider = providers.get(providerName);
 
             List<Map<String, Object>> toolsList = toToolsList(snap.path("tools"));
-            // An agent with an output_schema also gets submit_result, the channel it delivers
-            // its result through. Agents without a schema never see the tool.
+            // An agent with an object-typed output_schema also gets submit_result, the channel
+            // it delivers its result through. Agents without a schema never see the tool.
+            //
+            // "object-typed" is not cosmetic: AgentDefinitionValidator only checks meta-schema
+            // validity, so {"type":"array"} is an agent definition that exists today, and the
+            // API rejects a non-object input_schema outright. Offering the tool there would
+            // turn every turn of an agent that runs fine via the text path into a 400. Such an
+            // agent keeps the text path, unchanged.
             JsonNode outputSchemaNode = snap.get("output_schema");
-            boolean hasOutputSchema = outputSchemaNode != null && !outputSchemaNode.isNull();
-            if (hasOutputSchema) {
+            boolean offersResultTool = outputSchemaNode != null && !outputSchemaNode.isNull()
+                    && "object".equals(outputSchemaNode.path("type").asText());
+            if (offersResultTool) {
                 var withResultTool = new ArrayList<>(toolsList);
                 withResultTool.add(resultTools.build(outputSchemaNode));
                 toolsList = List.copyOf(withResultTool);
@@ -349,9 +356,11 @@ public class AgentRunner {
                     .filter(b -> ResultToolFactory.TOOL_NAME.equals(b.name()))
                     .findFirst().orElse(null);
             if (submitBlock != null) {
-                if (!hasOutputSchema) {
+                // Same condition as the offering site: when the tool was not offered, a
+                // submit_result block cannot legitimately arrive.
+                if (!offersResultTool) {
                     runs.markTerminal(runId, "failed", null,
-                            "submit_result called but agent has no output_schema", null);
+                            "submit_result called but agent has no object-typed output_schema", null);
                     return;
                 }
                 var errors = schemas.validate(outputSchemaNode, submitBlock.input());

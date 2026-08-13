@@ -53,12 +53,26 @@ class AgentRunnerSubmitResultTest extends PostgresTestBase {
     }
 
     private UUID givenAgent(JsonNode outputSchema) {
+        return givenAgent(outputSchema, mapper.createArrayNode());
+    }
+
+    private UUID givenAgent(JsonNode outputSchema, JsonNode tools) {
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "ag-" + agentId, "you analyse", "summarize_cell",
-                mapper.createArrayNode(), outputSchema, 5, 60, "wt-tok",
+                tools, outputSchema, 5, 60, "wt-tok",
                 false, null, null, null, null, null, null);
         budgetFixtures.seed(tenantId, agentId);
         return agentId;
+    }
+
+    /** One synthetic HTTP tool of the agent's own — never dispatched, only offered. */
+    private JsonNode ownTools() {
+        var tools = mapper.createArrayNode();
+        tools.add(mapper.valueToTree(Map.of(
+                "name", "synth.lookup", "description", "s",
+                "input_schema", Map.of("type", "object"),
+                "webhook_url", "http://192.0.2.10/tools/synth.lookup")));
+        return tools;
     }
 
     private List<String> lastToolNames() {
@@ -104,17 +118,30 @@ class AgentRunnerSubmitResultTest extends PostgresTestBase {
         assertThat(r.error()).startsWith("output_schema: submit_result: ");
     }
 
-    @Test void submitResultToolIsOfferedOnlyWhenSchemaPresent() throws Exception {
+    @Test void submitResultToolIsAppendedToTheAgentsOwnToolsWhenSchemaPresent() throws Exception {
         var withSchema = givenAgent(mapper.readTree("""
                 {"type":"object"}
-                """));
+                """), ownTools());
         stub.script(StubLlmScripts.Turn.endTurn("{}"));
         runner.startRunSync(tenantId, withSchema, "manual", mapper.readTree("{}"), null, null, null);
-        assertThat(lastToolNames()).contains(ResultToolFactory.TOOL_NAME);
+        // BOTH names: the tool is appended, never replaces the agent's own tools.
+        assertThat(lastToolNames()).contains("synth.lookup", ResultToolFactory.TOOL_NAME);
 
-        var withoutSchema = givenAgent(null);
+        var withoutSchema = givenAgent(null, ownTools());
         stub.script(StubLlmScripts.Turn.endTurn("done"));
         runner.startRunSync(tenantId, withoutSchema, "manual", mapper.readTree("{}"), null, null, null);
-        assertThat(lastToolNames()).doesNotContain(ResultToolFactory.TOOL_NAME);
+        assertThat(lastToolNames()).contains("synth.lookup").doesNotContain(ResultToolFactory.TOOL_NAME);
+    }
+
+    @Test void submitResultToolIsNotOfferedForANonObjectSchema() throws Exception {
+        // AgentDefinitionValidator accepts any meta-schema-valid schema, so {"type":"array"} is a
+        // definition that exists today. The API rejects a non-object input_schema, so offering the
+        // tool would 400 every turn — such an agent must keep the text path.
+        var agentId = givenAgent(mapper.readTree("""
+                {"type":"array"}
+                """), ownTools());
+        stub.script(StubLlmScripts.Turn.endTurn("[]"));
+        runner.startRunSync(tenantId, agentId, "manual", mapper.readTree("{}"), null, null, null);
+        assertThat(lastToolNames()).contains("synth.lookup").doesNotContain(ResultToolFactory.TOOL_NAME);
     }
 }
