@@ -2,6 +2,7 @@ package de.vesterion.vistierie.e2e;
 
 import de.vesterion.vistierie.PostgresTestBase;
 import de.vesterion.vistierie.agent.runner.AgentRunner;
+import de.vesterion.vistierie.agent.runner.ResultToolFactory;
 import de.vesterion.vistierie.agents.AgentRepository;
 import de.vesterion.vistierie.routing.RoutingRule;
 import de.vesterion.vistierie.routing.RoutingRuleRepository;
@@ -70,6 +71,10 @@ class ParallelQueenWithBeesE2ETest extends PostgresTestBase {
                 queenTools, queenSchema, 5, 60, "wt", false, null, null, null, null, null, null);
         budgetFixtures.seed(tenantId, queenId);
 
+        // submit_result, not plain end_turn text: object-typed output_schema offers the tool,
+        // and a bare end_turn now gets nudged instead of ending in one call. That matters
+        // doubly here — the 5 bee runs share ONE "bee" script queue, so a nudge on one bee run
+        // would steal the next bee run's turn out from under it.
         stub.scriptForAgent("queen",
                 StubLlmScripts.Turn.toolUses(
                         StubLlmScripts.Turn.toolUse("dispatch_bee", Map.of("cell_id","c1")),
@@ -77,14 +82,20 @@ class ParallelQueenWithBeesE2ETest extends PostgresTestBase {
                         StubLlmScripts.Turn.toolUse("dispatch_bee", Map.of("cell_id","c3")),
                         StubLlmScripts.Turn.toolUse("dispatch_bee", Map.of("cell_id","c4")),
                         StubLlmScripts.Turn.toolUse("dispatch_bee", Map.of("cell_id","c5"))),
-                StubLlmScripts.Turn.endTurn("{\"verdict\":\"5 cells curated\"}"));
+                StubLlmScripts.Turn.toolUses(
+                        StubLlmScripts.Turn.toolUse(ResultToolFactory.TOOL_NAME, Map.of("verdict", "5 cells curated"))));
 
         stub.scriptForAgent("bee",
-                StubLlmScripts.Turn.endTurn("{\"finding\":\"f1\"}"),
-                StubLlmScripts.Turn.endTurn("{\"finding\":\"f2\"}"),
-                StubLlmScripts.Turn.endTurn("{\"finding\":\"f3\"}"),
-                StubLlmScripts.Turn.endTurn("{\"finding\":\"f4\"}"),
-                StubLlmScripts.Turn.endTurn("{\"finding\":\"f5\"}"));
+                StubLlmScripts.Turn.toolUses(
+                        StubLlmScripts.Turn.toolUse(ResultToolFactory.TOOL_NAME, Map.of("finding", "f1"))),
+                StubLlmScripts.Turn.toolUses(
+                        StubLlmScripts.Turn.toolUse(ResultToolFactory.TOOL_NAME, Map.of("finding", "f2"))),
+                StubLlmScripts.Turn.toolUses(
+                        StubLlmScripts.Turn.toolUse(ResultToolFactory.TOOL_NAME, Map.of("finding", "f3"))),
+                StubLlmScripts.Turn.toolUses(
+                        StubLlmScripts.Turn.toolUse(ResultToolFactory.TOOL_NAME, Map.of("finding", "f4"))),
+                StubLlmScripts.Turn.toolUses(
+                        StubLlmScripts.Turn.toolUse(ResultToolFactory.TOOL_NAME, Map.of("finding", "f5"))));
 
         var queenRunId = runner.startRunSync(tenantId, queenId, "manual",
                 mapper.readTree("{}"), null, null, null);

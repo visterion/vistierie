@@ -128,10 +128,15 @@ class AgentRunnerSubmitResultTest extends PostgresTestBase {
         var withSchema = givenAgent(mapper.readTree("""
                 {"type":"object"}
                 """), ownTools());
-        stub.script(StubLlmScripts.Turn.endTurn("{}"));
-        runner.startRunSync(tenantId, withSchema, "manual", mapper.readTree("{}"), null, null, null);
+        // submit_result, not plain end_turn text: an object-typed output_schema offers the
+        // tool, and a bare end_turn now gets nudged instead of ending the run in one call —
+        // scripting only one turn would drive the run into an uncaught IllegalStateException.
+        stub.script(StubLlmScripts.Turn.toolUses(
+                StubLlmScripts.Turn.toolUse(ResultToolFactory.TOOL_NAME, Map.of())));
+        var withSchemaRunId = runner.startRunSync(tenantId, withSchema, "manual", mapper.readTree("{}"), null, null, null);
         // BOTH names: the tool is appended, never replaces the agent's own tools.
         assertThat(lastToolNames()).contains("synth.lookup", ResultToolFactory.TOOL_NAME);
+        assertThat(runStore.get(withSchemaRunId).status()).isEqualTo("done");
 
         var withoutSchema = givenAgent(null, ownTools());
         stub.script(StubLlmScripts.Turn.endTurn("done"));
@@ -192,5 +197,36 @@ class AgentRunnerSubmitResultTest extends PostgresTestBase {
         Run r = runStore.get(runId);
         assertThat(r.status()).isEqualTo("failed");
         assertThat(r.error()).startsWith("output_schema:");
+    }
+
+    @Test void fallbackStillRunsWhenNudgesWouldOtherwiseExhaustMaxTurns() throws Exception {
+        // A tight max_turns is not hypothetical: the lowest configured value in prod is 4
+        // (daywalker-deep, renfield). With max_turns=2 here, an unconditional nudge on turn 0
+        // would leave no budget to fall back on turn 1 and the run would die with
+        // max_turns_exceeded instead of ever parsing the model's text. The last available turn
+        // must always fall back rather than nudge.
+        var schema = mapper.readTree("""
+                {"type":"object","required":["verdicts"]}
+                """);
+        var agentId = UUID.randomUUID();
+        agents.insert(agentId, tenantId, "ag-" + agentId, "you analyse", "summarize_cell",
+                mapper.createArrayNode(), schema, 2, 60, "wt-tok",
+                false, null, null, null, null, null, null);
+        budgetFixtures.seed(tenantId, agentId);
+
+        stub.script(
+                StubLlmScripts.Turn.endTurn("Ich denke noch nach."),
+                StubLlmScripts.Turn.endTurn("""
+                        {"verdicts":[]}
+                        """));
+
+        var runId = runner.startRunSync(tenantId, agentId, "manual",
+                mapper.readTree("{}"), null, null, null);
+
+        Run r = runStore.get(runId);
+        assertThat(r.status()).isEqualTo("done");
+        assertThat(r.output().has("verdicts")).isTrue();
+        assertThat(countEvents(runId, "submit_result_nudged")).isEqualTo(1);
+        assertThat(countEvents(runId, "submit_result_fallback")).isEqualTo(1);
     }
 }

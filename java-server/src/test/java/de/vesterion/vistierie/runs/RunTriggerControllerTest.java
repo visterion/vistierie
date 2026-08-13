@@ -1,6 +1,7 @@
 package de.vesterion.vistierie.runs;
 
 import de.vesterion.vistierie.PostgresTestBase;
+import de.vesterion.vistierie.agent.runner.ResultToolFactory;
 import de.vesterion.vistierie.agents.AgentRepository;
 import de.vesterion.vistierie.budget.AgentBudgetRepository;
 import de.vesterion.vistierie.budget.TenantBudgetRepository;
@@ -26,6 +27,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -80,7 +82,10 @@ class RunTriggerControllerTest extends PostgresTestBase {
         // (DEFAULT_MAX_TOKENS as output tokens) before the call, so tiny caps would block the run.
         tenantBudgets.patch(tenantId, new BudgetPatchRequest(100_000_000L, 100_000_000L, 80, 90));
         agentBudgets.patch(agentId, new BudgetPatchRequest(50_000_000L, 50_000_000L, 80, 90));
-        stub.script(StubLlmScripts.Turn.endTurn("{\"x\":\"yes\"}"));
+        // submit_result, not plain end_turn text: an object-typed output_schema offers the
+        // tool, and a bare end_turn now gets nudged instead of ending the run in one call.
+        stub.script(StubLlmScripts.Turn.toolUses(
+                StubLlmScripts.Turn.toolUse(ResultToolFactory.TOOL_NAME, Map.of("x", "yes"))));
 
         var resp = mvc.perform(post("/agents/a/run")
                 .header("Authorization", "Bearer " + token)

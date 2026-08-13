@@ -1,6 +1,7 @@
 package de.vesterion.vistierie.runs;
 
 import de.vesterion.vistierie.PostgresTestBase;
+import de.vesterion.vistierie.agent.runner.ResultToolFactory;
 import de.vesterion.vistierie.agents.AgentRepository;
 import de.vesterion.vistierie.auth.AuthFilter;
 import de.vesterion.vistierie.routing.RoutingRule;
@@ -22,6 +23,7 @@ import org.springframework.web.context.WebApplicationContext;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -68,7 +70,10 @@ class LongPollServiceTest extends PostgresTestBase {
         agents.insert(agentId, tenantId, "a", "p", "summarize_cell",
                 mapper.createArrayNode(), schema, 3, 30, "wt", false, null, null, null, null, null, null);
         budgetFixtures.seed(tenantId, agentId);
-        stub.script(StubLlmScripts.Turn.endTurn("{\"x\":\"v\"}"));
+        // submit_result, not plain end_turn text: an object-typed output_schema offers the
+        // tool, and a bare end_turn now gets nudged instead of ending the run in one call.
+        stub.script(StubLlmScripts.Turn.toolUses(
+                StubLlmScripts.Turn.toolUse(ResultToolFactory.TOOL_NAME, Map.of("x", "v"))));
         var startResp = mvc.perform(post("/agents/a/run")
                 .header("Authorization", "Bearer " + token)
                 .contentType(MediaType.APPLICATION_JSON).content("{\"payload\":{}}"))

@@ -1,6 +1,7 @@
 package de.vesterion.vistierie.e2e;
 
 import de.vesterion.vistierie.PostgresTestBase;
+import de.vesterion.vistierie.agent.runner.ResultToolFactory;
 import de.vesterion.vistierie.agents.AgentRepository;
 import de.vesterion.vistierie.budget.AgentBudgetRepository;
 import de.vesterion.vistierie.budget.TenantBudgetRepository;
@@ -26,6 +27,7 @@ import org.springframework.web.context.WebApplicationContext;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -92,7 +94,10 @@ class AgentLifecycleE2ETest extends PostgresTestBase {
         // rate) ~= 150_733 micros reserved before the stub call even runs.
         seedOperationalBudget(tenants.findByName(tenantName).orElseThrow().id(), agentId, 1_000_000L, 500_000L);
 
-        stub.script(StubLlmScripts.Turn.endTurn("{\"x\":\"yes\"}"));
+        // submit_result, not plain end_turn text: an object-typed output_schema offers the
+        // tool, and a bare end_turn now gets nudged instead of ending the run in one call.
+        stub.script(StubLlmScripts.Turn.toolUses(
+                StubLlmScripts.Turn.toolUse(ResultToolFactory.TOOL_NAME, Map.of("x", "yes"))));
         var triggerResp = mvc.perform(post("/agents/a/run")
                 .header("Authorization", "Bearer " + token)
                 .contentType(MediaType.APPLICATION_JSON).content("{\"payload\":{}}"))

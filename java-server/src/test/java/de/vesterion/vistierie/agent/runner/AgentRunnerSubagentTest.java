@@ -127,12 +127,21 @@ class AgentRunnerSubagentTest extends PostgresTestBase {
 
         stub.scriptForAgent("queen",
                 StubLlmScripts.Turn.toolUses(StubLlmScripts.Turn.toolUse("dispatch_bee", Map.of())));
-        stub.scriptForAgent("bee", StubLlmScripts.Turn.endTurn("not even json"));
+        // Three identical junk-text turns: bee's object-typed schema offers submit_result, so a
+        // bare end_turn now gets nudged (budget 2) before falling back to parsing — this
+        // exercises that nudge -> nudge -> fallback -> schema-violation path all the way through,
+        // matching bee's max_turns=3 exactly so the run ends via the schema violation, not
+        // max_turns_exceeded.
+        stub.scriptForAgent("bee",
+                StubLlmScripts.Turn.endTurn("not even json"),
+                StubLlmScripts.Turn.endTurn("not even json"),
+                StubLlmScripts.Turn.endTurn("not even json"));
 
         var runId = runner.startRunSync(tenantId, queenId, "manual",
                 mapper.readTree("{}"), null, null, null);
         Run r = runStore.get(runId);
         assertThat(r.status()).isEqualTo("failed");
         assertThat(r.error()).contains("tool_error");
+        assertThat(r.error()).contains("output_schema");
     }
 }

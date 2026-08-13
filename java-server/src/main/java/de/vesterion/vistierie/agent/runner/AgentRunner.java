@@ -335,7 +335,13 @@ public class AgentRunner {
                 // (e.g. a non-object schema) never saw a nudge and must keep parsing straight
                 // away, exactly as before this feature existed.
                 if (offersResultTool) {
-                    if (submitNudges < MAX_SUBMIT_NUDGES) {
+                    // turn < maxTurns - 1: never nudge on the last available turn. A nudge costs
+                    // a loop iteration same as any other turn, so nudging unconditionally could
+                    // burn the remaining budget on "please call the tool" and hit
+                    // max_turns_exceeded instead of ever reaching the fallback below — live in
+                    // prod, not hypothetical: the lowest configured max_turns is 4
+                    // (daywalker-deep, renfield), and two tool turns plus two nudges exhausts it.
+                    if (submitNudges < MAX_SUBMIT_NUDGES && turn < maxTurns - 1) {
                         submitNudges++;
                         runs.recordEvent(runId, "info", "submit_result_nudged",
                                 mapper.valueToTree(Map.of("attempt", submitNudges, "turn", turn)));

@@ -4,6 +4,7 @@ import com.github.tomakehurst.wiremock.WireMockServer;
 import de.vesterion.vistierie.PostgresTestBase;
 import de.vesterion.vistierie.agents.AgentRepository;
 import de.vesterion.vistierie.agent.runner.AgentRunner;
+import de.vesterion.vistierie.agent.runner.ResultToolFactory;
 import de.vesterion.vistierie.auth.AuthFilter;
 import de.vesterion.vistierie.routing.RoutingResolver;
 import de.vesterion.vistierie.routing.RoutingRule;
@@ -78,9 +79,12 @@ class RunTranscriptControllerTest extends PostgresTestBase {
         agents.insert(agentId, tenantId, "echo", "p", "routine",
                 tools, schema, 5, 60, "wt", false, null, null, null, null, null, null);
         budgetFixtures.seed(tenantId, agentId);
+        // submit_result, not plain end_turn text: an object-typed output_schema offers the
+        // tool, and a bare end_turn now gets nudged instead of ending the run in one call.
         stub.script(
                 StubLlmScripts.Turn.toolUses(StubLlmScripts.Turn.toolUse("finnhub", Map.of("q", "AAPL"))),
-                StubLlmScripts.Turn.endTurn("{\"x\":\"done\"}"));
+                StubLlmScripts.Turn.toolUses(
+                        StubLlmScripts.Turn.toolUse(ResultToolFactory.TOOL_NAME, Map.of("x", "done"))));
         runId = runner.startRunSync(tenantId, agentId, "manual", mapper.readTree("{}"), null, null, null);
     }
 
