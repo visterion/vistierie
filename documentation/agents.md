@@ -164,6 +164,41 @@ as `webhook_token`.
 
 ---
 
+## Structured output (`output_schema` and `submit_result`)
+
+Any agent may declare an `output_schema` (a JSON Schema) on its definition.
+What happens with it depends on the schema's `type`:
+
+- **`type: "object"`**: Vistierie additionally offers the agent a
+  `submit_result` tool whose `input_schema` is the `output_schema` verbatim.
+  The agent should deliver its result by calling `submit_result` instead of
+  answering with text. The call's `input` is validated against
+  `output_schema` and becomes the run's `output`; a violation fails the run
+  with an `output_schema: submit_result: ...` error. Don't declare
+  `submit_result` yourself in the agent's `tools` — Vistierie adds it
+  automatically, and it is an **output channel**, not an executable tool:
+  it is intercepted before dispatch and never sent to any HTTP/MCP/subagent
+  tool backend.
+- Any other schema (or no schema at all) is unaffected: the agent is not
+  offered `submit_result`, and Vistierie parses the model's final text
+  against `output_schema` exactly as before this feature, same as agents
+  with no schema get `{"text": "..."}`.
+
+If the model ends a turn without calling `submit_result`, Vistierie doesn't
+fail the run immediately: it sends up to two follow-up turns asking the
+model to call the tool, then falls back to parsing the model's final
+assistant text as the `output_schema`-typed result. The follow-up is
+skipped once the run is on its last available turn, so the fallback is
+always reachable within `max_turns` — keep this in mind when setting a very
+low `max_turns` on a schema-bearing agent, since a tight budget leaves less
+room for the nudges before falling back.
+
+Each attempt is recorded as a `run_event` for observability:
+`submit_result_nudged` (carries the attempt number), `submit_result_fallback`,
+and `submit_result_received` when the tool call is accepted.
+
+---
+
 ## Webhook token contract
 
 The `webhook_token` field on the agent definition is the bearer token
