@@ -28,23 +28,34 @@ public class OutputSchemaValidator {
     private final JsonSchemas schemas;
     private final ObjectMapper mapper = new ObjectMapper();
 
+    /** Above every stage index, so a schema error always outranks a parse error. */
+    private static final int SCHEMA_RANK = Integer.MAX_VALUE;
+
     public OutputSchemaValidator(JsonSchemas schemas) { this.schemas = schemas; }
 
     public JsonNode parseAndValidate(String text, JsonNode schema) {
-        String firstParseError = null;
-        String firstSchemaError = null;
-        boolean anyParsed = false;
+        // Rank of the furthest candidate seen. A schema error (parsed, failed validation)
+        // always outranks a parse error; among parse errors a later stage outranks an
+        // earlier one. Reporting the FIRST error instead sent a real diagnosis down the
+        // wrong path: the raw candidate's "Unrecognized token 'Alle'" hid a delimiter
+        // break inside the fenced JSON (gropar, 2026-08-10/11).
+        int bestRank = -1;
+        String bestMessage = null;
 
+        int stageIndex = 0;
         for (Candidate cand : candidates(text)) {
+            int parseRank = stageIndex++;
             JsonNode node;
             try {
                 node = mapper.readTree(cand.value());
             } catch (Exception e) {
-                if (firstParseError == null) firstParseError = e.getMessage();
+                if (parseRank > bestRank) {
+                    bestRank = parseRank;
+                    bestMessage = cand.stage() + ": " + e.getMessage();
+                }
                 continue;
             }
             if (node == null || node.isMissingNode()) continue;
-            anyParsed = true;
 
             var errors = schemas.validate(schema, node);
             if (errors.isEmpty()) {
@@ -53,16 +64,15 @@ public class OutputSchemaValidator {
                 }
                 return node;
             }
-            if (firstSchemaError == null) {
-                firstSchemaError = errors.stream().map(Object::toString)
+            // Any schema error outranks every parse error: SCHEMA_RANK is above all stages.
+            if (SCHEMA_RANK > bestRank) {
+                bestRank = SCHEMA_RANK;
+                bestMessage = cand.stage() + ": " + errors.stream().map(Object::toString)
                         .reduce((a, b) -> a + "; " + b).orElse("");
             }
         }
 
-        if (anyParsed) {
-            throw new SchemaViolation(firstSchemaError);
-        }
-        throw new SchemaViolation("parse: " + firstParseError);
+        throw new SchemaViolation(bestMessage == null ? "no output candidates" : bestMessage);
     }
 
     private record Candidate(String stage, String value) {}

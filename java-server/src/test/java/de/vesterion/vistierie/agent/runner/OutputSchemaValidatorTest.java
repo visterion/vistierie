@@ -21,7 +21,7 @@ class OutputSchemaValidatorTest {
         var schema = M.readTree("{\"type\":\"object\"}");
         assertThatThrownBy(() -> v.parseAndValidate("not json", schema))
                 .isInstanceOf(OutputSchemaValidator.SchemaViolation.class)
-                .hasMessageContaining("parse");
+                .hasMessageStartingWith("raw:");
     }
 
     @Test void schemaViolationRejected() throws Exception {
@@ -82,7 +82,7 @@ class OutputSchemaValidatorTest {
         var schema = M.readTree(NUM_SCHEMA);
         assertThatThrownBy(() -> v.parseAndValidate("the model refused", schema))
             .isInstanceOf(OutputSchemaValidator.SchemaViolation.class)
-            .hasMessageStartingWith("parse:");
+            .hasMessageStartingWith("raw:");
     }
 
     @Test void schemaInvalidInsideFenceYieldsSchemaErrorNotParse() throws Exception {
@@ -113,5 +113,35 @@ class OutputSchemaValidatorTest {
         var schema = M.readTree(NUM_SCHEMA);
         var out = v.parseAndValidate("context {\"foo\":1} then {\"x\":1}", schema);
         assertThat(out.path("x").asInt()).isEqualTo(1);
+    }
+
+    @Test void reportsFurthestCandidateNotRawWhenFenceContentIsMalformed() {
+        // Shape of the gropar failure, rebuilt synthetically: German prose, then a fenced
+        // JSON block whose string value closes a „ quote with an ASCII " and breaks the JSON.
+        String text = """
+                Alle Positionen wurden geprüft. Hier ist die Bewertung:
+
+                ```json
+                {
+                  "signals": [
+                    {
+                      "symbol": "SYNTH",
+                      "rationale": "Das Kriterium „Schluss unter 10,00 USD" ist verletzt.",
+                      "confidence": 0.5
+                    }
+                  ]
+                }
+                ```
+
+                Soweit die Auswertung.
+                """;
+        var schema = M.readTree("""
+                {"type":"object","required":["signals"]}
+                """);
+
+        assertThatThrownBy(() -> v.parseAndValidate(text, schema))
+                .isInstanceOf(OutputSchemaValidator.SchemaViolation.class)
+                .hasMessageStartingWith("fence-strip:")
+                .satisfies(ex -> assertThat(ex.getMessage()).doesNotContain("Alle"));
     }
 }
