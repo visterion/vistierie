@@ -1,6 +1,7 @@
 package de.vesterion.vistierie.agent.runner;
 
 import de.vesterion.vistierie.agents.AgentRepository;
+import de.vesterion.vistierie.agents.JsonSchemas;
 import de.vesterion.vistierie.agents.dto.ToolDef;
 import de.vesterion.vistierie.audit.LlmCallRecorder;
 import de.vesterion.vistierie.budget.BudgetEnforcer;
@@ -71,6 +72,8 @@ public class AgentRunner {
     private final RunToolCallRepository toolCalls;
     private final Clock clock;
     private final LlmMetrics metrics;
+    private final ResultToolFactory resultTools;
+    private final JsonSchemas schemas;
 
     public AgentRunner(AgentRepository agents, RunStore runs,
                        RoutingResolver routing, ProviderRegistry providers,
@@ -84,7 +87,9 @@ public class AgentRunner {
                        ObjectMapper mapper,
                        RunToolCallRepository toolCalls,
                        Clock clock,
-                       LlmMetrics metrics) {
+                       LlmMetrics metrics,
+                       ResultToolFactory resultTools,
+                       JsonSchemas schemas) {
         this.agents = agents;
         this.runs = runs;
         this.routing = routing;
@@ -103,6 +108,8 @@ public class AgentRunner {
         this.toolCalls = toolCalls;
         this.clock = clock;
         this.metrics = metrics;
+        this.resultTools = resultTools;
+        this.schemas = schemas;
     }
 
     /** Synchronous run starter — used in tests; production path enqueues. */
@@ -210,6 +217,15 @@ public class AgentRunner {
             var provider = providers.get(providerName);
 
             List<Map<String, Object>> toolsList = toToolsList(snap.path("tools"));
+            // An agent with an output_schema also gets submit_result, the channel it delivers
+            // its result through. Agents without a schema never see the tool.
+            JsonNode outputSchemaNode = snap.get("output_schema");
+            boolean hasOutputSchema = outputSchemaNode != null && !outputSchemaNode.isNull();
+            if (hasOutputSchema) {
+                var withResultTool = new ArrayList<>(toolsList);
+                withResultTool.add(resultTools.build(outputSchemaNode));
+                toolsList = List.copyOf(withResultTool);
+            }
 
             String agentName = snap.path("name").asText();
             // Carry the threaded session id (when present) so the subscription bridge resumes the
@@ -324,6 +340,35 @@ public class AgentRunner {
                         "no_tool_use: stop_reason=" + pRes.stopReason(), null);
                 return;
             }
+
+            // submit_result is an output channel, not an executable tool. It MUST be handled
+            // before dispatch: toolDefByName is built from the agent's own tools, so dispatch
+            // would produce "unknown tool: submit_result" and the anyError branch below would
+            // fail the run.
+            var submitBlock = blocks.stream()
+                    .filter(b -> ResultToolFactory.TOOL_NAME.equals(b.name()))
+                    .findFirst().orElse(null);
+            if (submitBlock != null) {
+                if (!hasOutputSchema) {
+                    runs.markTerminal(runId, "failed", null,
+                            "submit_result called but agent has no output_schema", null);
+                    return;
+                }
+                var errors = schemas.validate(outputSchemaNode, submitBlock.input());
+                if (!errors.isEmpty()) {
+                    String detail = errors.stream().map(Object::toString)
+                            .reduce((a, b) -> a + "; " + b).orElse("");
+                    runs.markTerminal(runId, "failed", null,
+                            "output_schema: submit_result: " + detail, null);
+                    return;
+                }
+                runs.recordEvent(runId, "info", "submit_result_received",
+                        mapper.valueToTree(Map.of("turn", turn)));
+                runs.markTerminal(runId, "done", submitBlock.input(), null,
+                        summarize(submitBlock.input().toString()));
+                return;
+            }
+
             runs.recordEvent(runId, "info", "tool_dispatched",
                     mapper.valueToTree(Map.of("count", blocks.size())));
 
