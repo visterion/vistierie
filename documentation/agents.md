@@ -167,7 +167,8 @@ as `webhook_token`.
 ## Structured output (`output_schema` and `submit_result`)
 
 Any agent may declare an `output_schema` (a JSON Schema) on its definition.
-What happens with it depends on the schema's `type`:
+In a standard (non-batch) run, what happens with it depends on the schema's
+`type`:
 
 - **`type: "object"`**: Vistierie additionally offers the agent a
   `submit_result` tool whose `input_schema` is the `output_schema` verbatim.
@@ -181,21 +182,25 @@ What happens with it depends on the schema's `type`:
   tool backend.
 - Any other schema (or no schema at all) is unaffected: the agent is not
   offered `submit_result`, and Vistierie parses the model's final text
-  against `output_schema` exactly as before this feature, same as agents
-  with no schema get `{"text": "..."}`.
+  against the `output_schema` exactly as before this feature. An agent with
+  no schema at all still gets `{"text": "..."}`.
 
 If the model ends a turn without calling `submit_result`, Vistierie doesn't
 fail the run immediately: it sends up to two follow-up turns asking the
 model to call the tool, then falls back to parsing the model's final
 assistant text as the `output_schema`-typed result. The follow-up is
 skipped once the run is on its last available turn, so the fallback is
-always reachable within `max_turns` — keep this in mind when setting a very
-low `max_turns` on a schema-bearing agent, since a tight budget leaves less
-room for the nudges before falling back.
+always reachable within `max_turns`. Each follow-up consumes one of the
+run's `max_turns`, so on an agent with a tight budget the nudges eat turns
+that would otherwise go to tool calls.
 
-Each attempt is recorded as a `run_event` for observability:
-`submit_result_nudged` (carries the attempt number), `submit_result_fallback`,
-and `submit_result_received` when the tool call is accepted.
+The delivery path is visible in `run_events`: `submit_result_nudged`
+(carries the attempt number), `submit_result_fallback`, and
+`submit_result_received` when the tool call is accepted.
+
+Batched runs are single-turn and tool-free, so `submit_result` is never
+offered there — a batch item's output is always parsed from its text (see
+*Batched runs*).
 
 ---
 
