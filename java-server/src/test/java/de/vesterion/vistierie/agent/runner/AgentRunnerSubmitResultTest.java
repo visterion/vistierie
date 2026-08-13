@@ -6,6 +6,7 @@ import de.vesterion.vistierie.routing.RoutingRule;
 import de.vesterion.vistierie.routing.RoutingRuleRepository;
 import de.vesterion.vistierie.routing.RoutingResolver;
 import de.vesterion.vistierie.runs.Run;
+import de.vesterion.vistierie.runs.RunEventRecorder;
 import de.vesterion.vistierie.runs.RunStore;
 import de.vesterion.vistierie.tenants.TenantRepository;
 import de.vesterion.vistierie.testsupport.OperationalBudgetFixtures;
@@ -37,6 +38,7 @@ class AgentRunnerSubmitResultTest extends PostgresTestBase {
     @Autowired RoutingRuleRepository routingRules;
     @Autowired RoutingResolver routingResolver;
     @Autowired OperationalBudgetFixtures budgetFixtures;
+    @Autowired RunEventRecorder events;
 
     private UUID tenantId;
 
@@ -78,6 +80,10 @@ class AgentRunnerSubmitResultTest extends PostgresTestBase {
     private List<String> lastToolNames() {
         var tools = stub.lastRequest().tools();
         return tools == null ? List.of() : tools.stream().map(t -> String.valueOf(t.get("name"))).toList();
+    }
+
+    private long countEvents(String runId, String type) {
+        return events.byRun(runId).stream().filter(e -> type.equals(e.type())).count();
     }
 
     @Test void submitResultBlockEndsRunWithValidatedOutput() throws Exception {
@@ -143,5 +149,48 @@ class AgentRunnerSubmitResultTest extends PostgresTestBase {
         stub.script(StubLlmScripts.Turn.endTurn("[]"));
         runner.startRunSync(tenantId, agentId, "manual", mapper.readTree("{}"), null, null, null);
         assertThat(lastToolNames()).contains("synth.lookup").doesNotContain(ResultToolFactory.TOOL_NAME);
+    }
+
+    @Test void nudgesTwiceThenFallsBackToTextParsing() throws Exception {
+        var schema = mapper.readTree("""
+                {"type":"object","required":["verdicts"]}
+                """);
+        var agentId = givenAgent(schema);
+
+        // Three end_turn responses without submit_result; the third carries parseable JSON.
+        stub.script(
+                StubLlmScripts.Turn.endTurn("Ich denke noch nach."),
+                StubLlmScripts.Turn.endTurn("Immer noch am Rechnen."),
+                StubLlmScripts.Turn.endTurn("""
+                        {"verdicts":[]}
+                        """));
+
+        var runId = runner.startRunSync(tenantId, agentId, "manual",
+                mapper.readTree("{}"), null, null, null);
+
+        Run r = runStore.get(runId);
+        assertThat(r.status()).isEqualTo("done");
+        assertThat(r.output().has("verdicts")).isTrue();
+        assertThat(countEvents(runId, "submit_result_nudged")).isEqualTo(2);
+        assertThat(countEvents(runId, "submit_result_fallback")).isEqualTo(1);
+    }
+
+    @Test void fallbackStillFailsOnUnparseableText() throws Exception {
+        var schema = mapper.readTree("""
+                {"type":"object","required":["verdicts"]}
+                """);
+        var agentId = givenAgent(schema);
+
+        stub.script(
+                StubLlmScripts.Turn.endTurn("kein JSON"),
+                StubLlmScripts.Turn.endTurn("weiterhin kein JSON"),
+                StubLlmScripts.Turn.endTurn("immer noch keins"));
+
+        var runId = runner.startRunSync(tenantId, agentId, "manual",
+                mapper.readTree("{}"), null, null, null);
+
+        Run r = runStore.get(runId);
+        assertThat(r.status()).isEqualTo("failed");
+        assertThat(r.error()).startsWith("output_schema:");
     }
 }

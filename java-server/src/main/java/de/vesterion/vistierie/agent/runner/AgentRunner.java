@@ -54,6 +54,9 @@ public class AgentRunner {
      */
     static final int DEFAULT_MAX_TOKENS = 32768;
 
+    /** Follow-up turns spent asking for submit_result before falling back to text parsing. */
+    private static final int MAX_SUBMIT_NUDGES = 2;
+
     private final AgentRepository agents;
     private final RunStore runs;
     private final RoutingResolver routing;
@@ -199,6 +202,10 @@ public class AgentRunner {
         // provider (bridge sessions are provider-specific and must not leak across providers).
         String providerSessionId = null;
 
+        // Follow-ups spent asking for submit_result. Budget MAX_SUBMIT_NUDGES, then fall back
+        // to parsing the model's text exactly as before this feature existed.
+        int submitNudges = 0;
+
         for (int turn = 0; turn < maxTurns; turn++) {
             try { kill.check(run.tenantId()); }
             catch (KillSwitchService.KilledException e) {
@@ -322,7 +329,35 @@ public class AgentRunner {
 
             if ("end_turn".equals(pRes.stopReason())) {
                 JsonNode output;
-                if (snap.has("output_schema") && !snap.get("output_schema").isNull()) {
+                // offersResultTool gates the nudge/fallback dance below — it is only true for an
+                // object-typed schema, the only case where submit_result was ever offered (see
+                // the offering site above). A schema-bearing agent that does NOT offer the tool
+                // (e.g. a non-object schema) never saw a nudge and must keep parsing straight
+                // away, exactly as before this feature existed.
+                if (offersResultTool) {
+                    if (submitNudges < MAX_SUBMIT_NUDGES) {
+                        submitNudges++;
+                        runs.recordEvent(runId, "info", "submit_result_nudged",
+                                mapper.valueToTree(Map.of("attempt", submitNudges, "turn", turn)));
+                        var nudgeAssistantMsg = mapper.createObjectNode();
+                        nudgeAssistantMsg.put("role", "assistant");
+                        nudgeAssistantMsg.set("content", pRes.contentBlocks());
+                        messages.add(nudgeAssistantMsg);
+                        messages.add(mapper.createObjectNode()
+                                .put("role", "user")
+                                .put("content", "Deliver the final result by calling the "
+                                        + "submit_result tool. Do not answer with text."));
+                        continue;
+                    }
+                    runs.recordEvent(runId, "info", "submit_result_fallback",
+                            mapper.valueToTree(Map.of("turn", turn)));
+                    try {
+                        output = schema.parseAndValidate(pRes.text(), outputSchemaNode);
+                    } catch (OutputSchemaValidator.SchemaViolation e) {
+                        runs.markTerminal(runId, "failed", null, "output_schema: " + e.getMessage(), null);
+                        return;
+                    }
+                } else if (snap.has("output_schema") && !snap.get("output_schema").isNull()) {
                     try {
                         output = schema.parseAndValidate(pRes.text(), snap.get("output_schema"));
                     } catch (OutputSchemaValidator.SchemaViolation e) {

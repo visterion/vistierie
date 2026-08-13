@@ -83,10 +83,13 @@ class AgentRunnerMcpToolTest extends PostgresTestBase {
                     mcpCredentials);
             budgetFixtures.seed(tenantId, agentId);
 
+            // submit_result, not plain end_turn text: an object-typed output_schema offers the
+            // tool, and a bare end_turn now gets nudged instead of ending the run in one call.
             stub.script(
                     StubLlmScripts.Turn.toolUses(
                             StubLlmScripts.Turn.toolUse("echo", Map.of("q", "hello"))),
-                    StubLlmScripts.Turn.endTurn("{\"x\":\"final\"}"));
+                    StubLlmScripts.Turn.toolUses(
+                            StubLlmScripts.Turn.toolUse(ResultToolFactory.TOOL_NAME, Map.of("x", "final"))));
 
             var runId = runner.startRunSync(tenantId, agentId, "manual",
                     mapper.readTree("{}"), null, null, null);
@@ -178,14 +181,18 @@ class AgentRunnerMcpToolTest extends PostgresTestBase {
                     mcpCredentials);
             budgetFixtures.seed(tenantId, queenId);
 
+            // submit_result, not plain end_turn text: object-typed output_schema offers the
+            // tool, and a bare end_turn now gets nudged instead of ending in one call.
             stub.scriptForAgent("queen-mixed",
                     StubLlmScripts.Turn.toolUses(
                             StubLlmScripts.Turn.toolUse("http-echo", Map.of("q", "x")),
                             StubLlmScripts.Turn.toolUse("dispatch_bee", Map.of("cell_id", "c1")),
                             StubLlmScripts.Turn.toolUse("echo", Map.of("q", "y"))),
-                    StubLlmScripts.Turn.endTurn("{\"verdict\":\"shipped\"}"));
+                    StubLlmScripts.Turn.toolUses(
+                            StubLlmScripts.Turn.toolUse(ResultToolFactory.TOOL_NAME, Map.of("verdict", "shipped"))));
             stub.scriptForAgent("bee",
-                    StubLlmScripts.Turn.endTurn("{\"finding\":\"interesting cell\"}"));
+                    StubLlmScripts.Turn.toolUses(
+                            StubLlmScripts.Turn.toolUse(ResultToolFactory.TOOL_NAME, Map.of("finding", "interesting cell"))));
 
             var runId = runner.startRunSync(tenantId, queenId, "manual",
                     mapper.readTree("{}"), null, null, null);

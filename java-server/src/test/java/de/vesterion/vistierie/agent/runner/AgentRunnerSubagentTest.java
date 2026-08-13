@@ -77,12 +77,16 @@ class AgentRunnerSubagentTest extends PostgresTestBase {
                 queenTools, queenSchema, 5, 60, "wt", false, null, null, null, null, null, null);
         budgetFixtures.seed(tenantId, queenId);
 
+        // submit_result, not plain end_turn text: object-typed output_schema offers the tool,
+        // and a bare end_turn now gets nudged instead of ending the run in one call.
         stub.scriptForAgent("queen",
                 StubLlmScripts.Turn.toolUses(
                         StubLlmScripts.Turn.toolUse("dispatch_bee", Map.of("cell_id","c1"))),
-                StubLlmScripts.Turn.endTurn("{\"verdict\":\"shipped\"}"));
+                StubLlmScripts.Turn.toolUses(
+                        StubLlmScripts.Turn.toolUse(ResultToolFactory.TOOL_NAME, Map.of("verdict", "shipped"))));
         stub.scriptForAgent("bee",
-                StubLlmScripts.Turn.endTurn("{\"finding\":\"interesting cell\"}"));
+                StubLlmScripts.Turn.toolUses(
+                        StubLlmScripts.Turn.toolUse(ResultToolFactory.TOOL_NAME, Map.of("finding", "interesting cell"))));
 
         var queenRunId = runner.startRunSync(tenantId, queenId, "manual",
                 mapper.readTree("{}"), null, null, null);

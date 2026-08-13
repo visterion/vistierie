@@ -21,6 +21,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.JsonNodeFactory;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -63,7 +64,11 @@ class AgentRunnerCoreTest extends PostgresTestBase {
         // estimate (maxTokens as output tokens) before the call, so tiny caps would block every turn.
         tenantBudgets.patch(tenantId, new BudgetPatchRequest(100_000_000L, 100_000_000L, 80, 90));
         agentBudgets.patch(agentId, new BudgetPatchRequest(50_000_000L, 50_000_000L, 80, 90));
-        stub.script(StubLlmScripts.Turn.endTurn("{\"x\":\"yes\"}"));
+        // submit_result, not plain end_turn text: with an object-typed output_schema the tool
+        // is offered, and a bare end_turn now gets nudged (see AgentRunnerSubmitResultTest).
+        // This test's "ends immediately" premise wants the tool-call path.
+        stub.script(StubLlmScripts.Turn.toolUses(
+                StubLlmScripts.Turn.toolUse(ResultToolFactory.TOOL_NAME, Map.of("x", "yes"))));
 
         var runId = runner.startRunSync(tenantId, agentId, "manual",
                 mapper.readTree("{\"q\":\"hi\"}"), null, null, null);

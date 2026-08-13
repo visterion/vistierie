@@ -85,12 +85,15 @@ class AgentRunnerToolsTest extends PostgresTestBase {
                 tools, schema, 5, 60, "wt-tok", false, null, null, null, null, null, null);
         budgetFixtures.seed(tenantId, agentId);
 
+        // submit_result, not plain end_turn text: an object-typed output_schema offers the
+        // tool, and a bare end_turn now gets nudged instead of ending the run in one call.
         stub.script(
                 StubLlmScripts.Turn.toolUses(
                         StubLlmScripts.Turn.toolUse("cell.search", Map.of("q","x")),
                         StubLlmScripts.Turn.toolUse("cell.read",   Map.of("id","c1")),
                         StubLlmScripts.Turn.toolUse("cell.tag",    Map.of("id","c1","tag","new"))),
-                StubLlmScripts.Turn.endTurn("{\"x\":\"final\"}")
+                StubLlmScripts.Turn.toolUses(
+                        StubLlmScripts.Turn.toolUse(ResultToolFactory.TOOL_NAME, Map.of("x", "final")))
         );
 
         var runId = runner.startRunSync(tenantId, agentId, "manual",

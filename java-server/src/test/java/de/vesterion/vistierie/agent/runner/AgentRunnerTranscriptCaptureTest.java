@@ -77,9 +77,12 @@ class AgentRunnerTranscriptCaptureTest extends PostgresTestBase {
                 tools, schema, 5, 60, "wt", false, null, null, null, null, null, null);
         budgetFixtures.seed(tenantId, agentId);
 
+        // submit_result, not plain end_turn text: an object-typed output_schema offers the
+        // tool, and a bare end_turn now gets nudged instead of ending the run in one call.
         stub.script(
                 StubLlmScripts.Turn.toolUses(StubLlmScripts.Turn.toolUse("finnhub", Map.of("q", "AAPL"))),
-                StubLlmScripts.Turn.endTurn("{\"x\":\"done\"}"));
+                StubLlmScripts.Turn.toolUses(
+                        StubLlmScripts.Turn.toolUse(ResultToolFactory.TOOL_NAME, Map.of("x", "done"))));
 
         var runId = runner.startRunSync(tenantId, agentId, "manual",
                 mapper.readTree("{}"), null, null, null);

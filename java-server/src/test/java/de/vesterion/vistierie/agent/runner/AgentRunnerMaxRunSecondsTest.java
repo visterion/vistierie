@@ -135,7 +135,10 @@ class AgentRunnerMaxRunSecondsTest extends PostgresTestBase {
         stub.scriptForAgent("queen",
                 StubLlmScripts.Turn.toolUses(StubLlmScripts.Turn.toolUse("dispatch_bee", Map.of())),
                 StubLlmScripts.Turn.toolUses(StubLlmScripts.Turn.toolUse("dispatch_bee", Map.of())));
-        stub.scriptForAgent("bee", StubLlmScripts.Turn.endTurn("{\"finding\":\"ok\"}"));
+        // submit_result, not plain end_turn text: bee's object-typed output_schema offers the
+        // tool, and a bare end_turn now gets nudged instead of ending in one call.
+        stub.scriptForAgent("bee", StubLlmScripts.Turn.toolUses(
+                StubLlmScripts.Turn.toolUse(ResultToolFactory.TOOL_NAME, Map.of("finding", "ok"))));
 
         var runId = runner.startRunSync(tenantId, queenId, "manual",
                 mapper.readTree("{}"), null, null, null);
@@ -156,8 +159,12 @@ class AgentRunnerMaxRunSecondsTest extends PostgresTestBase {
 
         stub.scriptForAgent("queen",
                 StubLlmScripts.Turn.toolUses(StubLlmScripts.Turn.toolUse("dispatch_bee", Map.of())),
-                StubLlmScripts.Turn.endTurn("{\"verdict\":\"shipped\"}"));
-        stub.scriptForAgent("bee", StubLlmScripts.Turn.endTurn("{\"finding\":\"ok\"}"));
+                StubLlmScripts.Turn.toolUses(
+                        StubLlmScripts.Turn.toolUse(ResultToolFactory.TOOL_NAME, Map.of("verdict", "shipped"))));
+        // submit_result, not plain end_turn text: bee's object-typed output_schema offers the
+        // tool, and a bare end_turn now gets nudged instead of ending in one call.
+        stub.scriptForAgent("bee", StubLlmScripts.Turn.toolUses(
+                StubLlmScripts.Turn.toolUse(ResultToolFactory.TOOL_NAME, Map.of("finding", "ok"))));
 
         var runId = runner.startRunSync(tenantId, queenId, "manual",
                 mapper.readTree("{}"), null, null, null);
