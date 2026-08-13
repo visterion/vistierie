@@ -243,8 +243,9 @@ class AgentRunnerSubmitResultTest extends PostgresTestBase {
         assertThat(countEvents(runId, "submit_result_nudged")).isEqualTo(1);
         assertThat(countEvents(runId, "submit_result_received")).isEqualTo(1);
 
-        // Every tool_use block of the rejected turn got a matching tool_result — an unanswered
-        // tool_use block is a provider-level 400.
+        // The rejected turn's only block got a matching tool_result. This turn has no siblings —
+        // the fan-out over sibling blocks is covered by
+        // schemaViolatingSubmitResultAlsoAnswersTheSiblingToolUseBlocksOfItsTurn below.
         var sent = stub.lastRequest().messages();
         @SuppressWarnings("unchecked")
         var results = (List<Map<String, Object>>) sent.get(sent.size() - 1).get("content");
@@ -252,6 +253,52 @@ class AgentRunnerSubmitResultTest extends PostgresTestBase {
         assertThat(results.get(0).get("type")).isEqualTo("tool_result");
         assertThat(results.get(0).get("tool_use_id")).isNotNull();
         assertThat(String.valueOf(results.get(0).get("content"))).contains("submit_result");
+    }
+
+    @Test void schemaViolatingSubmitResultAlsoAnswersTheSiblingToolUseBlocksOfItsTurn() throws Exception {
+        // A turn may carry submit_result NEXT TO real tool_use blocks. Intercepting submit_result
+        // consumes the whole turn, so the siblings are never dispatched — but an unanswered
+        // tool_use block is a provider-level 400 on the follow-up request. Every block of the
+        // turn must come back with a tool_result, and the undispatched siblings must be flagged
+        // as errors rather than passed off as successful tool executions.
+        var schema = mapper.readTree("""
+                {"type":"object","required":["verdicts"],
+                 "properties":{"verdicts":{"type":"array"}}}
+                """);
+        var agentId = givenAgent(schema, ownTools());
+
+        var sibling = StubLlmScripts.Turn.toolUse("synth.lookup", Map.of("q", "SYNTH"));
+        var badSubmit = StubLlmScripts.Turn.toolUse(ResultToolFactory.TOOL_NAME, Map.of("other", "x"));
+        stub.script(
+                StubLlmScripts.Turn.toolUses(sibling, badSubmit),
+                StubLlmScripts.Turn.toolUses(
+                        StubLlmScripts.Turn.toolUse(ResultToolFactory.TOOL_NAME,
+                                Map.of("verdicts", List.of()))));
+
+        var runId = runner.startRunSync(tenantId, agentId, "manual",
+                mapper.readTree("{}"), null, null, null);
+
+        assertThat(runStore.get(runId).status()).isEqualTo("done");
+
+        var sent = stub.lastRequest().messages();
+        @SuppressWarnings("unchecked")
+        var results = (List<Map<String, Object>>) sent.get(sent.size() - 1).get("content");
+        assertThat(results).hasSize(2);
+        assertThat(results).allSatisfy(b -> assertThat(b.get("type")).isEqualTo("tool_result"));
+        assertThat(results.stream().map(b -> String.valueOf(b.get("tool_use_id"))).toList())
+                .containsExactlyInAnyOrder(sibling.id(), badSubmit.id());
+
+        var siblingResult = results.stream()
+                .filter(b -> sibling.id().equals(b.get("tool_use_id"))).findFirst().orElseThrow();
+        assertThat(siblingResult.get("is_error")).isEqualTo(true);
+        assertThat(String.valueOf(siblingResult.get("content"))).contains("not executed");
+
+        var submitResult = results.stream()
+                .filter(b -> badSubmit.id().equals(b.get("tool_use_id"))).findFirst().orElseThrow();
+        assertThat(submitResult.get("is_error")).isEqualTo(true);
+        assertThat(String.valueOf(submitResult.get("content"))).contains("submit_result");
+        // The sibling never reached the dispatcher, so no tool call was made for it.
+        assertThat(countEvents(runId, "tool_dispatched")).isZero();
     }
 
     @Test void schemaViolatingSubmitResultStillFailsOnceTheFollowUpBudgetIsSpent() throws Exception {
@@ -349,20 +396,25 @@ class AgentRunnerSubmitResultTest extends PostgresTestBase {
         assertThat(r.error()).startsWith("output_schema:");
     }
 
-    @Test void fallbackStillRunsWhenNudgesWouldOtherwiseExhaustMaxTurns() throws Exception {
-        // A tight max_turns is not hypothetical: the lowest configured value in prod is 4
-        // (daywalker-deep, renfield). With max_turns=2 here, an unconditional nudge on turn 0
-        // would leave no budget to fall back on turn 1 and the run would die with
-        // max_turns_exceeded instead of ever parsing the model's text. The last available turn
-        // must always fall back rather than nudge.
-        var schema = mapper.readTree("""
-                {"type":"object","required":["verdicts"]}
-                """);
+    /** An agent with a deliberately tight turn budget — prod's lowest max_turns is 4. */
+    private UUID givenAgentWithMaxTurns(JsonNode outputSchema, int maxTurns) {
         var agentId = UUID.randomUUID();
         agents.insert(agentId, tenantId, "ag-" + agentId, "you analyse", "summarize_cell",
-                mapper.createArrayNode(), schema, 2, 60, "wt-tok",
+                mapper.createArrayNode(), outputSchema, maxTurns, 60, "wt-tok",
                 false, null, null, null, null, null, null);
         budgetFixtures.seed(tenantId, agentId);
+        return agentId;
+    }
+
+    @Test void aNudgedRunStillDeliversOnTheFinalTurnOfATightBudget() throws Exception {
+        // Renamed from fallbackStillRunsWhenNudgesWouldOtherwiseExhaustMaxTurns: under parse-first
+        // this scenario passes with or without the `turn < maxTurns - 1` guard, because the last
+        // turn is parseable and never wants a nudge. What it does prove is that spending turn 0 on
+        // a nudge still leaves the run able to finish on turn 1 of a max_turns=2 budget. The guard
+        // itself is covered by theLastAvailableTurnFailsOnTheSchemaInsteadOfNudging below.
+        var agentId = givenAgentWithMaxTurns(mapper.readTree("""
+                {"type":"object","required":["verdicts"]}
+                """), 2);
 
         stub.script(
                 StubLlmScripts.Turn.endTurn("Ich denke noch nach."),
@@ -378,5 +430,29 @@ class AgentRunnerSubmitResultTest extends PostgresTestBase {
         assertThat(r.output().has("verdicts")).isTrue();
         assertThat(countEvents(runId, "submit_result_nudged")).isEqualTo(1);
         assertThat(countEvents(runId, "submit_result_fallback")).isEqualTo(1);
+    }
+
+    @Test void theLastAvailableTurnFailsOnTheSchemaInsteadOfNudging() throws Exception {
+        // The `turn < maxTurns - 1` guard: on the last available turn a nudge would burn the
+        // remaining budget on "please call the tool" and the run would die with the useless
+        // max_turns_exceeded instead of reporting the real schema failure. With max_turns=2 and
+        // both turns unparseable, turn 1 must fail with output_schema — dropping the guard turns
+        // this into max_turns_exceeded and a second nudge event.
+        var agentId = givenAgentWithMaxTurns(mapper.readTree("""
+                {"type":"object","required":["verdicts"]}
+                """), 2);
+
+        stub.script(
+                StubLlmScripts.Turn.endTurn("kein JSON"),
+                StubLlmScripts.Turn.endTurn("weiterhin kein JSON"));
+
+        var runId = runner.startRunSync(tenantId, agentId, "manual",
+                mapper.readTree("{}"), null, null, null);
+
+        Run r = runStore.get(runId);
+        assertThat(r.status()).isEqualTo("failed");
+        assertThat(r.error()).startsWith("output_schema:");
+        assertThat(r.error()).doesNotContain("max_turns_exceeded");
+        assertThat(countEvents(runId, "submit_result_nudged")).isEqualTo(1);
     }
 }
