@@ -90,7 +90,8 @@ class OutputSchemaValidatorTest {
         assertThatThrownBy(() ->
                 v.parseAndValidate("```json\n{\"x\":\"not-a-number\"}\n```", schema))
             .isInstanceOf(OutputSchemaValidator.SchemaViolation.class)
-            .hasMessageNotContaining("parse:");
+            .hasMessageStartingWith("fence-strip:")
+            .hasMessageContaining("number");
     }
 
     @Test void strayArrayBeforeObjectSkipped() throws Exception {
