@@ -106,31 +106,16 @@ class AgentRunnerSubmitResultTest extends PostgresTestBase {
         assertThat(r.error()).isNull();
     }
 
-    @Test void submitResultBlockFailsRunWhenPayloadViolatesSchema() throws Exception {
-        var schema = mapper.readTree("""
-                {"type":"object","required":["verdicts"],
-                 "properties":{"verdicts":{"type":"array"}}}
-                """);
-        var agentId = givenAgent(schema);
-
-        stub.script(StubLlmScripts.Turn.toolUses(
-                StubLlmScripts.Turn.toolUse(ResultToolFactory.TOOL_NAME, Map.of("other", "x"))));
-
-        var runId = runner.startRunSync(tenantId, agentId, "manual",
-                mapper.readTree("{}"), null, null, null);
-
-        Run r = runStore.get(runId);
-        assertThat(r.status()).isEqualTo("failed");
-        assertThat(r.error()).startsWith("output_schema: submit_result: ");
-    }
+    // A single schema-violating submit_result no longer fails the run outright — see
+    // schemaViolatingSubmitResultGetsAFollowUpInsteadOfDyingAtOnce and
+    // schemaViolatingSubmitResultStillFailsOnceTheFollowUpBudgetIsSpent below.
 
     @Test void submitResultToolIsAppendedToTheAgentsOwnToolsWhenSchemaPresent() throws Exception {
         var withSchema = givenAgent(mapper.readTree("""
                 {"type":"object"}
                 """), ownTools());
-        // submit_result, not plain end_turn text: an object-typed output_schema offers the
-        // tool, and a bare end_turn now gets nudged instead of ending the run in one call —
-        // scripting only one turn would drive the run into an uncaught IllegalStateException.
+        // submit_result rather than plain end_turn text: this asserts the tool reaches the
+        // provider request, which only a turn that actually uses it can demonstrate.
         stub.script(StubLlmScripts.Turn.toolUses(
                 StubLlmScripts.Turn.toolUse(ResultToolFactory.TOOL_NAME, Map.of())));
         var withSchemaRunId = runner.startRunSync(tenantId, withSchema, "manual", mapper.readTree("{}"), null, null, null);
@@ -154,6 +139,171 @@ class AgentRunnerSubmitResultTest extends PostgresTestBase {
         stub.script(StubLlmScripts.Turn.endTurn("[]"));
         runner.startRunSync(tenantId, agentId, "manual", mapper.readTree("{}"), null, null, null);
         assertThat(lastToolNames()).contains("synth.lookup").doesNotContain(ResultToolFactory.TOOL_NAME);
+    }
+
+    @Test void parseableTextEndsTheRunWithoutAnyFollowUp() throws Exception {
+        // Parse FIRST. No model calls submit_result on day one, so a follow-up before the parse
+        // would fire on every run of every schema-bearing agent — and on the subscription path
+        // each follow-up is a full history replay. A healthy run must cost exactly one turn.
+        var schema = mapper.readTree("""
+                {"type":"object","required":["verdicts"]}
+                """);
+        var agentId = givenAgent(schema);
+
+        stub.script(StubLlmScripts.Turn.endTurn("""
+                {"verdicts":[]}
+                """));
+
+        var runId = runner.startRunSync(tenantId, agentId, "manual",
+                mapper.readTree("{}"), null, null, null);
+
+        Run r = runStore.get(runId);
+        assertThat(r.status()).isEqualTo("done");
+        assertThat(r.output().has("verdicts")).isTrue();
+        assertThat(countEvents(runId, "submit_result_nudged")).isZero();
+        assertThat(countEvents(runId, "submit_result_fallback")).isEqualTo(1);
+    }
+
+    @Test void followUpCarriesRealAssistantContentWhenTheTurnHasNoContentBlocks() throws Exception {
+        // The primary provider returns NO content_blocks on end_turn. Setting that null onto the
+        // follow-up's assistant message made the bridge drop the message and Bedrock reject it —
+        // the model was asked to re-deliver a result no longer in its context.
+        var schema = mapper.readTree("""
+                {"type":"object","required":["verdicts"]}
+                """);
+        var agentId = givenAgent(schema);
+
+        stub.script(
+                StubLlmScripts.Turn.endTurn("Ich denke noch nach."),
+                StubLlmScripts.Turn.endTurn("""
+                        {"verdicts":[]}
+                        """));
+
+        var runId = runner.startRunSync(tenantId, agentId, "manual",
+                mapper.readTree("{}"), null, null, null);
+
+        assertThat(runStore.get(runId).status()).isEqualTo("done");
+        // The last request carries the follow-up exchange: assistant turn, then the ask.
+        var sent = stub.lastRequest().messages();
+        var assistantMsgs = sent.stream().filter(m -> "assistant".equals(m.get("role"))).toList();
+        assertThat(assistantMsgs).hasSize(1);
+        var content = assistantMsgs.get(0).get("content");
+        assertThat(content).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        var blocks = (List<Map<String, Object>>) content;
+        assertThat(blocks).hasSize(1);
+        assertThat(blocks.get(0).get("type")).isEqualTo("text");
+        assertThat(String.valueOf(blocks.get(0).get("text"))).contains("Ich denke noch nach.");
+    }
+
+    @Test void followUpIsOmittedRatherThanEmptyWhenTheTurnHasNoContentAtAll() throws Exception {
+        var schema = mapper.readTree("""
+                {"type":"object","required":["verdicts"]}
+                """);
+        var agentId = givenAgent(schema);
+
+        stub.script(
+                StubLlmScripts.Turn.endTurn("   "),
+                StubLlmScripts.Turn.endTurn("""
+                        {"verdicts":[]}
+                        """));
+
+        var runId = runner.startRunSync(tenantId, agentId, "manual",
+                mapper.readTree("{}"), null, null, null);
+
+        assertThat(runStore.get(runId).status()).isEqualTo("done");
+        var sent = stub.lastRequest().messages();
+        // No assistant message at all — never one with null or empty content.
+        assertThat(sent.stream().filter(m -> "assistant".equals(m.get("role"))).toList()).isEmpty();
+        assertThat(sent).allSatisfy(m -> assertThat(m.get("content")).isNotNull());
+    }
+
+    @Test void schemaViolatingSubmitResultGetsAFollowUpInsteadOfDyingAtOnce() throws Exception {
+        // The tool path must not be harsher than the text path it replaces: hand the validation
+        // errors back as a tool_result and let the model correct itself.
+        var schema = mapper.readTree("""
+                {"type":"object","required":["verdicts"],
+                 "properties":{"verdicts":{"type":"array"}}}
+                """);
+        var agentId = givenAgent(schema);
+
+        stub.script(
+                StubLlmScripts.Turn.toolUses(
+                        StubLlmScripts.Turn.toolUse(ResultToolFactory.TOOL_NAME, Map.of("other", "x"))),
+                StubLlmScripts.Turn.toolUses(
+                        StubLlmScripts.Turn.toolUse(ResultToolFactory.TOOL_NAME,
+                                Map.of("verdicts", List.of()))));
+
+        var runId = runner.startRunSync(tenantId, agentId, "manual",
+                mapper.readTree("{}"), null, null, null);
+
+        Run r = runStore.get(runId);
+        assertThat(r.status()).isEqualTo("done");
+        assertThat(r.output().has("verdicts")).isTrue();
+        assertThat(countEvents(runId, "submit_result_nudged")).isEqualTo(1);
+        assertThat(countEvents(runId, "submit_result_received")).isEqualTo(1);
+
+        // Every tool_use block of the rejected turn got a matching tool_result — an unanswered
+        // tool_use block is a provider-level 400.
+        var sent = stub.lastRequest().messages();
+        @SuppressWarnings("unchecked")
+        var results = (List<Map<String, Object>>) sent.get(sent.size() - 1).get("content");
+        assertThat(results).hasSize(1);
+        assertThat(results.get(0).get("type")).isEqualTo("tool_result");
+        assertThat(results.get(0).get("tool_use_id")).isNotNull();
+        assertThat(String.valueOf(results.get(0).get("content"))).contains("submit_result");
+    }
+
+    @Test void schemaViolatingSubmitResultStillFailsOnceTheFollowUpBudgetIsSpent() throws Exception {
+        var schema = mapper.readTree("""
+                {"type":"object","required":["verdicts"],
+                 "properties":{"verdicts":{"type":"array"}}}
+                """);
+        var agentId = givenAgent(schema);
+
+        stub.script(
+                StubLlmScripts.Turn.toolUses(
+                        StubLlmScripts.Turn.toolUse(ResultToolFactory.TOOL_NAME, Map.of("other", "1"))),
+                StubLlmScripts.Turn.toolUses(
+                        StubLlmScripts.Turn.toolUse(ResultToolFactory.TOOL_NAME, Map.of("other", "2"))),
+                StubLlmScripts.Turn.toolUses(
+                        StubLlmScripts.Turn.toolUse(ResultToolFactory.TOOL_NAME, Map.of("other", "3"))));
+
+        var runId = runner.startRunSync(tenantId, agentId, "manual",
+                mapper.readTree("{}"), null, null, null);
+
+        Run r = runStore.get(runId);
+        assertThat(r.status()).isEqualTo("failed");
+        assertThat(r.error()).startsWith("output_schema: submit_result: ");
+        assertThat(countEvents(runId, "submit_result_nudged")).isEqualTo(2);
+    }
+
+    @Test void anAgentOwningTheToolNameKeepsItsOwnToolAndTheTextPath() throws Exception {
+        // A definition registered BEFORE the reserved-name validator. Appending ours would send
+        // two same-named tools in one request; such an agent keeps its old behaviour exactly.
+        var tools = mapper.createArrayNode();
+        tools.add(mapper.valueToTree(Map.of(
+                "name", ResultToolFactory.TOOL_NAME, "description", "legacy operator tool",
+                "input_schema", Map.of("type", "object"),
+                "webhook_url", "http://192.0.2.10/tools/submit")));
+        var agentId = givenAgent(mapper.readTree("""
+                {"type":"object","required":["verdicts"]}
+                """), tools);
+
+        stub.script(StubLlmScripts.Turn.endTurn("""
+                {"verdicts":[]}
+                """));
+        var runId = runner.startRunSync(tenantId, agentId, "manual",
+                mapper.readTree("{}"), null, null, null);
+
+        assertThat(lastToolNames().stream().filter(ResultToolFactory.TOOL_NAME::equals).count())
+                .isEqualTo(1);
+        assertThat(stub.lastRequest().tools().stream()
+                .filter(t -> ResultToolFactory.TOOL_NAME.equals(t.get("name")))
+                .findFirst().orElseThrow())
+                .containsKey("webhook_url");
+        assertThat(runStore.get(runId).status()).isEqualTo("done");
+        assertThat(countEvents(runId, "submit_result_fallback")).isZero();
     }
 
     @Test void nudgesTwiceThenFallsBackToTextParsing() throws Exception {

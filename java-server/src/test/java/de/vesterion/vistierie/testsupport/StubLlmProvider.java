@@ -97,9 +97,17 @@ public class StubLlmProvider implements LlmProvider {
                             + " work from other tests can steal turns.");
         }
         if (turn.toolUses().isEmpty()) {
-            // Text-only turn (end_turn, or a truncated max_tokens turn). Emit one text block
-            // and report the SCRIPTED stop reason verbatim.
+            // Text-only turn (end_turn, or a truncated max_tokens turn). Report the SCRIPTED
+            // stop reason verbatim.
             String text = turn.text() == null ? "" : turn.text();
+            // end_turn carries NO content blocks — that is the shape production emits: the
+            // subscription bridge returns content_blocks only on tool_use turns
+            // (claude-bridge complete.ts:146-156). Synthesizing a text block here once hid a
+            // whole code path that only ever ran against a shape the primary provider never
+            // produces. Other stop reasons (e.g. a truncated max_tokens turn) keep the block.
+            if ("end_turn".equals(turn.stopReason())) {
+                return new ProviderResponse(text, turn.stopReason(), new Usage(10, 5, 0, 0), req.model());
+            }
             ArrayNode content = mapper.createArrayNode();
             content.add(mapper.createObjectNode().put("type", "text").put("text", text));
             return new ProviderResponse(text, turn.stopReason(), new Usage(10, 5, 0, 0), req.model(), content);

@@ -54,7 +54,11 @@ public class AgentRunner {
      */
     static final int DEFAULT_MAX_TOKENS = 32768;
 
-    /** Follow-up turns spent asking for submit_result before falling back to text parsing. */
+    /**
+     * Follow-up turns spent asking for a schema-conforming submit_result call. Run-global: the
+     * counter is never reset, so this is a whole-run ceiling shared by both failure paths (text
+     * that does not satisfy the schema, and a submit_result payload that does not).
+     */
     private static final int MAX_SUBMIT_NUDGES = 2;
 
     private final AgentRepository agents;
@@ -232,9 +236,19 @@ public class AgentRunner {
             // API rejects a non-object input_schema outright. Offering the tool there would
             // turn every turn of an agent that runs fine via the text path into a 400. Such an
             // agent keeps the text path, unchanged.
+            //
+            // Defensive skip: AgentDefinitionValidator now rejects a tool named submit_result,
+            // but definitions registered BEFORE that validator may still carry one. Appending
+            // ours would send two same-named tools in one request (a provider 400). Such an
+            // agent keeps its own tool and the plain text path — exactly its old behaviour.
             JsonNode outputSchemaNode = snap.get("output_schema");
+            boolean ownsResultToolName = false;
+            for (JsonNode t : snap.path("tools")) {
+                if (ResultToolFactory.TOOL_NAME.equals(t.path("name").asText())) ownsResultToolName = true;
+            }
             boolean offersResultTool = outputSchemaNode != null && !outputSchemaNode.isNull()
-                    && "object".equals(outputSchemaNode.path("type").asText());
+                    && "object".equals(outputSchemaNode.path("type").asText())
+                    && !ownsResultToolName;
             if (offersResultTool) {
                 var withResultTool = new ArrayList<>(toolsList);
                 withResultTool.add(resultTools.build(outputSchemaNode));
@@ -335,37 +349,44 @@ public class AgentRunner {
                 // (e.g. a non-object schema) never saw a nudge and must keep parsing straight
                 // away, exactly as before this feature existed.
                 if (offersResultTool) {
-                    // turn < maxTurns - 1: never nudge on the last available turn. A nudge costs
-                    // a loop iteration same as any other turn, so nudging unconditionally could
-                    // burn the remaining budget on "please call the tool" and hit
-                    // max_turns_exceeded instead of ever reaching the fallback below — live in
-                    // prod, not hypothetical: the lowest configured max_turns is 4
-                    // (daywalker-deep, renfield), and two tool turns plus two nudges exhausts it.
-                    if (submitNudges < MAX_SUBMIT_NUDGES && turn < maxTurns - 1) {
-                        submitNudges++;
-                        runs.recordEvent(runId, "info", "submit_result_nudged",
-                                mapper.valueToTree(Map.of("attempt", submitNudges, "turn", turn)));
-                        var nudgeAssistantMsg = mapper.createObjectNode();
-                        nudgeAssistantMsg.put("role", "assistant");
-                        nudgeAssistantMsg.set("content", pRes.contentBlocks());
-                        messages.add(nudgeAssistantMsg);
-                        messages.add(mapper.createObjectNode()
-                                .put("role", "user")
-                                .put("content", "Deliver the final result by calling the "
-                                        + "submit_result tool. Do not answer with text."));
-                        continue;
-                    }
-                    runs.recordEvent(runId, "info", "submit_result_fallback",
-                            mapper.valueToTree(Map.of("turn", turn)));
+                    // PARSE FIRST, follow up only on failure. Nudging before parsing would fire
+                    // on every schema-bearing end_turn of every agent — no model calls the tool
+                    // on day one — turning an additive safety net into a fleet-wide behaviour
+                    // change, and each follow-up on the subscription path is a full history
+                    // replay in a fresh CLI subprocess. A healthy run must stay untouched.
                     try {
                         output = schema.parseAndValidate(pRes.text(), outputSchemaNode);
                     } catch (OutputSchemaValidator.SchemaViolation e) {
+                        // turn < maxTurns - 1: never follow up on the last available turn. A
+                        // follow-up costs a loop iteration like any other turn, so it could burn
+                        // the remaining budget on "please call the tool" and hit
+                        // max_turns_exceeded instead of reporting the real schema failure — live
+                        // in prod, not hypothetical: the lowest configured max_turns is 4
+                        // (daywalker-deep, renfield).
+                        if (submitNudges < MAX_SUBMIT_NUDGES && turn < maxTurns - 1) {
+                            submitNudges++;
+                            runs.recordEvent(runId, "info", "submit_result_nudged",
+                                    mapper.valueToTree(Map.of("attempt", submitNudges, "turn", turn,
+                                            "reason", "text_schema_violation")));
+                            appendAssistantTurn(messages, pRes);
+                            messages.add(mapper.createObjectNode()
+                                    .put("role", "user")
+                                    .put("content", "Your answer did not satisfy the required "
+                                            + "output schema (" + e.getMessage() + "). Deliver the "
+                                            + "final result by calling the submit_result tool. Do "
+                                            + "not answer with text."));
+                            continue;
+                        }
                         runs.markTerminal(runId, "failed", null, "output_schema: " + e.getMessage(), null);
                         return;
                     }
-                } else if (snap.has("output_schema") && !snap.get("output_schema").isNull()) {
+                    // "the text path completed this run" — the adoption signal: while models
+                    // still answer in text this fires, and it stops firing as they adopt the tool.
+                    runs.recordEvent(runId, "info", "submit_result_fallback",
+                            mapper.valueToTree(Map.of("turn", turn)));
+                } else if (outputSchemaNode != null && !outputSchemaNode.isNull()) {
                     try {
-                        output = schema.parseAndValidate(pRes.text(), snap.get("output_schema"));
+                        output = schema.parseAndValidate(pRes.text(), outputSchemaNode);
                     } catch (OutputSchemaValidator.SchemaViolation e) {
                         runs.markTerminal(runId, "failed", null, "output_schema: " + e.getMessage(), null);
                         return;
@@ -393,7 +414,11 @@ public class AgentRunner {
             // before dispatch: toolDefByName is built from the agent's own tools, so dispatch
             // would produce "unknown tool: submit_result" and the anyError branch below would
             // fail the run.
-            var submitBlock = blocks.stream()
+            //
+            // Skipped entirely when the agent declares its OWN tool of that name (a definition
+            // predating the reserved-name validator): there the block is that tool's call and
+            // must go through normal dispatch.
+            var submitBlock = ownsResultToolName ? null : blocks.stream()
                     .filter(b -> ResultToolFactory.TOOL_NAME.equals(b.name()))
                     .findFirst().orElse(null);
             if (submitBlock != null) {
@@ -408,6 +433,40 @@ public class AgentRunner {
                 if (!errors.isEmpty()) {
                     String detail = errors.stream().map(Object::toString)
                             .reduce((a, b) -> a + "; " + b).orElse("");
+                    // A malformed payload gets the SAME budget as the text path it replaces:
+                    // hand the validation errors back as a tool_result and let the model
+                    // correct itself. Killing the run outright would make the new channel
+                    // strictly harsher than the old one.
+                    if (submitNudges < MAX_SUBMIT_NUDGES && turn < maxTurns - 1) {
+                        submitNudges++;
+                        runs.recordEvent(runId, "info", "submit_result_nudged",
+                                mapper.valueToTree(Map.of("attempt", submitNudges, "turn", turn,
+                                        "reason", "submit_result_schema_violation")));
+                        appendAssistantTurn(messages, pRes);
+                        // Every tool_use block of the turn needs a tool_result in the next user
+                        // message or the provider answers 400. The interception consumed the
+                        // whole turn, so the sibling calls are reported as not executed.
+                        var retryResults = mapper.createArrayNode();
+                        for (var b : blocks) {
+                            var resBlock = mapper.createObjectNode();
+                            resBlock.put("type", "tool_result");
+                            resBlock.put("tool_use_id", b.id());
+                            resBlock.put("is_error", true);
+                            resBlock.set("content", mapper.createObjectNode().put("error",
+                                    b == submitBlock
+                                        ? "output_schema: " + detail + " — call submit_result again"
+                                          + " with a payload that conforms to the schema."
+                                        : "not executed: submit_result was called in the same turn"
+                                          + " and its payload was rejected; call submit_result"
+                                          + " again with a conforming payload."));
+                            retryResults.add(resBlock);
+                        }
+                        var retryUserMsg = mapper.createObjectNode();
+                        retryUserMsg.put("role", "user");
+                        retryUserMsg.set("content", retryResults);
+                        messages.add(retryUserMsg);
+                        continue;
+                    }
                     runs.markTerminal(runId, "failed", null,
                             "output_schema: submit_result: " + detail, null);
                     return;
@@ -551,6 +610,35 @@ public class AgentRunner {
         }
 
         runs.markTerminal(runId, "failed", null, "max_turns_exceeded", null);
+    }
+
+    /**
+     * Appends the turn's assistant message before a follow-up, tolerating an absent
+     * {@code content_blocks}.
+     *
+     * <p>This is not defensive padding: on the primary path the subscription bridge returns NO
+     * content blocks on {@code end_turn} (claude-bridge {@code complete.ts:146-156}). Setting
+     * that null straight onto the message made the bridge silently drop the message when
+     * flattening and made Bedrock reject the empty content — either way the model was asked to
+     * re-deliver a result that was no longer in its own context. So: use the blocks when they
+     * are a non-empty array, else synthesize a text block from the turn's text, and when there
+     * is no text either omit the message rather than append empty content.
+     */
+    private void appendAssistantTurn(ArrayNode messages, ProviderResponse pRes) {
+        JsonNode content = null;
+        JsonNode blocks = pRes.contentBlocks();
+        if (blocks != null && blocks.isArray() && !blocks.isEmpty()) {
+            content = blocks;
+        } else if (pRes.text() != null && !pRes.text().isBlank()) {
+            var synthesized = mapper.createArrayNode();
+            synthesized.add(mapper.createObjectNode().put("type", "text").put("text", pRes.text()));
+            content = synthesized;
+        }
+        if (content == null) return;
+        var msg = mapper.createObjectNode();
+        msg.put("role", "assistant");
+        msg.set("content", content);
+        messages.add(msg);
     }
 
     /**
