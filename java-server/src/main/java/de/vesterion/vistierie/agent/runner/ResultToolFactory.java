@@ -17,7 +17,9 @@ import java.util.Map;
 @Component
 public class ResultToolFactory {
 
-    public static final String TOOL_NAME = "submit_result";
+    /** Single source of truth lives in the validator that reserves it (see there for why). */
+    public static final String TOOL_NAME =
+            de.vesterion.vistierie.agents.AgentDefinitionValidator.RESERVED_TOOL_NAME;
 
     private static final String DESCRIPTION =
             "Deliver the final structured result. Call this exactly once when your analysis "

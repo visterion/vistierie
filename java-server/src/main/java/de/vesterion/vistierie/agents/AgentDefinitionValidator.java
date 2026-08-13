@@ -10,6 +10,14 @@ import java.util.regex.Pattern;
 public class AgentDefinitionValidator {
 
     private static final Pattern NAME = Pattern.compile("^[a-z0-9-]+$");
+
+    /**
+     * Tool name Vistierie reserves for itself — the structured-output channel added by
+     * {@code ResultToolFactory}. Declared here rather than in {@code agent.runner} because
+     * {@code agent.runner} already depends on this package; the reverse direction would be a
+     * package cycle. {@code ResultToolFactory.TOOL_NAME} reads it back.
+     */
+    public static final String RESERVED_TOOL_NAME = "submit_result";
     private final JsonSchemas schemas;
 
     public AgentDefinitionValidator(JsonSchemas schemas) { this.schemas = schemas; }
@@ -24,6 +32,16 @@ public class AgentDefinitionValidator {
     public void validateTool(ToolDef t, List<String> sameTenantAgentNames) {
         if (t.name() == null || t.name().isBlank()) {
             throw new InvalidDefinitionException("tool name required");
+        }
+        // Vistierie appends its own submit_result tool to every agent with an object-typed
+        // output_schema. An operator-declared tool of the same name would put two same-named
+        // tools in one provider request (a 400) and make the runner's output-channel
+        // interception swallow the operator's tool. Reserve the name.
+        if (RESERVED_TOOL_NAME.equals(t.name())) {
+            throw new InvalidDefinitionException(
+                    "tool name '" + RESERVED_TOOL_NAME + "' is reserved by Vistierie: it is added"
+                            + " automatically for an object-typed output_schema and is an output"
+                            + " channel, not an executable tool");
         }
         boolean hasWebhook = t.webhook_url() != null;
         boolean hasSubagent = "subagent".equals(t.type());

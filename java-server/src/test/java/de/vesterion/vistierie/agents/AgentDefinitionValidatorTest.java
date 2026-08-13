@@ -107,6 +107,16 @@ class AgentDefinitionValidatorTest {
         org.assertj.core.api.Assertions.assertThat(t.resolvedMcpToolName()).isEqualTo("remote_x");
     }
 
+    @Test void rejectsTheReservedSubmitResultToolName() {
+        // Vistierie appends its own submit_result tool for an object-typed output_schema; an
+        // operator-declared one would put two same-named tools in a single provider request.
+        var t = new ToolDef(AgentDefinitionValidator.RESERVED_TOOL_NAME, "desc",
+                schema("{\"type\":\"object\"}"), null, null, "http://192.0.2.10/t", 30);
+        assertThatThrownBy(() -> v.validateTool(t, List.of()))
+                .isInstanceOf(AgentDefinitionValidator.InvalidDefinitionException.class)
+                .hasMessageContaining("reserved");
+    }
+
     @Test void mcpToolWithValidServerUrlPasses() {
         var t = new ToolDef("mcp-tool", "desc", schema("{\"type\":\"object\"}"),
                 "mcp", null, null, null, "http://agora:8080", null, null, null);
