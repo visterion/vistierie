@@ -330,18 +330,111 @@ function createMatcher(pending: Map<string, PendingTool>): SessionRuntime["match
   };
 }
 
+/** A JSON Schema node, as far as anything can be assumed about it off the wire. */
+type SchemaNode = Record<string, unknown>;
+
+function asNode(node: unknown): SchemaNode | undefined {
+  return node && typeof node === "object" && !Array.isArray(node) ? (node as SchemaNode) : undefined;
+}
+
+/** Literal union for an `enum`, or `undefined` if the values are not literals. */
+function deriveEnum(values: unknown[]): z.ZodTypeAny | undefined {
+  const literal = (v: unknown): z.ZodTypeAny | undefined => {
+    const t = typeof v;
+    if (v === null || t === "string" || t === "number" || t === "boolean") {
+      return z.literal(v as string | number | boolean | null);
+    }
+    return undefined;
+  };
+  const members = values.map(literal);
+  if (members.length === 0 || members.some((m) => m === undefined)) return undefined;
+  const known = members as z.ZodTypeAny[];
+  return known.length === 1 ? known[0] : z.union(known as [z.ZodTypeAny, z.ZodTypeAny, ...z.ZodTypeAny[]]);
+}
+
 /**
- * Derive a permissive Zod raw shape from a JSON Schema's top-level properties so
- * argument keys survive Zod stripping. The real contract is appended to the tool
- * description (the SDK's `inputSchema` accepts a Zod raw shape only, not JSON
- * Schema); Vistierie validates arguments server-side regardless.
+ * Translate one JSON Schema node into a Zod type, recursively.
+ *
+ * Deliberately permissive: objects stay "loose" (unknown keys survive) and their
+ * members stay optional, because Vistierie validates the authoritative JSON
+ * Schema — including `required` — after the call. Anything unrecognised,
+ * missing or malformed degrades to `z.any()`; deriving a shape must never throw
+ * and never break tool construction.
+ */
+function deriveType(node: unknown): z.ZodTypeAny {
+  const s = asNode(node);
+  if (!s) return z.any();
+
+  if (Array.isArray(s.enum)) {
+    const fromEnum = deriveEnum(s.enum);
+    if (fromEnum) return fromEnum;
+    return z.any();
+  }
+
+  // `type` may be a list of alternatives, e.g. ["string", "null"].
+  if (Array.isArray(s.type)) {
+    const members = s.type.map((t) => deriveType({ ...s, type: t }));
+    if (members.length === 0) return z.any();
+    if (members.length === 1) return members[0];
+    return z.union(members as [z.ZodTypeAny, z.ZodTypeAny, ...z.ZodTypeAny[]]);
+  }
+
+  switch (s.type) {
+    case "object": {
+      const props = asNode(s.properties);
+      // No declared properties: accept any object rather than an empty one.
+      if (!props) return z.record(z.string(), z.any());
+      return z.looseObject(
+        Object.fromEntries(Object.entries(props).map(([k, v]) => [k, deriveType(v).optional()])),
+      );
+    }
+    case "array":
+      return z.array(deriveType(s.items));
+    case "string":
+      return z.string();
+    case "number":
+      return z.number();
+    case "integer":
+      return z.int();
+    case "boolean":
+      return z.boolean();
+    case "null":
+      return z.null();
+    default:
+      return z.any();
+  }
+}
+
+/**
+ * Derive a Zod raw shape from a JSON Schema's top-level properties. The SDK's
+ * `inputSchema` accepts a Zod raw shape only, not JSON Schema, so without this
+ * the tool would be advertised untyped and the model has to guess the structure
+ * (observed in production: an array-of-objects property sent as a JSON-encoded
+ * string). The full contract is still appended to the tool description for the
+ * constraints Zod cannot express.
+ *
+ * NOTE — every top-level property stays `.optional()` on purpose. This function
+ * types arguments, it does not gate them: Vistierie validates the real JSON
+ * Schema (`required` included) server-side, so enforcing requiredness here would
+ * add a second, differently-behaving gate and could reject payloads that pass
+ * today. Please do not "fix" it.
  */
 export function deriveShape(inputSchema: unknown): Record<string, z.ZodTypeAny> {
-  const props = (inputSchema as { properties?: Record<string, unknown> } | undefined)?.properties;
-  if (props && typeof props === "object") {
-    return Object.fromEntries(Object.keys(props).map((k) => [k, z.any().optional()]));
+  try {
+    const props = asNode(asNode(inputSchema)?.properties);
+    if (!props) return {};
+    return Object.fromEntries(
+      Object.entries(props).map(([k, v]) => {
+        try {
+          return [k, deriveType(v).optional()];
+        } catch {
+          return [k, z.any().optional()];
+        }
+      }),
+    );
+  } catch {
+    return {};
   }
-  return {};
 }
 
 function buildTool(def: ToolDefWire, matcher: SessionRuntime["matcher"]) {
