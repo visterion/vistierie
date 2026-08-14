@@ -1,9 +1,67 @@
 import { describe, it, expect } from "vitest";
+import { z } from "zod";
 
 import { deriveShape } from "../src/complete.js";
 
+/**
+ * What the model is actually shown. The Agent SDK converts the derived Zod
+ * types with zod's own `toJSONSchema` in input mode, so this is the advertised
+ * contract — and the half of the behavior that `.catch()` must not flatten.
+ */
+function advertised(t: z.ZodTypeAny): Record<string, any> {
+  const { $schema, ...rest } = z.toJSONSchema(t, { io: "input" }) as Record<string, any>;
+  return rest;
+}
+
+/**
+ * Parsing must be TOTAL. A rejection happens inside the SDK before the tool
+ * handler runs, after the `tool_use` block was already registered as pending —
+ * it desynchronises the bridge's FIFO call matcher and makes the model retry,
+ * i.e. execute the tool twice.
+ */
+function parsesAnything(t: z.ZodTypeAny): boolean {
+  const junk: unknown[] = [
+    undefined,
+    null,
+    "",
+    "nonsense",
+    '[{"code":"AAA"}]',
+    0,
+    2.5,
+    -1,
+    true,
+    [],
+    ["AAA"],
+    [{ code: 7 }],
+    {},
+    { a: [1] },
+  ];
+  return junk.every((v) => t.safeParse(v).success);
+}
+
 describe("deriveShape", () => {
-  it("types a nested array-of-objects property and rejects the stringified-JSON form", () => {
+  it("never rejects a value, whatever the declared type", () => {
+    const shape = deriveShape({
+      type: "object",
+      properties: {
+        items: { type: "array", items: { type: "object", properties: { code: { type: "string" } } } },
+        mode: { type: "string", enum: ["fast", "slow"] },
+        count: { type: "integer" },
+        name: { type: "string" },
+        ratio: { type: "number" },
+        flag: { type: "boolean" },
+        nothing: { type: "null" },
+        window: { type: "object", properties: { from: { type: "string" } } },
+        note: { type: ["string", "null"] },
+      },
+    });
+
+    for (const [key, type] of Object.entries(shape)) {
+      expect(parsesAnything(type), `property ${key} rejected a value`).toBe(true);
+    }
+  });
+
+  it("advertises a nested array-of-objects while accepting the stringified form", () => {
     const shape = deriveShape({
       type: "object",
       properties: {
@@ -20,19 +78,21 @@ describe("deriveShape", () => {
       },
     });
 
-    const items = shape.items;
-    expect(items).toBeDefined();
+    // The advertised structure is what the model cannot guess: production once
+    // sent this property as a JSON-encoded string. `.catch()` must not flatten it.
+    expect(advertised(shape.items)).toEqual({
+      type: "array",
+      items: {
+        type: "object",
+        properties: { code: { type: "string" }, score: { type: "number" } },
+        additionalProperties: {},
+      },
+    });
 
-    // The real, structured form must pass ...
-    expect(items.safeParse([{ code: "AAA", score: 0.5 }]).success).toBe(true);
-    // ... and the JSON-encoded string form that broke production must not.
-    expect(items.safeParse('[{"code":"AAA","score":0.5}]').success).toBe(false);
-    // A non-object array element is rejected too.
-    expect(items.safeParse(["AAA"]).success).toBe(false);
-    // Element fields keep their declared type.
-    expect(items.safeParse([{ code: 7 }]).success).toBe(false);
-    // Unknown element keys stay permissive (Vistierie owns real validation).
-    expect(items.safeParse([{ code: "AAA", extra: true }]).success).toBe(true);
+    expect(shape.items.safeParse([{ code: "AAA", score: 0.5 }]).success).toBe(true);
+    // ... and the JSON-encoded string form that broke production is tolerated
+    // rather than rejected, because rejecting it is the worse failure.
+    expect(shape.items.safeParse('[{"code":"AAA","score":0.5}]').success).toBe(true);
   });
 
   it("keeps every top-level property optional", () => {
@@ -42,12 +102,12 @@ describe("deriveShape", () => {
       required: ["name"],
     });
 
+    expect(advertised(shape.name)).toEqual({ type: "string" });
     expect(shape.name.safeParse(undefined).success).toBe(true);
     expect(shape.name.safeParse("x").success).toBe(true);
-    expect(shape.name.safeParse(3).success).toBe(false);
   });
 
-  it("types an enum by its members' JSON type without pinning the values", () => {
+  it("advertises an enum by its members, not merely by their type", () => {
     const shape = deriveShape({
       type: "object",
       properties: {
@@ -56,41 +116,53 @@ describe("deriveShape", () => {
       },
     });
 
-    expect(shape.mode.safeParse("fast").success).toBe(true);
-    expect(shape.mode.safeParse("slow").success).toBe(true);
-    // An off-enum value must be ACCEPTED: rejecting it inside the SDK would
-    // abort the tool call and desynchronise the pending-tool queue. Vistierie
-    // is the authoritative validator.
-    expect(shape.mode.safeParse("sideways").success).toBe(true);
-    // The type is still enforced.
-    expect(shape.mode.safeParse(7).success).toBe(false);
+    expect(advertised(shape.mode)).toEqual({
+      anyOf: [
+        { type: "string", const: "fast" },
+        { type: "string", const: "slow" },
+      ],
+    });
+    expect(advertised(shape.level)).toEqual({
+      anyOf: [
+        { type: "number", const: 1 },
+        { type: "number", const: 2 },
+        { type: "number", const: 3 },
+      ],
+    });
 
-    expect(shape.level.safeParse(2).success).toBe(true);
+    expect(shape.mode.safeParse("fast").success).toBe(true);
+    // An off-enum value is still ACCEPTED — the constraint informs the model, it
+    // does not gate the call. Vistierie is the authoritative validator.
+    expect(shape.mode.safeParse("sideways").success).toBe(true);
     expect(shape.level.safeParse(99).success).toBe(true);
-    expect(shape.level.safeParse("2").success).toBe(false);
   });
 
-  it("accepts null and a normal member for an enum that lists null", () => {
+  it("advertises null among an enum's members when it lists null", () => {
     const shape = deriveShape({
       type: "object",
       properties: { horizon: { type: ["string", "null"], enum: ["short", "long", null] } },
     });
 
+    expect(advertised(shape.horizon)).toEqual({
+      anyOf: [
+        { type: "string", const: "short" },
+        { type: "string", const: "long" },
+        { type: "null" },
+      ],
+    });
     expect(shape.horizon.safeParse(null).success).toBe(true);
     expect(shape.horizon.safeParse("short").success).toBe(true);
-    expect(shape.horizon.safeParse("other").success).toBe(true);
-    expect(shape.horizon.safeParse(5).success).toBe(false);
   });
 
-  it("accepts both members of a nullable type union", () => {
+  it("advertises both members of a nullable type union", () => {
     const shape = deriveShape({
       type: "object",
       properties: { note: { type: ["string", "null"] } },
     });
 
-    expect(shape.note.safeParse("text").success).toBe(true);
-    expect(shape.note.safeParse(null).success).toBe(true);
-    expect(shape.note.safeParse(12).success).toBe(false);
+    expect(advertised(shape.note)).toEqual({
+      anyOf: [{ type: "string" }, { type: "null" }],
+    });
   });
 
   it("falls back to any for a mixed-type enum", () => {
@@ -99,14 +171,11 @@ describe("deriveShape", () => {
       properties: { mixed: { enum: ["a", 1] }, objects: { enum: [{ a: 1 }] } },
     });
 
-    expect(shape.mixed.safeParse("a").success).toBe(true);
-    expect(shape.mixed.safeParse(1).success).toBe(true);
-    expect(shape.mixed.safeParse({ any: true }).success).toBe(true);
-    expect(shape.objects.safeParse({ a: 1 }).success).toBe(true);
-    expect(shape.objects.safeParse("anything").success).toBe(true);
+    expect(advertised(shape.mixed)).toEqual({});
+    expect(advertised(shape.objects)).toEqual({});
   });
 
-  it("types scalars", () => {
+  it("advertises scalars, integer included", () => {
     const shape = deriveShape({
       type: "object",
       properties: {
@@ -118,22 +187,19 @@ describe("deriveShape", () => {
       },
     });
 
-    expect(shape.s.safeParse("x").success).toBe(true);
-    expect(shape.s.safeParse(1).success).toBe(false);
-    expect(shape.n.safeParse(1.5).success).toBe(true);
-    expect(shape.n.safeParse("1.5").success).toBe(false);
-    expect(shape.i.safeParse(2).success).toBe(true);
-    // `integer` types as a plain number: a fractional value must reach the
-    // handler, not be rejected by the SDK before it runs.
+    expect(advertised(shape.s)).toEqual({ type: "string" });
+    expect(advertised(shape.n)).toEqual({ type: "number" });
+    // `integer`, not a plain number: the constraint is advertised again now that
+    // it can no longer cause a rejection.
+    expect(advertised(shape.i)).toMatchObject({ type: "integer" });
+    expect(advertised(shape.b)).toEqual({ type: "boolean" });
+    expect(advertised(shape.z)).toEqual({ type: "null" });
+
+    // A fractional value still reaches the handler.
     expect(shape.i.safeParse(2.5).success).toBe(true);
-    expect(shape.i.safeParse("2").success).toBe(false);
-    expect(shape.b.safeParse(true).success).toBe(true);
-    expect(shape.b.safeParse("true").success).toBe(false);
-    expect(shape.z.safeParse(null).success).toBe(true);
-    expect(shape.z.safeParse(0).success).toBe(false);
   });
 
-  it("types a nested object property and leaves its members optional", () => {
+  it("advertises a nested object property with optional members", () => {
     const shape = deriveShape({
       type: "object",
       properties: {
@@ -145,11 +211,16 @@ describe("deriveShape", () => {
       },
     });
 
+    const schema = advertised(shape.window);
+    expect(schema.type).toBe("object");
+    expect(schema.required).toBeUndefined();
+    expect(schema.properties.from).toEqual({ type: "string" });
+    // The nested constraint survives too — `.catch()` at the top level must not
+    // reach down and erase it.
+    expect(schema.properties.days).toMatchObject({ type: "integer" });
+
     expect(shape.window.safeParse({ from: "a", days: 2 }).success).toBe(true);
-    expect(shape.window.safeParse({}).success).toBe(true);
-    expect(shape.window.safeParse({ days: 2.5 }).success).toBe(true);
-    expect(shape.window.safeParse({ days: "2" }).success).toBe(false);
-    expect(shape.window.safeParse("from=a").success).toBe(false);
+    expect(shape.window.safeParse("from=a").success).toBe(true);
   });
 
   it("falls back to an any-shape for an unknown or absent type", () => {
@@ -163,9 +234,8 @@ describe("deriveShape", () => {
     });
 
     for (const key of ["weird", "untyped", "empty"]) {
-      expect(shape[key].safeParse("anything").success).toBe(true);
-      expect(shape[key].safeParse({ a: [1] }).success).toBe(true);
-      expect(shape[key].safeParse(undefined).success).toBe(true);
+      expect(advertised(shape[key])).toEqual({});
+      expect(parsesAnything(shape[key])).toBe(true);
     }
   });
 
@@ -180,11 +250,10 @@ describe("deriveShape", () => {
       },
     });
 
-    expect(shape.loose.safeParse([1, "a", {}]).success).toBe(true);
-    expect(shape.loose.safeParse("nope").success).toBe(false);
-    expect(shape.bad.safeParse([{ any: 1 }]).success).toBe(true);
-    expect(shape.bag.safeParse({ a: 1 }).success).toBe(true);
-    expect(shape.broken.safeParse("anything").success).toBe(true);
+    expect(advertised(shape.loose)).toEqual({ type: "array", items: {} });
+    expect(advertised(shape.bad)).toEqual({ type: "array", items: {} });
+    expect(advertised(shape.bag)).toMatchObject({ type: "object" });
+    expect(advertised(shape.broken)).toEqual({});
   });
 
   it("does not throw on a malformed input schema", () => {
