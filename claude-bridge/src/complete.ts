@@ -338,57 +338,46 @@ function asNode(node: unknown): SchemaNode | undefined {
 }
 
 /**
- * The plain type an `enum`'s members share, or `undefined` if it is unclear.
+ * An `enum` as a union of its members, or `undefined` if the members are not
+ * usable (mixed types, or a non-scalar member) — the caller then uses `z.any()`.
  *
- * Deliberately NOT a literal union: only the members' JSON type is derived, not
- * their values, so a string enum yields `z.string()` and an off-enum string is
- * accepted. The authoritative check is Vistierie's, which validates the real
- * JSON Schema after the call — a rejection here would happen inside the SDK
- * before the tool handler runs, desynchronising the pending-tool queue. Do not
- * tighten this back into literals.
- *
- * `null` among the members counts as nullability rather than a second type
- * (mirroring `type: ["string", "null"]`). Any other mix, or a non-scalar
- * member, is unclear and yields `undefined` — the caller then uses `z.any()`.
+ * The member values ARE pinned: they are what the model most needs to see, and
+ * they can no longer cause a rejection because every top-level property is made
+ * total with `.catch(undefined)` in `deriveShape`. `null` among the members
+ * becomes a `z.null()` branch (mirroring `type: ["string", "null"]`).
  */
 function deriveEnumType(values: unknown[]): z.ZodTypeAny | undefined {
   if (values.length === 0) return undefined;
-  let nullable = false;
+  const members: z.ZodTypeAny[] = [];
   const kinds = new Set<string>();
   for (const v of values) {
     if (v === null) {
-      nullable = true;
+      members.push(z.null());
       continue;
     }
     const t = typeof v;
     if (t !== "string" && t !== "number" && t !== "boolean") return undefined;
     kinds.add(t);
+    members.push(z.literal(v as string | number | boolean));
   }
   if (kinds.size > 1) return undefined;
-  const [kind] = kinds;
-  if (kind === undefined) return nullable ? z.null() : undefined;
-  const base = kind === "string" ? z.string() : kind === "number" ? z.number() : z.boolean();
-  return nullable ? z.union([base, z.null()]) : base;
+  if (members.length === 1) return members[0];
+  return z.union(members as [z.ZodTypeAny, z.ZodTypeAny, ...z.ZodTypeAny[]]);
 }
 
 /**
  * Translate one JSON Schema node into a Zod type, recursively.
  *
- * STRUCTURAL typing only — never value-level constraints. Arguments are
- * forwarded verbatim from the assistant block, so this schema shapes what is
- * advertised to the model; it adds no protection. What it can do is harm: the
- * Agent SDK validates tool input against it BEFORE the handler runs, so a
- * rejection aborts the call after the `tool_use` block was already registered
- * as pending, permanently desynchronising the handler/register queue for that
- * tool (and making the model retry, i.e. execute the tool twice). Vistierie
- * validates the authoritative JSON Schema after the call and handles violations
- * gracefully — that is the only enforcement point.
+ * This types what is ADVERTISED to the model; it never gates a call. Arguments
+ * reach Vistierie verbatim from the assistant block, and Vistierie validates the
+ * authoritative JSON Schema after the call — that is the only enforcement point.
+ * `deriveShape` makes every top-level property total with `.catch(undefined)`,
+ * so nothing derived here can be rejected by the SDK's pre-handler validation.
  *
- * Hence: objects stay "loose" (unknown keys survive) and their members optional
- * (`required` is not enforced), `enum` becomes its members' plain type, and
- * `integer` becomes `z.number()`. Anything unrecognised, missing or malformed
- * degrades to `z.any()`; deriving a shape must never throw and never break tool
- * construction.
+ * Objects stay "loose" (unknown keys survive) and their members optional
+ * (`required` is not enforced), so a payload is never rejected for a missing or
+ * extra key. Anything unrecognised, missing or malformed degrades to `z.any()`;
+ * deriving a shape must never throw and never break tool construction.
  */
 function deriveType(node: unknown): z.ZodTypeAny {
   const s = asNode(node);
@@ -424,10 +413,9 @@ function deriveType(node: unknown): z.ZodTypeAny {
     case "number":
       return z.number();
     case "integer":
-      // `z.number()`, not `z.int()`: integrality is a value-level constraint and
-      // Vistierie is the authoritative validator. A fractional value must reach
-      // the handler rather than be rejected inside the SDK.
-      return z.number();
+      // Advertised as "integer"; a fractional value still reaches the handler
+      // because the top-level property is total (see `deriveShape`).
+      return z.int();
     case "boolean":
       return z.boolean();
     case "null":
@@ -450,6 +438,25 @@ function deriveType(node: unknown): z.ZodTypeAny {
  * Schema (`required` included) server-side, so enforcing requiredness here would
  * add a second, differently-behaving gate and could reject payloads that pass
  * today. Please do not "fix" it.
+ *
+ * NOTE — `.catch(undefined)` on each property is what makes validation TOTAL,
+ * and it must stay exactly here. The SDK builds `z.object(shape)` from this and
+ * validates tool input against it BEFORE the handler runs (`validateToolInput`),
+ * while `pump` has already emitted the `tool_use` block and registered it as
+ * pending. A rejection therefore advances only the register counter of the FIFO
+ * matcher — a permanent off-by-one for that tool name: Vistierie runs the call
+ * anyway, the model retries on "Invalid arguments" and the tool executes a
+ * second time. With a `.catch()` on every property, no property failure can fail
+ * the object, so that path is unreachable.
+ *
+ * Placement is load-bearing in the other direction too: it sits AFTER
+ * `.optional()` at the top level only, and never inside `deriveType`. Measured
+ * on zod 4.4.3, `z.toJSONSchema(t, {io:"input"})` of `x.optional().catch(undefined)`
+ * is byte-identical to that of `x.optional()`, nested types included — the
+ * advertised array items, object members, enum members and `"integer"` all
+ * survive. A `.catch()` that ever flattened the schema to `{}` would silently
+ * reintroduce the production bug it was added for (a model sending a nested
+ * array as a JSON string), so `derive-shape.test.ts` asserts both halves.
  */
 export function deriveShape(inputSchema: unknown): Record<string, z.ZodTypeAny> {
   try {
@@ -458,9 +465,9 @@ export function deriveShape(inputSchema: unknown): Record<string, z.ZodTypeAny> 
     return Object.fromEntries(
       Object.entries(props).map(([k, v]) => {
         try {
-          return [k, deriveType(v).optional()];
+          return [k, deriveType(v).optional().catch(undefined)];
         } catch {
-          return [k, z.any().optional()];
+          return [k, z.any().optional().catch(undefined)];
         }
       }),
     );
