@@ -337,36 +337,65 @@ function asNode(node: unknown): SchemaNode | undefined {
   return node && typeof node === "object" && !Array.isArray(node) ? (node as SchemaNode) : undefined;
 }
 
-/** Literal union for an `enum`, or `undefined` if the values are not literals. */
-function deriveEnum(values: unknown[]): z.ZodTypeAny | undefined {
-  const literal = (v: unknown): z.ZodTypeAny | undefined => {
-    const t = typeof v;
-    if (v === null || t === "string" || t === "number" || t === "boolean") {
-      return z.literal(v as string | number | boolean | null);
+/**
+ * The plain type an `enum`'s members share, or `undefined` if it is unclear.
+ *
+ * Deliberately NOT a literal union: only the members' JSON type is derived, not
+ * their values, so a string enum yields `z.string()` and an off-enum string is
+ * accepted. The authoritative check is Vistierie's, which validates the real
+ * JSON Schema after the call — a rejection here would happen inside the SDK
+ * before the tool handler runs, desynchronising the pending-tool queue. Do not
+ * tighten this back into literals.
+ *
+ * `null` among the members counts as nullability rather than a second type
+ * (mirroring `type: ["string", "null"]`). Any other mix, or a non-scalar
+ * member, is unclear and yields `undefined` — the caller then uses `z.any()`.
+ */
+function deriveEnumType(values: unknown[]): z.ZodTypeAny | undefined {
+  if (values.length === 0) return undefined;
+  let nullable = false;
+  const kinds = new Set<string>();
+  for (const v of values) {
+    if (v === null) {
+      nullable = true;
+      continue;
     }
-    return undefined;
-  };
-  const members = values.map(literal);
-  if (members.length === 0 || members.some((m) => m === undefined)) return undefined;
-  const known = members as z.ZodTypeAny[];
-  return known.length === 1 ? known[0] : z.union(known as [z.ZodTypeAny, z.ZodTypeAny, ...z.ZodTypeAny[]]);
+    const t = typeof v;
+    if (t !== "string" && t !== "number" && t !== "boolean") return undefined;
+    kinds.add(t);
+  }
+  if (kinds.size > 1) return undefined;
+  const [kind] = kinds;
+  if (kind === undefined) return nullable ? z.null() : undefined;
+  const base = kind === "string" ? z.string() : kind === "number" ? z.number() : z.boolean();
+  return nullable ? z.union([base, z.null()]) : base;
 }
 
 /**
  * Translate one JSON Schema node into a Zod type, recursively.
  *
- * Deliberately permissive: objects stay "loose" (unknown keys survive) and their
- * members stay optional, because Vistierie validates the authoritative JSON
- * Schema — including `required` — after the call. Anything unrecognised,
- * missing or malformed degrades to `z.any()`; deriving a shape must never throw
- * and never break tool construction.
+ * STRUCTURAL typing only — never value-level constraints. Arguments are
+ * forwarded verbatim from the assistant block, so this schema shapes what is
+ * advertised to the model; it adds no protection. What it can do is harm: the
+ * Agent SDK validates tool input against it BEFORE the handler runs, so a
+ * rejection aborts the call after the `tool_use` block was already registered
+ * as pending, permanently desynchronising the handler/register queue for that
+ * tool (and making the model retry, i.e. execute the tool twice). Vistierie
+ * validates the authoritative JSON Schema after the call and handles violations
+ * gracefully — that is the only enforcement point.
+ *
+ * Hence: objects stay "loose" (unknown keys survive) and their members optional
+ * (`required` is not enforced), `enum` becomes its members' plain type, and
+ * `integer` becomes `z.number()`. Anything unrecognised, missing or malformed
+ * degrades to `z.any()`; deriving a shape must never throw and never break tool
+ * construction.
  */
 function deriveType(node: unknown): z.ZodTypeAny {
   const s = asNode(node);
   if (!s) return z.any();
 
   if (Array.isArray(s.enum)) {
-    const fromEnum = deriveEnum(s.enum);
+    const fromEnum = deriveEnumType(s.enum);
     if (fromEnum) return fromEnum;
     return z.any();
   }
@@ -395,7 +424,10 @@ function deriveType(node: unknown): z.ZodTypeAny {
     case "number":
       return z.number();
     case "integer":
-      return z.int();
+      // `z.number()`, not `z.int()`: integrality is a value-level constraint and
+      // Vistierie is the authoritative validator. A fractional value must reach
+      // the handler rather than be rejected inside the SDK.
+      return z.number();
     case "boolean":
       return z.boolean();
     case "null":

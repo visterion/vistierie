@@ -47,15 +47,63 @@ describe("deriveShape", () => {
     expect(shape.name.safeParse(3).success).toBe(false);
   });
 
-  it("accepts a listed enum value and rejects an unlisted one", () => {
+  it("types an enum by its members' JSON type without pinning the values", () => {
     const shape = deriveShape({
       type: "object",
-      properties: { mode: { type: "string", enum: ["fast", "slow"] } },
+      properties: {
+        mode: { type: "string", enum: ["fast", "slow"] },
+        level: { enum: [1, 2, 3] },
+      },
     });
 
     expect(shape.mode.safeParse("fast").success).toBe(true);
     expect(shape.mode.safeParse("slow").success).toBe(true);
-    expect(shape.mode.safeParse("sideways").success).toBe(false);
+    // An off-enum value must be ACCEPTED: rejecting it inside the SDK would
+    // abort the tool call and desynchronise the pending-tool queue. Vistierie
+    // is the authoritative validator.
+    expect(shape.mode.safeParse("sideways").success).toBe(true);
+    // The type is still enforced.
+    expect(shape.mode.safeParse(7).success).toBe(false);
+
+    expect(shape.level.safeParse(2).success).toBe(true);
+    expect(shape.level.safeParse(99).success).toBe(true);
+    expect(shape.level.safeParse("2").success).toBe(false);
+  });
+
+  it("accepts null and a normal member for an enum that lists null", () => {
+    const shape = deriveShape({
+      type: "object",
+      properties: { horizon: { type: ["string", "null"], enum: ["short", "long", null] } },
+    });
+
+    expect(shape.horizon.safeParse(null).success).toBe(true);
+    expect(shape.horizon.safeParse("short").success).toBe(true);
+    expect(shape.horizon.safeParse("other").success).toBe(true);
+    expect(shape.horizon.safeParse(5).success).toBe(false);
+  });
+
+  it("accepts both members of a nullable type union", () => {
+    const shape = deriveShape({
+      type: "object",
+      properties: { note: { type: ["string", "null"] } },
+    });
+
+    expect(shape.note.safeParse("text").success).toBe(true);
+    expect(shape.note.safeParse(null).success).toBe(true);
+    expect(shape.note.safeParse(12).success).toBe(false);
+  });
+
+  it("falls back to any for a mixed-type enum", () => {
+    const shape = deriveShape({
+      type: "object",
+      properties: { mixed: { enum: ["a", 1] }, objects: { enum: [{ a: 1 }] } },
+    });
+
+    expect(shape.mixed.safeParse("a").success).toBe(true);
+    expect(shape.mixed.safeParse(1).success).toBe(true);
+    expect(shape.mixed.safeParse({ any: true }).success).toBe(true);
+    expect(shape.objects.safeParse({ a: 1 }).success).toBe(true);
+    expect(shape.objects.safeParse("anything").success).toBe(true);
   });
 
   it("types scalars", () => {
@@ -75,7 +123,10 @@ describe("deriveShape", () => {
     expect(shape.n.safeParse(1.5).success).toBe(true);
     expect(shape.n.safeParse("1.5").success).toBe(false);
     expect(shape.i.safeParse(2).success).toBe(true);
-    expect(shape.i.safeParse(2.5).success).toBe(false);
+    // `integer` types as a plain number: a fractional value must reach the
+    // handler, not be rejected by the SDK before it runs.
+    expect(shape.i.safeParse(2.5).success).toBe(true);
+    expect(shape.i.safeParse("2").success).toBe(false);
     expect(shape.b.safeParse(true).success).toBe(true);
     expect(shape.b.safeParse("true").success).toBe(false);
     expect(shape.z.safeParse(null).success).toBe(true);
@@ -96,7 +147,8 @@ describe("deriveShape", () => {
 
     expect(shape.window.safeParse({ from: "a", days: 2 }).success).toBe(true);
     expect(shape.window.safeParse({}).success).toBe(true);
-    expect(shape.window.safeParse({ days: 2.5 }).success).toBe(false);
+    expect(shape.window.safeParse({ days: 2.5 }).success).toBe(true);
+    expect(shape.window.safeParse({ days: "2" }).success).toBe(false);
     expect(shape.window.safeParse("from=a").success).toBe(false);
   });
 
