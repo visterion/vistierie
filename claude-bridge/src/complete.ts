@@ -336,7 +336,7 @@ function createMatcher(pending: Map<string, PendingTool>): SessionRuntime["match
  * description (the SDK's `inputSchema` accepts a Zod raw shape only, not JSON
  * Schema); Vistierie validates arguments server-side regardless.
  */
-function deriveShape(inputSchema: unknown): Record<string, z.ZodTypeAny> {
+export function deriveShape(inputSchema: unknown): Record<string, z.ZodTypeAny> {
   const props = (inputSchema as { properties?: Record<string, unknown> } | undefined)?.properties;
   if (props && typeof props === "object") {
     return Object.fromEntries(Object.keys(props).map((k) => [k, z.any().optional()]));
