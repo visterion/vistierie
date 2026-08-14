@@ -48,6 +48,26 @@ forwards as `session_id` on the next `/v1/complete` call. This requires a curren
 `claude-bridge` image with tool-session support — an older bridge ignores the
 `tools`/`session_id` fields.
 
+**How the bridge advertises `input_schema`:** the Claude Agent SDK takes tools as
+typed parameters, not as raw JSON Schema, so the bridge derives them. The derivation
+is **structural only** — objects, nested properties, arrays and their item types,
+scalars — and deliberately drops value-level constraints: an `enum` contributes its
+members' type but not the member list, and `integer` becomes a plain number. All
+properties are advertised as optional, `required` is ignored, and unknown constructs
+(`anyOf`, `oneOf`, `allOf`, `$ref`, `const`) degrade to an unconstrained type. The
+full JSON Schema is additionally appended to the tool description, so the model still
+sees the constraints the derived types cannot express.
+
+Two reasons for that split. Structure is what a model cannot reliably guess: with an
+untyped schema it may deliver a nested array as a JSON-encoded string — an observed
+production failure, not a hypothetical. Value constraints, by contrast, buy nothing
+here: arguments are forwarded verbatim from the assistant block, so SDK-side
+validation protects nothing, while a rejection lands *after* Vistierie has already
+received and dispatched the `tool_use` block and would desynchronise the bridge's
+call matcher. **Vistierie is the authoritative validator** — it checks the real JSON
+Schema after the call and reports violations as ordinary run errors. Do not tighten
+the derived types.
+
 On `/v1/complete` the bridge request accepts an optional `effort` field
 (`off`, `low`, `medium`, `high`, `max`), forwarded only for text completion
 — never for vision. `off` disables extended thinking (Agent SDK
