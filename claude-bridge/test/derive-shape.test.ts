@@ -61,6 +61,47 @@ describe("deriveShape", () => {
     }
   });
 
+  it("makes the object the SDK actually parses total, except for a non-object", () => {
+    // The SDK turns the raw shape into a plain, non-strict `z.object(shape)` and
+    // safeParses the tool arguments against it. Mirror that here: `.catch()` on
+    // the properties only makes the parse total as long as the object itself
+    // stays non-strict and catchall-free. If an SDK bump changed that, the
+    // matcher desync would return silently — this test is the canary.
+    const args = z.object(
+      deriveShape({
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: { type: "object", properties: { code: { type: "string" } } },
+          },
+          count: { type: "integer" },
+          mode: { type: "string", enum: ["fast", "slow"] },
+        },
+        required: ["items", "count"],
+      }),
+    );
+
+    // A declared-required key may be missing.
+    expect(args.safeParse({ mode: "fast" }).success).toBe(true);
+    // An unknown key does not make the object reject — the strictness canary.
+    expect(args.safeParse({ items: [], unknown_key: 1, nested: { a: [1] } }).success).toBe(true);
+    // Violating values reject nowhere, through the object rather than the property:
+    // the stringified array that broke production, a fractional integer, an
+    // off-enum member, and a wholly wrong type.
+    expect(args.safeParse({ items: '[{"code":"AAA"}]' }).success).toBe(true);
+    expect(args.safeParse({ count: 2.5 }).success).toBe(true);
+    expect(args.safeParse({ mode: "sideways" }).success).toBe(true);
+    expect(args.safeParse({ items: 7, count: "many", mode: null }).success).toBe(true);
+    expect(args.safeParse({}).success).toBe(true);
+
+    // The documented boundary: absent arguments are not an object, and no
+    // property-level `.catch()` can rescue that. This is the one remaining
+    // trigger of the FIFO-matcher desync, deliberately left to the deferred
+    // matcher-hardening ticket rather than papered over here.
+    expect(args.safeParse(undefined).success).toBe(false);
+  });
+
   it("advertises a nested array-of-objects while accepting the stringified form", () => {
     const shape = deriveShape({
       type: "object",
