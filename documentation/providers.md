@@ -73,6 +73,20 @@ model cannot reliably guess: with an untyped schema it may deliver a nested arra
 a JSON-encoded string — an observed production failure, not a hypothetical. So the
 advertised schema must keep its constraints, and parsing must never reject.
 
+**Forced tool calls (structured output):** the Claude Agent SDK behind this provider
+has no way to force a tool choice — left to itself it can still answer in prose even
+when `tool_choice` asks for one. So when a request sets `tool_choice: {"type":
+"tool", "name": N}` and `tools` contains a matching entry that carries an
+`input_schema`, the bridge instead serves it through the SDK's native structured
+output, constraining the reply to that schema. The validated payload comes back as a
+single `tool_use` content block, so the response shape matches every other provider
+and no caller-visible behaviour changes. Any other `tool_choice` shape (or none), an
+unknown or schema-less tool name, and any request that continues an existing session
+(`session_id` set) all keep the ordinary agentic tool path instead. If the SDK
+returns no structured payload, the bridge answers `502
+structured_output_missing`, which — like other bridge/SDK failures — fails the call
+over to a provider that can force tools (see "Error semantics" below).
+
 On `/v1/complete` the bridge request accepts an optional `effort` field
 (`off`, `low`, `medium`, `high`, `max`), forwarded only for text completion
 — never for vision. `off` disables extended thinking (Agent SDK
