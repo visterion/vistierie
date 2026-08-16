@@ -173,7 +173,7 @@ Operational rules:
 |----------|---------|---------|-------------|
 | `logging.level.de.vesterion.vistierie.llm` | `VISTIERIE_LOG_LLM` | `INFO` | Log level for provider/LLM calls. One of `ERROR`, `WARN`, `INFO`, `DEBUG`, `TRACE` |
 | `logging.level.de.vesterion.vistierie.agent.runner` | `VISTIERIE_LOG_AGENT` | `INFO` | Log level for the agent runner |
-| `VISTIERIE_LOG_DIR` | `logs` | Directory for the rotating log files. In production it is mounted onto a host directory, so the logs survive the container being recreated — see [operations.md](./operations.md#log-retention-14-days). |
+| — | `VISTIERIE_LOG_DIR` | `logs` | Directory for the rotating log files, read directly by Logback (not a Spring property). Durable retention requires deployment-side setup beyond just setting this variable — see [operations.md](./operations.md#log-retention-14-days). |
 
 Because the project ships its own `logback-spring.xml`, Spring Boot's own
 logging properties (`logging.structured.format.console`, `logging.file.name`,
