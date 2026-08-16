@@ -114,6 +114,48 @@ class LlmServiceTest {
         assertThat(captured.toolChoice()).isEqualTo(choice);
     }
 
+    /** Regression guard for finding #2: Bedrock/OpenAiCompatible synthesize content_blocks
+     *  unconditionally, so LlmService itself must drop them for toolless callers instead of
+     *  trusting the provider to only populate the field when tools were offered. */
+    @Test void completeWithoutToolsDropsProviderSuppliedContentBlocks() {
+        when(routing.resolve(eq(tenantName), eq("test_realm"), eq("test_purpose"), eq(null)))
+                .thenReturn(new RoutingDecision("anthropic", "claude-haiku-4-5", false));
+        when(providers.get("anthropic")).thenReturn(provider);
+        var mapper = new tools.jackson.databind.ObjectMapper();
+        var blocks = mapper.createArrayNode();
+        blocks.addObject().put("type", "text").put("text", "ok");
+        when(provider.complete(any())).thenReturn(new ProviderResponse(
+                "ok", "end_turn", new Usage(10, 20, 0, 0), "claude-haiku-4-5", blocks));
+
+        var res = svc.complete(completeReq());
+
+        assertThat(res.response().content_blocks()).isNull();
+    }
+
+    @Test void completeWithToolsKeepsProviderSuppliedContentBlocks() {
+        var tool = Map.<String, Object>of(
+                "name", "submit_mailings",
+                "description", "Deliver the grouping.",
+                "input_schema", Map.of("type", "object"));
+        var choice = Map.<String, Object>of("type", "tool", "name", "submit_mailings");
+        when(routing.resolve(eq(tenantName), eq("test_realm"), eq("test_purpose"), eq(null)))
+                .thenReturn(new RoutingDecision("anthropic", "claude-haiku-4-5", false));
+        when(providers.get("anthropic")).thenReturn(provider);
+        var mapper = new tools.jackson.databind.ObjectMapper();
+        var blocks = mapper.createArrayNode();
+        blocks.addObject().put("type", "tool_use").put("id", "tu1").put("name", "submit_mailings");
+        when(provider.complete(any())).thenReturn(new ProviderResponse(
+                "", "tool_use", new Usage(10, 20, 0, 0), "claude-haiku-4-5", blocks));
+
+        var res = svc.complete(new CompleteRequest(
+                "writer", "test_purpose", "test_realm", "sys",
+                List.of(Map.of("role", "user", "content", "hi")),
+                null, null, null, List.of(tool), choice));
+
+        assertThat(res.response().content_blocks()).isNotNull();
+        assertThat(res.response().content_blocks().get(0).path("id").asText()).isEqualTo("tu1");
+    }
+
     private VisionRequest visionReq() {
         return new VisionRequest("writer", "test_purpose", "test_realm",
                 new VisionRequest.Image("base64", "image/png", "AAAA"),

@@ -230,8 +230,10 @@ public class LlmService {
                         id, ctx.tenantName(), ctx.agentName(), ctx.purpose(), ctx.endpoint(),
                         providerName, model, pRes.usage().inputTokens(), pRes.usage().outputTokens(),
                         usd(cost), shadow == null ? "-" : usd(shadow), dur);
+                boolean requestedTools = pReq.tools() != null && !pReq.tools().isEmpty();
                 return new InvocationResult(new LlmResponse(pRes.text(), pRes.stopReason(),
-                        pRes.usage(), providerName, model, cost, id, pRes.contentBlocks()),
+                        pRes.usage(), providerName, model, cost, id,
+                        requestedTools ? pRes.contentBlocks() : null),
                         ctx.budget());
             } catch (LlmProvider.ProviderException e) {
                 // Open here (not in invoke's catch) — attempt() is the single choke point for BOTH

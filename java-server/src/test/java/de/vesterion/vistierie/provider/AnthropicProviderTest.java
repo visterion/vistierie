@@ -143,5 +143,31 @@ class AnthropicProviderTest {
         verify(postRequestedFor(urlEqualTo("/v1/messages"))
                 .withRequestBody(containing("\"name\":\"cell.read\""))
                 .withRequestBody(containing("\"tools\":")));
+        assertThat(res.contentBlocks()).isNotNull();
+        assertThat(res.contentBlocks().get(1).path("type").asText()).isEqualTo("tool_use");
+        assertThat(res.contentBlocks().get(1).path("id").asText()).isEqualTo("toolu_1");
+        assertThat(res.contentBlocks().get(1).path("input").path("id").asText()).isEqualTo("c1");
+    }
+
+    @Test void forwardsToolChoiceWhenSet() {
+        stubFor(post(urlEqualTo("/v1/messages")).willReturn(okJson("""
+                {"id":"m","type":"message","role":"assistant","model":"claude-haiku-4-5",
+                 "content":[{"type":"tool_use","id":"toolu_2","name":"cell.read","input":{"id":"c1"}}],
+                 "stop_reason":"tool_use",
+                 "usage":{"input_tokens":10,"output_tokens":4,
+                          "cache_creation_input_tokens":0,"cache_read_input_tokens":0}}
+                """)));
+        var tools = java.util.List.of(java.util.Map.<String, Object>of(
+                "name", "cell.read",
+                "description", "read",
+                "input_schema", java.util.Map.of("type", "object")
+        ));
+        var req = new ProviderRequest("claude-haiku-4-5", 256, null, "system",
+                java.util.List.of(java.util.Map.of("role", "user", "content", "find c1")),
+                tools, java.util.Map.of("type", "tool", "name", "cell.read"), null);
+        provider.complete(req);
+        verify(postRequestedFor(urlEqualTo("/v1/messages"))
+                .withRequestBody(matchingJsonPath("$.tool_choice.type", equalTo("tool")))
+                .withRequestBody(matchingJsonPath("$.tool_choice.name", equalTo("cell.read"))));
     }
 }

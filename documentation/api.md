@@ -79,8 +79,17 @@ Run a chat completion against the tenant's routed model.
   "provider":    "anthropic",
   "model":       "claude-haiku-4-5",
   "cost_micros": 142,
-  "llm_call_id": "01HZ...",
-  "content_blocks": null
+  "llm_call_id": "01HZ..."
+}
+```
+
+When the request carried `tools`, the response additionally includes:
+
+```json
+{
+  "content_blocks": [
+    {"type": "tool_use", "id": "toolu_01...", "name": "submit_mailings", "input": {}}
+  ]
 }
 ```
 
@@ -96,7 +105,7 @@ Run a chat completion against the tenant's routed model.
 | `model` | string | Model that handled the call (may differ from request when override is off) |
 | `cost_micros` | integer | Estimated cost in micro-EUR (divide by 1 000 000 for EUR) |
 | `llm_call_id` | string | Audit row ID, safe to log and reference in support requests |
-| `content_blocks` | object \| null | Raw provider content blocks, carrying `tool_use` payloads. Optional; null when the request sent no `tools` |
+| `content_blocks` | array, key absent otherwise | Raw provider content blocks, carrying `tool_use` payloads. The key is omitted from the response entirely (not sent as `null`) when the request sent no `tools` |
 
 ### Response headers
 

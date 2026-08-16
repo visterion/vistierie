@@ -282,8 +282,15 @@ class ClaudeSubscriptionProviderTest {
                 List.of(Map.of("name", "submit_mailings", "description", "d",
                         "input_schema", Map.of("type", "object"))),
                 null, null));
-        verify(postRequestedFor(urlEqualTo("/v1/complete"))
-                .withRequestBody(notMatching(".*tool_choice.*")));
+
+        // Real absence check on the parsed body, not a regex: Java's "." does not match
+        // newlines, so a notMatching(".*tool_choice.*") assertion would pass vacuously
+        // against a pretty-printed body even if tool_choice were present.
+        var requests = findAll(postRequestedFor(urlEqualTo("/v1/complete")));
+        assertThat(requests).hasSize(1);
+        var parsedBody = new tools.jackson.databind.ObjectMapper()
+                .readTree(requests.get(0).getBodyAsString());
+        assertThat(parsedBody.has("tool_choice")).isFalse();
     }
 
     @Test void completeMapsToolUseResponse() {

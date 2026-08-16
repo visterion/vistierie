@@ -61,6 +61,9 @@ public class AnthropicProvider implements LlmProvider {
         body.put("messages", req.messages());
         if (req.tools() != null && !req.tools().isEmpty()) {
             body.put("tools", req.tools());
+            // Offering a tool is not enough: without a choice the model may still answer in
+            // prose. Mirrors ClaudeSubscriptionProvider's forwarding.
+            if (req.toolChoice() != null) body.put("tool_choice", req.toolChoice());
         }
         return call(body);
     }
