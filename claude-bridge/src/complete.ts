@@ -164,8 +164,13 @@ function resultToResponse(
       // `subtype: "success"` with no structured_output is real upstream behaviour
       // (claude-agent-sdk-typescript#277), so the FIELD is the gate, never the subtype.
       // 502 is >= 500, so Vistierie fails over to a provider that can force tools; returning
-      // an empty block instead would silently hand the caller an empty result.
-      if (msg.structured_output === undefined || msg.structured_output === null) {
+      // an empty block instead would silently hand the caller an empty result. The gate is a
+      // SHAPE check, not just nullishness: `{}`, `""`, `0`, `false` and `[]` all pass a
+      // nullish check yet none of them can carry the caller's schema, so each becomes a
+      // `tool_use` block whose expected fields are simply missing — a silently empty result,
+      // the only failure mode here that produces a wrong answer instead of a fallback.
+      const structured = asNode(msg.structured_output);
+      if (!structured || Object.keys(structured).length === 0) {
         throw new BridgeError(
           502,
           "structured_output_missing",
@@ -176,7 +181,7 @@ function resultToResponse(
         type: "tool_use",
         id: `structured_${randomUUID()}`,
         name: structuredToolName,
-        input: msg.structured_output,
+        input: structured,
       };
       return { text: "", stop_reason: "tool_use", model, usage, content_blocks: [block] };
     }
@@ -201,16 +206,42 @@ function resultToResponse(
  * call and drove the timeouts this route exists to remove.
  *
  * Deliberately narrow. Anything else — no tool_choice, another choice type, an unknown tool
- * name, a tool without a schema, or a request continuing a session — returns null and keeps
- * today's behaviour. Vistierie's AgentRunner passes toolChoice = null, so genuine agentic
- * runs never land here.
+ * name, a tool without an object schema, more than one tool on the request, or a request
+ * continuing a session — returns null and keeps today's behaviour. Vistierie's AgentRunner
+ * passes toolChoice = null, so genuine agentic runs never land here.
  */
 function structuredToolFrom(req: CompleteRequest): ToolDefWire | null {
   if (req.session_id !== undefined) return null;
   const choice = req.tool_choice;
   if (!choice || choice.type !== "tool" || !choice.name) return null;
-  const named = req.tools?.find((t) => t.name === choice.name);
-  if (!named || named.input_schema === undefined || named.input_schema === null) return null;
+
+  // A forced single-tool call offers exactly one tool by definition. A multi-tool request
+  // that forces one of them is the agentic shape and must not divert here — e.g.
+  // AgentRunner.java:250-256 appends `submit_result` to an agent's own tools; forcing that
+  // tool would otherwise land on this route and never offer the agent's real tools to the
+  // model at all. It would not crash — it would silently return a schema-valid payload
+  // produced without ever calling a tool.
+  if ((req.tools?.length ?? 0) !== 1) {
+    console.log(
+      `structured-output route declined: tool_choice names "${choice.name}" but request carries ${req.tools?.length ?? 0} tool(s)`,
+    );
+    return null;
+  }
+  const named = req.tools!.find((t) => t.name === choice.name);
+  if (!named) {
+    console.log(`structured-output route declined: tool_choice names unknown tool "${choice.name}"`);
+    return null;
+  }
+  // The bridge validates nothing about request bodies (server.ts checks only `model` and
+  // `messages`), so `input_schema` is arbitrary caller JSON. A stringified or array schema
+  // would otherwise become `outputFormat.schema` verbatim, handing the CLI something it was
+  // never typed to accept.
+  if (!asNode(named.input_schema)) {
+    console.log(
+      `structured-output route declined: tool "${named.name}" has a non-object input_schema`,
+    );
+    return null;
+  }
   return named;
 }
 
@@ -305,6 +336,12 @@ async function completePlain(
       type: "json_schema",
       schema: structuredTool.input_schema as Record<string, unknown>,
     };
+    // `allowedTools: []` above is only the auto-allow list; without `tools: []` the built-ins
+    // (Read/Bash/Glob/WebSearch/...) would still be OFFERED to the model, which would attempt
+    // one, get denied, and burn turns against maxTurns: 8. Mirrors startSession's `tools: []`
+    // (complete.ts) for the same reason. Scoped to this branch only — existing plain-path
+    // traffic (no structured tool) is unaffected.
+    options.tools = [];
   }
 
   async function consume(): Promise<CompleteResponse> {

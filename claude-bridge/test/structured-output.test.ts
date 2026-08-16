@@ -68,6 +68,10 @@ describe("structured-output route", () => {
     expect(options.outputFormat).toEqual({ type: "json_schema", schema: SCHEMA });
     expect(options.mcpServers).toBeUndefined();
     expect(options.allowedTools).toEqual([]);
+    // Built-in-tool parity with the tool path's `tools: []` (startSession): without it, the
+    // model would be OFFERED Read/Bash/Glob/... on the structured route, attempt one, get
+    // denied, and burn turns against maxTurns: 8.
+    expect(options.tools).toEqual([]);
   });
 
   it("returns the structured payload as a single tool_use block", async () => {
@@ -91,6 +95,8 @@ describe("structured-output route", () => {
       cache_creation_input_tokens: 3,
       cache_read_input_tokens: 4,
     });
+    // The structured route never parks a session — there is nothing to continue.
+    expect(res.session_id).toBeUndefined();
   });
 
   it("fails with 502 when subtype is success but structured_output is absent", async () => {
@@ -99,6 +105,32 @@ describe("structured-output route", () => {
     await expect(
       complete({ ...base, tools: [TOOL], tool_choice: FORCED }),
     ).rejects.toMatchObject({ status: 502, code: "structured_output_missing" });
+  });
+
+  it("fails with 502 when structured_output is an empty object", async () => {
+    queryMock.mockReturnValue(sdkStream([successResult({ structured_output: {} })]));
+
+    await expect(
+      complete({ ...base, tools: [TOOL], tool_choice: FORCED }),
+    ).rejects.toMatchObject({ status: 502, code: "structured_output_missing" });
+  });
+
+  it("fails with 502 when structured_output is an array", async () => {
+    queryMock.mockReturnValue(sdkStream([successResult({ structured_output: [] })]));
+
+    await expect(
+      complete({ ...base, tools: [TOOL], tool_choice: FORCED }),
+    ).rejects.toMatchObject({ status: 502, code: "structured_output_missing" });
+  });
+
+  it("surfaces an SDKResultError for max structured-output retries as a 5xx via mapSdkError", async () => {
+    queryMock.mockReturnValue(
+      sdkStream([{ type: "result", subtype: "error_max_structured_output_retries" }]),
+    );
+
+    await expect(
+      complete({ ...base, tools: [TOOL], tool_choice: FORCED }),
+    ).rejects.toMatchObject({ status: 500, code: "sdk_error" });
   });
 
   it("still reports an upstream API error instead of a structured response", async () => {
@@ -171,6 +203,16 @@ describe("requests that must keep the agentic tool path", () => {
   it("a named tool that carries no input_schema", async () => {
     const bare = { name: "submit_items", description: "synthetic tool" };
     await expectToolPath({ ...base, tools: [bare], tool_choice: FORCED });
+  });
+
+  it("more than one tool on the request, even with a forced choice", async () => {
+    const OTHER = { name: "other_tool", description: "synthetic", input_schema: SCHEMA };
+    await expectToolPath({ ...base, tools: [TOOL, OTHER], tool_choice: FORCED });
+  });
+
+  it("a named tool whose input_schema is not an object (e.g. stringified)", async () => {
+    const stringly = { name: "submit_items", description: "synthetic", input_schema: JSON.stringify(SCHEMA) };
+    await expectToolPath({ ...base, tools: [stringly], tool_choice: FORCED });
   });
 
   it("a request continuing a session", async () => {
