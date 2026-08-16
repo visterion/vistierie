@@ -39,8 +39,11 @@ provider forwards a `tools` array on `/v1/complete` containing only the wire-saf
 keys (`name`, `description`, `input_schema`) — Vistierie's internal `ToolDef` keys
 (`type`, `webhook_url`, `target_agent`, ...) are stripped and never sent to the
 bridge. When `ProviderRequest.toolChoice()` is also set, it is forwarded verbatim as
-`tool_choice` on the same request, so the bridge can force rather than merely offer
-the tool; it is only ever sent alongside a non-empty `tools` array. The bridge may
+`tool_choice` on the same request; it is only ever sent alongside a non-empty `tools`
+array. The Agent SDK behind the bridge cannot force a tool choice by itself — for the
+narrow shape of request where that matters, the bridge substitutes native structured
+output instead (see "Forced tool calls" below); every other shape keeps the ordinary
+agentic path, where `tool_choice` steers but does not force. The bridge may
 respond with `stop_reason: "tool_use"`, a Claude-style
 `content_blocks` array (including `{type: "tool_use", id, name, input}` entries),
 and a `session_id`. Vistierie surfaces both on `ProviderResponse` (`contentBlocks`,
@@ -65,8 +68,13 @@ fail. That is deliberate. Arguments are forwarded verbatim from the assistant bl
 so SDK-side validation protects nothing — while an SDK-side rejection lands *after*
 Vistierie has already received and dispatched the `tool_use` block, desynchronising
 the bridge's FIFO call matcher and making the model retry, i.e. executing the tool
-twice. **Vistierie is the authoritative validator** — it checks the real JSON Schema
-after the call and reports violations as ordinary run errors.
+twice. No code path validates an individual tool call's arguments against that
+tool's `input_schema` — not here, and not on the forced-single-tool route below (see
+"Forced tool calls"). **On the agent path, Vistierie does validate one related
+thing:** the agent runner checks the run's final `submit_result` payload against the
+agent's declared `output_schema` after the call and reports violations as ordinary
+run errors — a check on the agent's own output contract, not on any one tool's
+input.
 
 Both halves are load-bearing, and the bridge's tests pin both. Structure is what a
 model cannot reliably guess: with an untyped schema it may deliver a nested array as
@@ -75,24 +83,29 @@ advertised schema must keep its constraints, and parsing must never reject.
 
 **Forced tool calls (structured output):** the Claude Agent SDK behind this provider
 has no way to force a tool choice — left to itself it can still answer in prose even
-when `tool_choice` asks for one. So when a request sets `tool_choice: {"type":
-"tool", "name": N}` and `tools` contains a matching entry that carries an
-`input_schema`, the bridge instead serves it through the SDK's native structured
-output, constraining the reply to that schema. The bridge itself only checks that a
-payload came back at all (see below); it hands the schema-constrained `tool_use`
-block back to the caller unvalidated, so callers parse it exactly as they parse the
-other providers' tool calls and are responsible for validating it against the
-schema themselves. The reply is a single,
-complete turn: it carries no `session_id`, so there is nothing to continue — forcing
-a tool is a one-shot request, not an agent loop. It also reports real token usage,
-unlike the agentic tool path's `tool_use` responses, which report zero usage because
-the run is still in progress. Any other `tool_choice` shape (or none), an unknown or
-schema-less tool name, and any request that continues an existing session
-(`session_id` set) all keep the ordinary agentic tool path instead. If the SDK
-returns no structured payload, the bridge answers `502
-structured_output_missing`, so a routing rule's fallback provider takes over if
-configured (see
-"Error semantics" below).
+when `tool_choice` asks for one. The bridge takes this route only for the narrow
+shape of request where forcing a single tool is unambiguous: `tool_choice` is
+`{"type": "tool", "name": N}`, the request's `tools` array holds **exactly one**
+entry, its `name` matches, and its `input_schema` is a real object (not a string,
+not an array, not missing). A multi-tool request that happens to force one of its
+tools is the agentic shape, not this one — offering only that one tool would starve
+the model of the others it needs — so it is deliberately excluded and keeps the
+ordinary agentic path, as is a stringified or otherwise non-object schema. When the
+narrow shape matches, the bridge serves the request through the SDK's native
+structured output, constraining the reply to that one tool's schema. The bridge
+itself only checks that a payload came back at all (see below); it hands the
+schema-constrained `tool_use` block back to the caller unvalidated, so callers parse
+it exactly as they parse the other providers' tool calls and are responsible for
+validating it against the schema themselves. The reply is a single, complete turn:
+it carries no `session_id`, so there is nothing to continue — forcing a tool is a
+one-shot request, not an agent loop. It also reports real token usage, unlike the
+agentic tool path's `tool_use` responses, which report zero usage because the run is
+still in progress. Any request outside the narrow shape above — no `tool_choice`,
+another choice type, more than one tool, an unknown tool name, a non-object
+`input_schema`, or a request continuing a session (`session_id` set) — keeps the
+ordinary agentic tool path instead. If the SDK returns no structured payload, the
+bridge answers `502 structured_output_missing`, so a routing rule's fallback
+provider takes over if configured (see "Error semantics" below).
 
 On `/v1/complete` the bridge request accepts an optional `effort` field
 (`off`, `low`, `medium`, `high`, `max`), forwarded only for text completion
