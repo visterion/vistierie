@@ -78,14 +78,19 @@ has no way to force a tool choice — left to itself it can still answer in pros
 when `tool_choice` asks for one. So when a request sets `tool_choice: {"type":
 "tool", "name": N}` and `tools` contains a matching entry that carries an
 `input_schema`, the bridge instead serves it through the SDK's native structured
-output, constraining the reply to that schema. The validated payload comes back as a
-single `tool_use` content block, so the response shape matches every other provider
-and no caller-visible behaviour changes. Any other `tool_choice` shape (or none), an
-unknown or schema-less tool name, and any request that continues an existing session
+output, constraining the reply to that schema. The schema-constrained payload comes
+back as a single `tool_use` content block, so callers parse it exactly as they parse
+the other providers' tool calls — Vistierie still validates it against the real JSON
+Schema after the call, same as any other tool response. The reply is a single,
+complete turn: it carries no `session_id`, so there is nothing to continue — forcing
+a tool is a one-shot request, not an agent loop. It also reports real token usage,
+unlike the agentic tool path's `tool_use` responses, which report zero usage because
+the run is still in progress. Any other `tool_choice` shape (or none), an unknown or
+schema-less tool name, and any request that continues an existing session
 (`session_id` set) all keep the ordinary agentic tool path instead. If the SDK
 returns no structured payload, the bridge answers `502
-structured_output_missing`, which — like other bridge/SDK failures — fails the call
-over to a provider that can force tools (see "Error semantics" below).
+structured_output_missing`, so a routing rule's fallback provider takes over (see
+"Error semantics" below).
 
 On `/v1/complete` the bridge request accepts an optional `effort` field
 (`off`, `low`, `medium`, `high`, `max`), forwarded only for text completion

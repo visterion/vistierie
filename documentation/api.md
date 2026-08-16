@@ -62,7 +62,7 @@ Run a chat completion against the tenant's routed model.
 | `temperature` | number | no | Sampling temperature (0–1) |
 | `model` | string | no | Override the resolved model, only honoured when `allow-override: true` in routing config |
 | `tools` | array | no | Tool definitions, passed straight to the provider. Omitting it preserves the previous behaviour (no tools offered) |
-| `tool_choice` | object | no | Forces (or steers) tool use, e.g. `{"type": "tool", "name": "submit_mailings"}`. Omitting it lets the model decide. `{"type": "tool", "name": ...}` is the shape that guarantees a tool call — the matching entry in `tools` is called, and the answer arrives in `content_blocks` as a `tool_use` block instead of in `text` |
+| `tool_choice` | object | no | Forces (or steers) tool use, e.g. `{"type": "tool", "name": "submit_mailings"}`. Omitting it lets the model decide. `{"type": "tool", "name": ...}` is the shape that forces a tool call — the matching entry in `tools` is the one the model must use, and the answer arrives in `content_blocks` as a `tool_use` block instead of in `text` |
 
 ### Response `200 OK`
 
