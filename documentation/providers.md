@@ -38,7 +38,10 @@ always stays on the `anthropic` (API-key) provider.
 provider forwards a `tools` array on `/v1/complete` containing only the wire-safe
 keys (`name`, `description`, `input_schema`) — Vistierie's internal `ToolDef` keys
 (`type`, `webhook_url`, `target_agent`, ...) are stripped and never sent to the
-bridge. The bridge may respond with `stop_reason: "tool_use"`, a Claude-style
+bridge. When `ProviderRequest.toolChoice()` is also set, it is forwarded verbatim as
+`tool_choice` on the same request, so the bridge can force rather than merely offer
+the tool; it is only ever sent alongside a non-empty `tools` array. The bridge may
+respond with `stop_reason: "tool_use"`, a Claude-style
 `content_blocks` array (including `{type: "tool_use", id, name, input}` entries),
 and a `session_id`. Vistierie surfaces both on `ProviderResponse` (`contentBlocks`,
 `sessionId`). `session_id` is transport-internal to the bridge conversation: to

@@ -261,6 +261,31 @@ class ClaudeSubscriptionProviderTest {
                 });
     }
 
+    @Test
+    void forwardsToolChoiceWhenSet() {
+        stubFor(post(urlEqualTo("/v1/complete")).willReturn(okJson(OK_BODY)));
+        provider.complete(new ProviderRequest("claude-opus-4-8", 256, null, null,
+                List.of(Map.of("role", "user", "content", "hi")),
+                List.of(Map.of("name", "submit_mailings", "description", "d",
+                        "input_schema", Map.of("type", "object"))),
+                Map.of("type", "tool", "name", "submit_mailings"), null));
+        verify(postRequestedFor(urlEqualTo("/v1/complete"))
+                .withRequestBody(matchingJsonPath("$.tool_choice.type", equalTo("tool")))
+                .withRequestBody(matchingJsonPath("$.tool_choice.name", equalTo("submit_mailings"))));
+    }
+
+    @Test
+    void omitsToolChoiceKeyWhenNull() {
+        stubFor(post(urlEqualTo("/v1/complete")).willReturn(okJson(OK_BODY)));
+        provider.complete(new ProviderRequest("claude-opus-4-8", 256, null, null,
+                List.of(Map.of("role", "user", "content", "hi")),
+                List.of(Map.of("name", "submit_mailings", "description", "d",
+                        "input_schema", Map.of("type", "object"))),
+                null, null));
+        verify(postRequestedFor(urlEqualTo("/v1/complete"))
+                .withRequestBody(notMatching(".*tool_choice.*")));
+    }
+
     @Test void completeMapsToolUseResponse() {
         var toolUseBody = """
                 {"text":"","stop_reason":"tool_use","model":"m",

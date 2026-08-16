@@ -43,6 +43,9 @@ public class ClaudeSubscriptionProvider implements LlmProvider {
                 wireTools.add(wt);
             }
             body.put("tools", wireTools);
+            // Offering a tool is not enough: without a choice the model may still answer in prose,
+            // which is the failure this forwarding exists to remove.
+            if (req.toolChoice() != null) body.put("tool_choice", req.toolChoice());
         }
         Object sessionId = req.metadata() == null ? null : req.metadata().get("provider_session_id");
         if (sessionId != null) body.put("session_id", sessionId);
