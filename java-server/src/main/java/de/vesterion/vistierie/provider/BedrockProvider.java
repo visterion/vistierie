@@ -42,7 +42,7 @@ public class BedrockProvider implements LlmProvider {
         }
 
         if (req.tools() != null && !req.tools().isEmpty()) {
-            builder.toolConfig(buildToolConfig(req.tools())); // req.toolChoice() not yet forwarded
+            builder.toolConfig(buildToolConfig(req.tools(), req.toolChoice()));
         }
 
         return call(builder.build(), req.model());
@@ -224,7 +224,7 @@ public class BedrockProvider implements LlmProvider {
         return mapper.nullNode();
     }
 
-    private ToolConfiguration buildToolConfig(List<Map<String, Object>> tools) {
+    private ToolConfiguration buildToolConfig(List<Map<String, Object>> tools, Object toolChoice) {
         var toolList = tools.stream().map(t -> {
             var specBuilder = ToolSpecification.builder()
                     .name((String) t.get("name"));
@@ -238,7 +238,29 @@ public class BedrockProvider implements LlmProvider {
             }
             return Tool.builder().toolSpec(specBuilder.build()).build();
         }).toList();
-        return ToolConfiguration.builder().tools(toolList).build();
+        var cfg = ToolConfiguration.builder().tools(toolList);
+        ToolChoice choice = toToolChoice(toolChoice);
+        if (choice != null) cfg.toolChoice(choice);
+        return cfg.build();
+    }
+
+    /** Maps the untyped JSON tool choice onto Bedrock's ToolChoice. An unrecognised shape yields
+     *  null — the tool is then merely offered, which is worse than forcing it but far better than
+     *  failing the whole call. */
+    private static ToolChoice toToolChoice(Object toolChoice) {
+        if (!(toolChoice instanceof Map<?, ?> m)) return null;
+        Object type = m.get("type");
+        if ("any".equals(type)) {
+            return ToolChoice.builder().any(AnyToolChoice.builder().build()).build();
+        }
+        if ("auto".equals(type)) {
+            return ToolChoice.builder().auto(AutoToolChoice.builder().build()).build();
+        }
+        if ("tool".equals(type) && m.get("name") instanceof String name) {
+            return ToolChoice.builder()
+                    .tool(SpecificToolChoice.builder().name(name).build()).build();
+        }
+        return null;
     }
 
     private String writeJson(Object value) {

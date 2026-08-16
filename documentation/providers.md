@@ -172,6 +172,14 @@ in Bedrock: Anthropic Claude, Amazon Nova, Titan, Mistral, and others.
 Supports text completion, vision, multi-image vision (`/llm/vision-multi`), and tool use.
 No batch support.
 
+**Tool choice:** when `ProviderRequest.toolChoice()` is set, it is mapped onto
+Bedrock's `ToolConfiguration.toolChoice` so the model can be forced to use a tool
+rather than merely offered one. Supported shapes: `{"type": "tool", "name": "..."}`
+(forces that specific tool), `{"type": "any"}` (forces some tool), and
+`{"type": "auto"}` (leaves it to the model, the Converse API default). Any other
+or malformed shape leaves the choice unset — the tools are still offered via
+`ToolConfiguration.tools`, just not forced — rather than failing the request.
+
 > **Multi-image limit:** Bedrock's Converse API caps a single request at roughly 20 images.
 > Vistierie does not enforce a hard cap — requests above the provider limit are rejected by
 > Bedrock and surface as a `ProviderException` (same handling as `/llm/vision`). Callers that

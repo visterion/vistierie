@@ -256,4 +256,45 @@ class BedrockProviderTest {
         assertThatThrownBy(() -> provider.submitBatch(List.of()))
             .isInstanceOf(UnsupportedOperationException.class);
     }
+
+    private ConverseRequest captureConverseRequest(ProviderRequest req) {
+        when(client.converse(any(ConverseRequest.class))).thenReturn(
+            ConverseResponse.builder()
+                .output(ConverseOutput.builder()
+                    .message(Message.builder()
+                        .role(ConversationRole.ASSISTANT)
+                        .content(ContentBlock.fromText("ok"))
+                        .build())
+                    .build())
+                .stopReason(StopReason.END_TURN)
+                .usage(TokenUsage.builder().inputTokens(1).outputTokens(1).build())
+                .build());
+
+        provider.complete(req);
+
+        var captor = ArgumentCaptor.forClass(ConverseRequest.class);
+        org.mockito.Mockito.verify(client).converse(captor.capture());
+        return captor.getValue();
+    }
+
+    private static ProviderRequest toolReq(Object toolChoice) {
+        return new ProviderRequest("anthropic.claude-3-5-sonnet-20241022-v2:0", 256, null, null,
+                List.of(Map.of("role", "user", "content", "hi")),
+                List.of(Map.of("name", "submit_mailings", "description", "d",
+                        "input_schema", Map.of("type", "object"))),
+                toolChoice, null);
+    }
+
+    @Test
+    void forwardsSpecificToolChoice() {
+        var captured = captureConverseRequest(
+                toolReq(Map.of("type", "tool", "name", "submit_mailings")));
+        assertThat(captured.toolConfig().toolChoice().tool().name()).isEqualTo("submit_mailings");
+    }
+
+    @Test
+    void leavesToolChoiceUnsetWhenNull() {
+        var captured = captureConverseRequest(toolReq(null));
+        assertThat(captured.toolConfig().toolChoice()).isNull();
+    }
 }
