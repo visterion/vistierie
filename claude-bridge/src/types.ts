@@ -7,6 +7,16 @@ export interface ToolDefWire {
   input_schema?: unknown;
 }
 
+/**
+ * Anthropic-shaped tool choice as Vistierie forwards it. Only `{type:"tool", name}` is acted
+ * upon (see `structuredToolFrom`); other shapes are accepted and ignored, so adding `any` or
+ * `auto` later needs no wire change.
+ */
+export interface ToolChoiceWire {
+  type: string;
+  name?: string;
+}
+
 export interface CompleteRequest {
   model: string;
   max_tokens?: number;
@@ -14,6 +24,7 @@ export interface CompleteRequest {
   effort?: Effort;
   messages: Array<{ role: string; content: unknown }>;
   tools?: ToolDefWire[];
+  tool_choice?: ToolChoiceWire;
   session_id?: string;
 }
 

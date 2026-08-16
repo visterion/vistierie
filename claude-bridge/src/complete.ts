@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { query, createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
 import type { Options, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
@@ -102,8 +103,17 @@ function applyModelKnobs(options: Options, req: CompleteRequest): void {
   }
 }
 
-/** Map an SDK `result` message to the wire response (throws on error subtype). */
-function resultToResponse(msg: Record<string, any>, model: string): CompleteResponse {
+/** Map an SDK `result` message to the wire response (throws on error subtype).
+ *
+ * With `structuredToolName` set, the caller asked for structured output: the validated
+ * payload comes back as the single `tool_use` block callers already parse, so the wire shape
+ * matches the other providers. The error checks below stay in front of it — a structured
+ * payload must never mask an exhausted subscription or an expired token. */
+function resultToResponse(
+  msg: Record<string, any>,
+  model: string,
+  structuredToolName?: string,
+): CompleteResponse {
   if (msg.subtype === "success") {
     const text = String(msg.result ?? "");
     const outputTokens = msg.usage?.output_tokens ?? 0;
@@ -143,17 +153,35 @@ function resultToResponse(msg: Record<string, any>, model: string): CompleteResp
     const fromText = apiErrorFrom(text);
     if (fromText) throw fromText;
 
-    return {
-      text,
-      stop_reason: "end_turn",
-      model,
-      usage: {
-        input_tokens: msg.usage?.input_tokens ?? 0,
-        output_tokens: outputTokens,
-        cache_creation_input_tokens: msg.usage?.cache_creation_input_tokens ?? 0,
-        cache_read_input_tokens: msg.usage?.cache_read_input_tokens ?? 0,
-      },
+    const usage = {
+      input_tokens: msg.usage?.input_tokens ?? 0,
+      output_tokens: outputTokens,
+      cache_creation_input_tokens: msg.usage?.cache_creation_input_tokens ?? 0,
+      cache_read_input_tokens: msg.usage?.cache_read_input_tokens ?? 0,
     };
+
+    if (structuredToolName !== undefined) {
+      // `subtype: "success"` with no structured_output is real upstream behaviour
+      // (claude-agent-sdk-typescript#277), so the FIELD is the gate, never the subtype.
+      // 502 is >= 500, so Vistierie fails over to a provider that can force tools; returning
+      // an empty block instead would silently hand the caller an empty result.
+      if (msg.structured_output === undefined || msg.structured_output === null) {
+        throw new BridgeError(
+          502,
+          "structured_output_missing",
+          text || "result carried no structured_output",
+        );
+      }
+      const block: ContentBlockWire = {
+        type: "tool_use",
+        id: `structured_${randomUUID()}`,
+        name: structuredToolName,
+        input: msg.structured_output,
+      };
+      return { text: "", stop_reason: "tool_use", model, usage, content_blocks: [block] };
+    }
+
+    return { text, stop_reason: "end_turn", model, usage };
   }
   // SDKResultError carries its error text in `errors: string[]` (no `result` field).
   const errorText =
@@ -161,6 +189,29 @@ function resultToResponse(msg: Record<string, any>, model: string): CompleteResp
       ? msg.errors.join("; ")
       : String(msg.subtype);
   throw mapSdkError(new Error(errorText));
+}
+
+/**
+ * The tool a request wants FORCED, or null when this is not a structured-output request.
+ *
+ * Forcing one named tool is how a caller says "give me a single structured answer", not "run
+ * an agent loop". The Agent SDK cannot force a tool at all, but it can enforce a JSON Schema
+ * through `outputFormat` — so these requests take the plain path with that schema, which
+ * needs no MCP server and parks no session. Parked sessions are what leaked a CLI child per
+ * call and drove the timeouts this route exists to remove.
+ *
+ * Deliberately narrow. Anything else — no tool_choice, another choice type, an unknown tool
+ * name, a tool without a schema, or a request continuing a session — returns null and keeps
+ * today's behaviour. Vistierie's AgentRunner passes toolChoice = null, so genuine agentic
+ * runs never land here.
+ */
+function structuredToolFrom(req: CompleteRequest): ToolDefWire | null {
+  if (req.session_id !== undefined) return null;
+  const choice = req.tool_choice;
+  if (!choice || choice.type !== "tool" || !choice.name) return null;
+  const named = req.tools?.find((t) => t.name === choice.name);
+  if (!named || named.input_schema === undefined || named.input_schema === null) return null;
+  return named;
 }
 
 export async function complete(
@@ -175,6 +226,9 @@ export async function complete(
     );
   }
 
+  const structuredTool = structuredToolFrom(req);
+  if (structuredTool) return completePlain(req, opts, structuredTool);
+
   const isToolMode = (req.tools?.length ?? 0) > 0 || req.session_id !== undefined;
   if (isToolMode) return completeTool(req, opts);
   return completePlain(req, opts);
@@ -187,6 +241,7 @@ export async function complete(
 async function completePlain(
   req: CompleteRequest,
   opts: CompleteOptions,
+  structuredTool?: ToolDefWire,
 ): Promise<CompleteResponse> {
   const content = flattenMessages(req.messages);
   const timeoutMs = resolveTimeoutMs(opts.timeoutMs);
@@ -243,12 +298,20 @@ async function completePlain(
     abortController: controller,
   };
   applyModelKnobs(options, req);
+  if (structuredTool) {
+    // maxTurns stays at the plain path's 8: structured output spends one extra synthetic
+    // turn (claude-agent-sdk-python#1013, measured num_turns = 2), well inside that bound.
+    options.outputFormat = {
+      type: "json_schema",
+      schema: structuredTool.input_schema as Record<string, unknown>,
+    };
+  }
 
   async function consume(): Promise<CompleteResponse> {
     const q = query({ prompt: promptStream(), options });
     for await (const msg of q as AsyncIterable<Record<string, any>>) {
       if (msg.type !== "result") continue;
-      return resultToResponse(msg, req.model);
+      return resultToResponse(msg, req.model, structuredTool?.name);
     }
     throw new BridgeError(500, "no_result", "SDK stream ended without a result message");
   }
