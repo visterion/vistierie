@@ -43,7 +43,8 @@ bridge. When `ProviderRequest.toolChoice()` is also set, it is forwarded verbati
 array. The Agent SDK behind the bridge cannot force a tool choice by itself — for the
 narrow shape of request where that matters, the bridge substitutes native structured
 output instead (see "Forced tool calls" below); every other shape keeps the ordinary
-agentic path, where `tool_choice` steers but does not force. The bridge may
+agentic path, where `tool_choice` is not carried through at all and is simply
+ignored. The bridge may
 respond with `stop_reason: "tool_use"`, a Claude-style
 `content_blocks` array (including `{type: "tool_use", id, name, input}` entries),
 and a `session_id`. Vistierie surfaces both on `ProviderResponse` (`contentBlocks`,
@@ -68,13 +69,14 @@ fail. That is deliberate. Arguments are forwarded verbatim from the assistant bl
 so SDK-side validation protects nothing — while an SDK-side rejection lands *after*
 Vistierie has already received and dispatched the `tool_use` block, desynchronising
 the bridge's FIFO call matcher and making the model retry, i.e. executing the tool
-twice. No code path validates an individual tool call's arguments against that
-tool's `input_schema` — not here, and not on the forced-single-tool route below (see
-"Forced tool calls"). **On the agent path, Vistierie does validate one related
-thing:** the agent runner checks the run's final `submit_result` payload against the
-agent's declared `output_schema` after the call and reports violations as ordinary
-run errors — a check on the agent's own output contract, not on any one tool's
-input.
+twice. One tool is the exception: `submit_result`, the agent runner's own output
+channel, has its `input_schema` set to the agent's `output_schema`
+(`ResultToolFactory.build`), and the runner validates that call's arguments against
+it (`AgentRunner`, `schemas.validate(outputSchemaNode, submitBlock.input())`) — a
+violation is fed back as a `tool_result` for the model to correct, up to a bounded
+number of retries, before the run is failed. Every other tool's arguments reach
+`ToolDispatcher` unvalidated, and the forced-single-tool route below validates
+nothing either (see "Forced tool calls").
 
 Both halves are load-bearing, and the bridge's tests pin both. Structure is what a
 model cannot reliably guess: with an untyped schema it may deliver a nested array as
