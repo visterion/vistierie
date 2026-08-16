@@ -88,7 +88,7 @@ public class LlmService {
 
         java.util.function.Function<String, ProviderRequest> reqForModel = model ->
                 new ProviderRequest(model, maxTokens, req.temperature(), req.system(),
-                        req.messages(), null, null, null, decision.effort());
+                        req.messages(), req.tools(), req.tool_choice(), null, decision.effort());
 
         return invoke(ctx, decision, reqForModel,
                 (provider, model) -> provider.complete(reqForModel.apply(model)));
@@ -231,7 +231,8 @@ public class LlmService {
                         providerName, model, pRes.usage().inputTokens(), pRes.usage().outputTokens(),
                         usd(cost), shadow == null ? "-" : usd(shadow), dur);
                 return new InvocationResult(new LlmResponse(pRes.text(), pRes.stopReason(),
-                        pRes.usage(), providerName, model, cost, id), ctx.budget());
+                        pRes.usage(), providerName, model, cost, id, pRes.contentBlocks()),
+                        ctx.budget());
             } catch (LlmProvider.ProviderException e) {
                 // Open here (not in invoke's catch) — attempt() is the single choke point for BOTH
                 // primary and fallback provider calls, so a subscription 429 is caught wherever it occurs.

@@ -14,5 +14,11 @@ public record CompleteRequest(
         @NotNull List<Map<String, Object>> messages,
         Integer max_tokens,
         Double temperature,
-        String model
+        String model,
+        /** Optional tool definitions, passed straight to the provider. Null keeps the previous
+         *  behaviour for every existing caller. */
+        List<Map<String, Object>> tools,
+        /** Optional tool choice, e.g. {"type":"tool","name":"submit_mailings"}. Forcing a tool is
+         *  what stops a model from answering in prose. */
+        Object tool_choice
 ) {}

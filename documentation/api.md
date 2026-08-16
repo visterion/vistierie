@@ -61,6 +61,8 @@ Run a chat completion against the tenant's routed model.
 | `max_tokens` | integer | no | Cap on output tokens; routing config may set a lower cap |
 | `temperature` | number | no | Sampling temperature (0–1) |
 | `model` | string | no | Override the resolved model, only honoured when `allow-override: true` in routing config |
+| `tools` | array | no | Tool definitions, passed straight to the provider. Omitting it preserves the previous behaviour (no tools offered) |
+| `tool_choice` | object | no | Forces (or steers) tool use, e.g. `{"type": "tool", "name": "submit_mailings"}`. Omitting it lets the model decide |
 
 ### Response `200 OK`
 
@@ -77,7 +79,8 @@ Run a chat completion against the tenant's routed model.
   "provider":    "anthropic",
   "model":       "claude-haiku-4-5",
   "cost_micros": 142,
-  "llm_call_id": "01HZ..."
+  "llm_call_id": "01HZ...",
+  "content_blocks": null
 }
 ```
 
@@ -93,6 +96,7 @@ Run a chat completion against the tenant's routed model.
 | `model` | string | Model that handled the call (may differ from request when override is off) |
 | `cost_micros` | integer | Estimated cost in micro-EUR (divide by 1 000 000 for EUR) |
 | `llm_call_id` | string | Audit row ID, safe to log and reference in support requests |
+| `content_blocks` | object \| null | Raw provider content blocks, carrying `tool_use` payloads. Optional; null when the request sent no `tools` |
 
 ### Response headers
 

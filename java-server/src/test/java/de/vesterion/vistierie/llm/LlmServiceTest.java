@@ -77,7 +77,41 @@ class LlmServiceTest {
     private CompleteRequest completeReq() {
         return new CompleteRequest("writer", "test_purpose", "test_realm", "sys",
                 List.of(Map.of("role", "user", "content", "hi")),
-                null, null, null);
+                null, null, null, null, null);
+    }
+
+    private ProviderRequest captureProviderRequestFor(CompleteRequest req) {
+        when(routing.resolve(eq(tenantName), eq("test_realm"), eq("test_purpose"), eq(null)))
+                .thenReturn(new RoutingDecision("anthropic", "claude-haiku-4-5", false));
+        when(providers.get("anthropic")).thenReturn(provider);
+        when(provider.complete(any())).thenReturn(new ProviderResponse(
+                "ok", "end_turn", new Usage(10, 20, 0, 0), "claude-haiku-4-5"));
+
+        svc.complete(req);
+
+        var captor = ArgumentCaptor.forClass(ProviderRequest.class);
+        verify(provider).complete(captor.capture());
+        return captor.getValue();
+    }
+
+    @Test void completeWithoutToolsPassesNullToolsAndNullToolChoice() {
+        var captured = captureProviderRequestFor(completeReq());
+        assertThat(captured.tools()).isNull();
+        assertThat(captured.toolChoice()).isNull();
+    }
+
+    @Test void completeForwardsToolsAndToolChoiceVerbatim() {
+        var tool = Map.<String, Object>of(
+                "name", "submit_mailings",
+                "description", "Deliver the grouping.",
+                "input_schema", Map.of("type", "object"));
+        var choice = Map.<String, Object>of("type", "tool", "name", "submit_mailings");
+        var captured = captureProviderRequestFor(new CompleteRequest(
+                "writer", "test_purpose", "test_realm", "sys",
+                List.of(Map.of("role", "user", "content", "hi")),
+                null, null, null, List.of(tool), choice));
+        assertThat(captured.tools()).containsExactly(tool);
+        assertThat(captured.toolChoice()).isEqualTo(choice);
     }
 
     private VisionRequest visionReq() {
