@@ -296,5 +296,32 @@ class BedrockProviderTest {
     void leavesToolChoiceUnsetWhenNull() {
         var captured = captureConverseRequest(toolReq(null));
         assertThat(captured.toolConfig().toolChoice()).isNull();
+        assertThat(captured.toolConfig().tools()).hasSize(1);
+    }
+
+    @Test
+    void forwardsAnyToolChoice() {
+        var captured = captureConverseRequest(toolReq(Map.of("type", "any")));
+        assertThat(captured.toolConfig().toolChoice().any()).isNotNull();
+    }
+
+    @Test
+    void forwardsAutoToolChoice() {
+        var captured = captureConverseRequest(toolReq(Map.of("type", "auto")));
+        assertThat(captured.toolConfig().toolChoice().auto()).isNotNull();
+    }
+
+    @Test
+    void leavesToolChoiceUnsetForNonMapChoice() {
+        var captured = captureConverseRequest(toolReq("forceit"));
+        assertThat(captured.toolConfig().toolChoice()).isNull();
+        assertThat(captured.toolConfig().tools()).hasSize(1);
+    }
+
+    @Test
+    void leavesToolChoiceUnsetForToolChoiceWithoutName() {
+        var captured = captureConverseRequest(toolReq(Map.of("type", "tool")));
+        assertThat(captured.toolConfig().toolChoice()).isNull();
+        assertThat(captured.toolConfig().tools()).hasSize(1);
     }
 }
