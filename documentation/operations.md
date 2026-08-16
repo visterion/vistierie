@@ -308,6 +308,68 @@ Log levels are env-tunable (default `INFO`): `VISTIERIE_LOG_LLM` for the gateway
 (`de.vesterion.vistierie.agent.runner`). Set `WARN` to quiet the per-call lines or
 `DEBUG` for more detail.
 
+### Log retention (14 days)
+
+Note first: `runs`, `run_tool_calls` and `llm_calls` already persist durably in
+Postgres, so this file-based retention is a secondary, coarser safety net for
+whatever those tables don't capture (framework-level warnings, startup/shutdown,
+stack traces) — the audit trail's primary source of truth stays the database.
+
+Alongside stdout, the app also writes to a rolling log file: the active day's
+`vistierie.log` is plain text, capped at 100 MB — once it hits that size it
+rotates within the same day into a gzip-compressed
+`vistierie.<date>.<index>.log.gz` (the index starts at 0 and increments per
+same-day rollover). Rotation is triggered by two independent conditions: the
+100 MB size cap described above, and a daily rollover at midnight (visible
+in the `<date>` component of the rotated filename) regardless of size. Rotated
+files are kept for 14 days subject to a 2 GB total cap across all of them —
+if the cap is reached, the oldest rotated files are dropped first, so
+retention can fall below 14 days sooner than the 14-day figure alone
+suggests. The directory is named by `VISTIERIE_LOG_DIR` (default `logs`; see
+[configuration.md](./configuration.md#logging)).
+
+By itself, the application only writes this rolling file **inside the
+container's own filesystem** — that alone does *not* survive the container
+being recreated (redeploys, crash-restarts) any better than `docker logs`
+does. Making it durable is a **deployment-side** responsibility with two
+required edits to the compose service, not just setting an env var:
+
+1. Bind-mount a directory on the host into the container at the path you
+   intend to log to.
+2. Add `VISTIERIE_LOG_DIR` to that service's `environment:` list, pointed at
+   that same in-container mount path.
+
+> **Trap:** if the deployed compose file lists `environment:` entries
+> explicitly (as opposed to using `env_file`), setting `VISTIERIE_LOG_DIR` in
+> `.env` alone does **nothing** — Compose only injects variables that are
+> named in the compose file. The container keeps writing inside its own
+> writable layer, keeps rotating and enforcing the 14-day/2 GB budget exactly
+> as configured, and it all still gets silently destroyed on the next
+> `up -d`/recreate, while nothing in the app's own behavior signals that the
+> durability promise wasn't actually delivered. This project has already lost
+> time to this exact class of mistake once before (an unrelated
+> agent-tunable `.env` change that did nothing because the variable wasn't
+> named in the compose file) — don't rediscover it here.
+>
+> Without the mount, the 100 MB active file plus the up-to-2 GB archive
+> budget simply accumulate in the container's writable layer instead of on
+> the host, consuming the container's own storage until it is recreated.
+
+`docker logs` keeps working exactly as before for live tailing; the file (once
+the mount and env var are both wired up) is the durable, restart-surviving
+source to reach for when a postmortem needs to look further back than the
+currently running container's lifetime.
+
+Once durable retention is wired up, check the mounted directory's size after
+one week and again after three, to confirm the 2 GB cap is not biting sooner
+than the 14-day figure implies (`$LOG_DIR` is the host directory mounted at
+`VISTIERIE_LOG_DIR`):
+
+```bash
+du -sh "$LOG_DIR"
+ls "$LOG_DIR" | wc -l
+```
+
 ---
 
 ## Backup and restore ordering

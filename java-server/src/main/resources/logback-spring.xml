@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  CONSOLE stays as Spring Boot had it (`docker logs` must keep working); FILE answers the
+  actual requirement, because `docker logs` belongs to the container and dies when a
+  deploy recreates it. A bind-mounted host directory outlives the container.
+
+  The FILE appender uses SizeAndTimeBasedRollingPolicy, not a plain time-based policy:
+  totalSizeCap only counts already-archived files, so with a plain time-based policy
+  today's active file would have no size bound until midnight, and a retry storm could
+  fill the host disk before the cap ever fires. maxFileSize bounds the active file too.
+-->
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+
+    <property name="LOG_DIR" value="${VISTIERIE_LOG_DIR:-logs}"/>
+
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/vistierie.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/vistierie.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>100MB</maxFileSize>
+            <maxHistory>14</maxHistory>
+            <!-- NOTE when this cap bites, Logback drops the OLDEST files and retention
+                 silently falls below 14 days, hence the mandatory size check after one
+                 and three weeks in the runbook. -->
+            <totalSizeCap>2GB</totalSizeCap>
+        </rollingPolicy>
+        <encoder>
+            <pattern>${FILE_LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="FILE"/>
+    </root>
+</configuration>

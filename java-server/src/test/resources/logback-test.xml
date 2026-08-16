@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Test-scope Logback config: CONSOLE only. Without this, @SpringBootTest contexts would
+  fall back to logback-spring.xml and honour an ambient VISTIERIE_LOG_DIR, writing test
+  output into a production log directory. LogbackRetentionTest loads logback-spring.xml
+  explicitly by resource name, so this file does not shadow it for that test.
+-->
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+</configuration>
