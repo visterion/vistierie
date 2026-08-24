@@ -7,7 +7,7 @@
         <java.version>25</java.version>
         <testcontainers.version>1.21.4</testcontainers.version>
         <wiremock.version>3.13.2</wiremock.version>
-        <aws.sdk.version>2.49.3</aws.sdk.version>
+        <aws.sdk.version>2.54.1</aws.sdk.version>
     </properties>
     <dependencyManagement>
         <dependencies>
@@ -23,7 +23,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>4.1.0</version>
+        <version>4.1.1</version>
         <relativePath/>
     </parent>
     <groupId>de.vesterion</groupId>
@@ -104,7 +104,7 @@
         <dependency>
             <groupId>com.networknt</groupId>
             <artifactId>json-schema-validator</artifactId>
-            <version>3.0.6</version>
+            <version>3.0.7</version>
         </dependency>
         <dependency>
             <groupId>org.awaitility</groupId>
@@ -130,7 +130,7 @@
         <dependency>
             <groupId>io.modelcontextprotocol.sdk</groupId>
             <artifactId>mcp-core</artifactId>
-            <version>2.0.0</version>
+            <version>2.0.1</version>
         </dependency>
         <!-- Jackson 3 JSON provider for the MCP SDK (discovered via SPI). Under Spring
              Boot 4 the Jackson 2 classpath is gone, so the SDK needs the jackson3
@@ -138,7 +138,7 @@
         <dependency>
             <groupId>io.modelcontextprotocol.sdk</groupId>
             <artifactId>mcp-json-jackson3</artifactId>
-            <version>2.0.0</version>
+            <version>2.0.1</version>
         </dependency>
     </dependencies>
     <build>
