@@ -551,7 +551,7 @@ function deriveType(node: unknown): z.ZodTypeAny {
  *
  * Placement is load-bearing in the other direction too: it sits AFTER
  * `.optional()` at the top level only, and never inside `deriveType`. Measured
- * on zod 4.4.3, `z.toJSONSchema(t, {io:"input"})` of `x.optional().catch(undefined)`
+ * on zod 4.4.3 and 4.5.4, `z.toJSONSchema(t, {io:"input"})` of `x.optional().catch(undefined)`
  * is byte-identical to that of `x.optional()`, nested types included — the
  * advertised array items, object members, enum members and `"integer"` all
  * survive. A `.catch()` that ever flattened the schema to `{}` would silently
