@@ -201,9 +201,9 @@ describe("deriveShape", () => {
       properties: { note: { type: ["string", "null"] } },
     });
 
-    expect(advertised(shape.note)).toEqual({
-      anyOf: [{ type: "string" }, { type: "null" }],
-    });
+    // zod >= 4.5 compacts a union of bare type assertions into a `type` list
+    // (equivalent to `anyOf: [{type:"string"},{type:"null"}]` in every draft).
+    expect(advertised(shape.note)).toEqual({ type: ["string", "null"] });
   });
 
   it("falls back to any for a mixed-type enum", () => {
