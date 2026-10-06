@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { fakeSdkMcpServer } from "./fake-mcp-server.js";
 
 const queryMock = vi.fn();
 // The in-process MCP server + tool factories from the Agent SDK. The mock
 // captures the registered tools so a test can invoke a tool's handler directly
 // (the real SDK would invoke it when the model emits a tool_use).
-const createSdkMcpServerMock = vi.fn((opts: any) => ({ type: "sdk", name: opts.name, instance: {} }));
+const createSdkMcpServerMock = vi.fn((opts: any) => fakeSdkMcpServer(opts));
 const toolMock = vi.fn((name: string, description: string, inputSchema: any, handler: any) => ({
   name,
   description,

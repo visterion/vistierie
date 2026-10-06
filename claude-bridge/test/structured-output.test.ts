@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { fakeSdkMcpServer } from "./fake-mcp-server.js";
 
 const queryMock = vi.fn();
 // The tool path also reaches for the SDK's in-process MCP server factories, so all three
 // exports must be mocked — same harness as test/complete-tools.test.ts. The `any` parameters
 // mirror that file's existing style.
-const createSdkMcpServerMock = vi.fn((opts: any) => ({ type: "sdk", name: opts.name, instance: {} }));
+const createSdkMcpServerMock = vi.fn((opts: any) => fakeSdkMcpServer(opts));
 const toolMock = vi.fn((name: string, description: string, inputSchema: any, handler: any) => ({
   name,
   description,

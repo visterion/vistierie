@@ -500,8 +500,13 @@ function deriveType(node: unknown): z.ZodTypeAny {
   switch (s.type) {
     case "object": {
       const props = asNode(s.properties);
-      // No declared properties: accept any object rather than an empty one.
-      if (!props) return z.record(z.string(), z.any());
+      // No declared properties: accept any object rather than an empty one. A loose
+      // object with no members, NEVER `z.record`: zod >= 4.5's record processor needs a
+      // `deferred` list that the Agent SDK's bundled JSON-schema driver never creates, so
+      // a record crashes the MCP `tools/list` and the CLI silently starts with no tools
+      // at all (mcp-tools-list.test.ts). Advertised as
+      // `{"type":"object","properties":{},"additionalProperties":{}}` — any keys.
+      if (!props) return z.looseObject({});
       return z.looseObject(
         Object.fromEntries(Object.entries(props).map(([k, v]) => [k, deriveType(v).optional()])),
       );
@@ -590,6 +595,103 @@ function buildTool(def: ToolDefWire, matcher: SessionRuntime["matcher"]) {
   });
 }
 
+type SdkMcpServer = ReturnType<typeof createSdkMcpServer>;
+
+const TOOLS_LIST_TIMEOUT_MS = 5000;
+
+/**
+ * Answer one MCP `tools/list` request from an in-process SDK MCP server and return the
+ * advertised tool names. `tools/list` is where the Agent SDK serialises every tool's Zod
+ * shape to JSON Schema with its own bundled driver, so this exercises exactly the code the
+ * CLI runs when it loads the tools. Throws with the server's error message if listing fails.
+ *
+ * Connects a throwaway in-memory transport and closes it again before returning, on every
+ * path: an MCP server accepts one transport at a time, and the SDK connects its own to the
+ * same server when the session starts. Must therefore run BEFORE `query()`.
+ */
+export async function listMcpToolNames(server: SdkMcpServer): Promise<string[]> {
+  const requestId = 1;
+  let settle!: (msg: Record<string, any>) => void;
+  const reply = new Promise<Record<string, any>>((resolve) => {
+    settle = resolve;
+  });
+  const transport = {
+    onmessage: undefined as ((msg: unknown) => void) | undefined,
+    onclose: undefined as (() => void) | undefined,
+    onerror: undefined as ((err: Error) => void) | undefined,
+    async start(): Promise<void> {},
+    async close(): Promise<void> {
+      transport.onclose?.();
+    },
+    async send(msg: unknown): Promise<void> {
+      const m = asNode(msg);
+      if (m?.id === requestId) settle(m);
+    },
+  };
+  let timer: NodeJS.Timeout | undefined;
+  // The transport is structurally an MCP `Transport`; that type lives in a transitive
+  // dependency the bridge does not import directly.
+  await server.instance.connect(transport as any);
+  try {
+    transport.onmessage!({ jsonrpc: "2.0", id: requestId, method: "tools/list", params: {} });
+    const msg = await Promise.race([
+      reply,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`tools/list did not answer within ${TOOLS_LIST_TIMEOUT_MS}ms`)),
+          TOOLS_LIST_TIMEOUT_MS,
+        );
+      }),
+    ]);
+    const error = asNode(msg.error);
+    if (error) throw new Error(String(error.message ?? "tools/list failed"));
+    const tools = asNode(msg.result)?.tools;
+    if (!Array.isArray(tools)) throw new Error("tools/list returned no tool array");
+    return tools.map((t) => String(asNode(t)?.name));
+  } finally {
+    clearTimeout(timer);
+    await server.instance.close();
+  }
+}
+
+/**
+ * Fail the request loudly unless every requested tool is actually advertised.
+ *
+ * When the SDK's MCP server cannot list its tools, the CLI swallows the error and starts the
+ * session with NO tools. The model then writes its tool calls as plain text, the bridge sees
+ * no `tool_use`, returns `end_turn`, and the caller gets a green run that did nothing — no
+ * log line anywhere. Checking up front turns that into a 502, which Vistierie treats as a
+ * provider failure and fails over on, instead of a silently empty result.
+ *
+ * `expected` are the bare names from the request, not from the built tools, so a tool that
+ * ends up registered under another name counts as missing too.
+ */
+async function assertToolsListed(
+  server: SdkMcpServer,
+  expected: string[],
+  model: string,
+): Promise<void> {
+  let listed: string[];
+  try {
+    listed = await listMcpToolNames(server);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    const detail =
+      `MCP tools/list failed, the session would start without tools ` +
+      `(expected ${expected.map((n) => MCP_PREFIX + n).join(", ")}): ${reason}`;
+    console.error(`tools_unavailable model=${model} ${detail}`);
+    throw new BridgeError(502, "tools_unavailable", detail);
+  }
+  const missing = expected.filter((n) => !listed.includes(n));
+  if (missing.length > 0) {
+    const detail =
+      `MCP server does not advertise ${missing.map((n) => MCP_PREFIX + n).join(", ")} ` +
+      `(listed: ${listed.join(", ") || "none"})`;
+    console.error(`tools_unavailable model=${model} ${detail}`);
+    throw new BridgeError(502, "tools_unavailable", detail);
+  }
+}
+
 async function completeTool(
   req: CompleteRequest,
   opts: CompleteOptions,
@@ -612,7 +714,7 @@ async function completeTool(
   return startSession(req, opts, store);
 }
 
-function startSession(
+async function startSession(
   req: CompleteRequest,
   opts: CompleteOptions,
   store: SessionStore,
@@ -628,6 +730,10 @@ function startSession(
     version: "1.0.0",
     tools: toolDefs.map((t) => buildTool(t, matcher)),
   });
+  // Before `query()`: nothing is spawned or parked for a session that could not use tools.
+  if (toolDefs.length > 0) {
+    await assertToolsListed(mcpServer, toolDefs.map((t) => t.name), req.model);
+  }
 
   const options: Options = {
     model: req.model,

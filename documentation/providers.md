@@ -142,6 +142,12 @@ and reachable at `base-url`.
 - Any other bridge/SDK failure (e.g. `auth_expired`, transport errors, malformed
   response) is surfaced as `ProviderException(502, <code>, ...)` so it behaves like
   a normal upstream outage for routing/fallback purposes.
+- On the agentic tool path the bridge checks, before the SDK session starts, that its
+  in-process MCP server actually lists every requested tool. If listing fails or a
+  tool is missing, it answers `502 tools_unavailable` (and logs the missing
+  `mcp__vistierie__<name>` tools) instead of starting a session without tools —
+  in which the model would only write its tool calls as text and the run would end
+  without having called anything. The 502 lets a routing rule's fallback take over.
 - A `subscription_exhausted` 429 also opens the global cooldown described in
   `cooldown-seconds` below: further calls whose primary provider is
   `claude-subscription` skip the bridge entirely and go straight to the
