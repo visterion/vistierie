@@ -58,10 +58,18 @@ afterEach(() => {
 
 describe("tool-mode session start guard", () => {
   it("fails with 502 tools_unavailable when the MCP server cannot list its tools", async () => {
-    // The exact production failure: a Zod record in a tool shape, which the SDK's bundled
-    // JSON-schema driver cannot serialise with zod >= 4.5 — tools/list throws.
+    // Originally reproduced with a Zod record field (`z.record(z.string(), z.any())`), which
+    // the SDK's bundled JSON-schema driver up to 0.3.260 could not serialise: tools/list threw
+    // "Cannot read properties of undefined (reading 'push')" for the whole server. Verified
+    // against claude-agent-sdk 0.3.292 (2026-10-07): that record shape now serialises fine and
+    // the tool is listed. The SDK instead drops a tool with a genuinely unconvertible shape
+    // (e.g. a field typed `z.bigint()`) from tools/list with a console warning
+    // (`CLAUDE_SDK_MCP_TOOL_SCHEMA_UNCONVERTIBLE`) rather than throwing — so the danger this
+    // guard exists for (a tool silently missing from the list) still occurs, just via the
+    // "missing" branch of `assertToolsListed` instead of the "listing failed" branch. This
+    // tool shape reproduces that current failure mode.
     toolOverrides.set("submit_result", (actual) =>
-      actual.tool("submit_result", "d", { x: z.record(z.string(), z.any()).optional() }, async () => ({
+      actual.tool("submit_result", "d", { x: z.bigint().optional() }, async () => ({
         content: [],
       })),
     );
@@ -72,9 +80,8 @@ describe("tool-mode session start guard", () => {
     );
 
     expect(err).toMatchObject({ status: 502, code: "tools_unavailable" });
-    expect(err.message).toContain("mcp__vistierie__fetch_list");
     expect(err.message).toContain("mcp__vistierie__submit_result");
-    expect(err.message).toContain("Cannot read properties of undefined");
+    expect(err.message).toContain("listed:");
     // No CLI child is spawned and no session is parked for a run that could not use tools.
     expect(queryMock).not.toHaveBeenCalled();
     expect(store.size()).toBe(0);
