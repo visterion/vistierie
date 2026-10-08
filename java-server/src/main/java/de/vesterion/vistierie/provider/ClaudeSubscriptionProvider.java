@@ -152,12 +152,49 @@ public class ClaudeSubscriptionProvider implements LlmProvider {
                 Math.max(0, u.path("cache_read_input_tokens").asInt(0)));
         JsonNode contentBlocks = resp.has("content_blocks") ? resp.get("content_blocks") : null;
         String sessionId = resp.has("session_id") ? resp.path("session_id").asText(null) : null;
+        // `model` keeps meaning what it always has: the provider echo (resp.model), unchanged.
+        // `requested_model` is the new-bridge marker: an old bridge echoes `model` = req.model
+        // (complete.ts:862), which is indistinguishable from a real served-model observation, so
+        // servedModel is only trusted when `requested_model` is also present (current bridge,
+        // message_start of the turn's last API message).
+        String model = resp.path("model").asText("");
+        String servedModel = resp.has("requested_model") ? model : null;
         return new ProviderResponse(
                 resp.path("text").asText(""),
                 resp.path("stop_reason").asText("end_turn"),
                 usage,
-                resp.path("model").asText(""),
+                model,
                 contentBlocks,
-                sessionId);
+                sessionId,
+                servedModel,
+                parseRateLimit(resp.get("rate_limit")));
+    }
+
+    /**
+     * Tolerant: a missing or non-object {@code rate_limit} is null, unknown utilisations are
+     * null, and a {@code rate_limit} whose status and both utilisations are all absent/null
+     * carries no information, so it is null too rather than {@code RateLimitInfo(null,null,null)}.
+     */
+    private static RateLimitInfo parseRateLimit(JsonNode rl) {
+        if (rl == null || !rl.isObject()) return null;
+        String status = rl.path("status").isString() ? rl.path("status").asText() : null;
+        Double fiveHour = fraction(rl.get("five_hour_utilization"));
+        Double sevenDay = fraction(rl.get("seven_day_utilization"));
+        if (status == null && fiveHour == null && sevenDay == null) return null;
+        return new RateLimitInfo(status, fiveHour, sevenDay);
+    }
+
+    /**
+     * Tolerant numeric extraction, guarded against the DB column's range: {@code quota_five_hour_util}
+     * / {@code quota_seven_day_util} are {@code NUMERIC(5,4)}, so a value outside [0, 9.9999] (or
+     * NaN/infinite) would fail the INSERT and lose the whole llm_calls cost row. Out-of-range becomes
+     * null rather than risking that.
+     */
+    private static Double fraction(JsonNode n) {
+        if (n == null || !n.isNumber()) return null;
+        double v = n.asDouble();
+        if (Double.isNaN(v) || Double.isInfinite(v)) return null;
+        if (v < 0 || v > 9.9999) return null;
+        return v;
     }
 }

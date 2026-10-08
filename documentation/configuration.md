@@ -59,6 +59,7 @@ fully flushed whenever tenant auth state changes (tenant create, kill, clear-kil
 | `vistierie.claude-subscription.timeout-seconds` | — | `300` | HTTP read timeout, in seconds |
 | — | `BRIDGE_QUERY_TIMEOUT_MS` | `290000` | Sidecar-side cap on a single Agent SDK query, in ms. Keep it below `timeout-seconds` above so the bridge, not the caller, times out first |
 | — | `BRIDGE_SESSION_TTL_MS` | `300000` | Sidecar idle timeout for a resumable session, in ms (hard lifetime cap is a fixed 30 min) |
+| — | `BRIDGE_USAGE_DRAIN_MS` | `30000` | Sidecar cap, in ms, on reading a tool turn on to its `message_stop` so its final usage and parallel `tool_use` blocks are reported with it. The per-query `BRIDGE_QUERY_TIMEOUT_MS` stays the hard ceiling |
 | — | `CLAUDE_CODE_OAUTH_TOKEN` | — | Claude subscription OAuth token. Read by the `claude-bridge` sidecar, not by the Java service |
 | `vistierie.claude-subscription.cooldown-seconds` | `CLAUDE_SUBSCRIPTION_COOLDOWN_SECONDS` | `3600` | On a `subscription_exhausted` 429, opens a global in-memory cooldown for this many seconds; while open, calls whose primary provider is `claude-subscription` skip it and route straight to the configured fallback instead of re-attempting. Resets on restart. `0` or negative disables the cooldown (each call re-attempts + fails over per-call). |
 

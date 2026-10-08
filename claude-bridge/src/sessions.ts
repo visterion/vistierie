@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { BridgeError } from "./types.js";
+import type { UsageAccumulator } from "./usage.js";
 
 export interface PendingTool {
   id: string;
@@ -27,6 +28,14 @@ export interface SessionRuntime {
   };
   /** Resolves the prompt generator's tail await so the SDK can shut down. */
   closeInput: () => void;
+  /** Per-session usage accumulator fed with every SDK message the pump consumes. */
+  usage: UsageAccumulator;
+  /**
+   * An iterator read left in flight by a timed-out usage drain (or a message the drain pushed
+   * back). The next pump consumes it before calling `iterator.next()` again, so no message is
+   * ever skipped.
+   */
+  pendingNext?: Promise<IteratorResult<Record<string, any>>>;
 }
 
 export interface Session {

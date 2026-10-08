@@ -57,6 +57,10 @@ llm_calls
   run_id                       TEXT FK → runs.id (nullable, ON DELETE SET NULL)  -- V2
   batch_id                     TEXT      -- nullable, V4
   shadow_cost_micros           BIGINT    -- V12, nullable; what a subscription-served call would have cost via the API
+  served_model                 TEXT      -- V16, nullable; model the provider actually served (claude-bridge), `model` stays the routed one
+  quota_five_hour_util         NUMERIC(5,4) -- V16, nullable; Max subscription 5-hour utilisation (0..1) as of the turn
+  quota_seven_day_util         NUMERIC(5,4) -- V16, nullable; Max subscription 7-day utilisation (0..1) as of the turn
+  quota_status                 TEXT      -- V16, nullable; bridge rate_limit status (allowed | allowed_warning | rejected | unknown)
   created_at                   TIMESTAMPTZ
 
 tenant_budgets

@@ -185,4 +185,28 @@ class CostAggregationRepositoryTest extends PostgresTestBase {
         assertThat(byAgent.get("(unattributed)").calls()).isEqualTo(1);
         assertThat(byAgent.get("(unattributed)").costMicros()).isEqualTo(100);
     }
+
+    @Test
+    void servedModelDoesNotSplitTheRoutedModelGroup() {
+        // llm_calls.model stays the ROUTED model; a served_model on some rows must not change
+        // grouping or filtering by model (spec decision M2).
+        var t0 = Instant.parse("2026-05-10T10:00:00Z");
+        seedCall(tA, "p", null, "claude-subscription", "opus", 0, 10, t0.plus(1, ChronoUnit.MINUTES));
+        seedCall(tA, "p", null, "claude-subscription", "opus", 0, 20, t0.plus(2, ChronoUnit.MINUTES));
+        jdbc.sql("UPDATE vistierie.llm_calls SET served_model = 'claude-opus-5-5' "
+                + "WHERE tenant_id = ? AND input_tokens = 10").param(tA).update();
+
+        var grouped = repo.query(new CostAggregationRepository.Query(
+                t0, t0.plus(1, ChronoUnit.HOURS), "none", List.of("model"),
+                nameA, null, null, null, null, null, null));
+        assertThat(grouped).hasSize(1);
+        assertThat(grouped.get(0).groupValues().get("model")).isEqualTo("opus");
+        assertThat(grouped.get(0).calls()).isEqualTo(2);
+
+        var filtered = repo.query(new CostAggregationRepository.Query(
+                t0, t0.plus(1, ChronoUnit.HOURS), "none", List.of("tenant"),
+                nameA, null, null, null, "opus", null, null));
+        assertThat(filtered).hasSize(1);
+        assertThat(filtered.get(0).calls()).isEqualTo(2);
+    }
 }

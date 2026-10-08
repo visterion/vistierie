@@ -3,7 +3,8 @@
 Routing rules live in Postgres (`vistierie.routing_rules`) and are managed
 exclusively by operators via the admin REST API. Tenants have read-only
 visibility through their own audit trail (`llm_calls.provider`,
-`llm_calls.model`).
+`llm_calls.model`; for `claude-subscription` the model the CLI actually served
+is in `llm_calls.served_model`).
 
 ## Resolution algorithm
 
@@ -46,7 +47,9 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" \
 After this rule exists, every `/llm/complete` call from `hivemem` with
 `realm: "medical"` resolves to `(provider=ollama, model=llama-3.1-70b)`,
 regardless of any `model` override in the request body. The `llm_calls`
-audit row records the actual provider+model used.
+audit row records the actual provider and the routed model used (`model`);
+when the provider reports which model it served (e.g. a family alias like
+`opus` resolved to `claude-opus-5-5`), that id is in `served_model`.
 
 ## Priority conventions
 

@@ -1,7 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 // NOTE: no vi.mock here — this file drives the REAL @anthropic-ai/claude-agent-sdk
 // (and the Claude Code CLI child it spawns) against a live Claude subscription.
 import { complete } from "../src/complete.js";
+import { SessionStore } from "../src/sessions.js";
 
 // Regression guard for the plain-path maxTurns fix
 // (docs/bugs/2026-07-19-claude-bridge-maxturns-plain-path.md).
@@ -36,6 +37,45 @@ describe.skipIf(!LIVE)("complete — live subscription (maxTurns regression guar
       expect(typeof res.text).toBe("string");
       expect(res.text.length).toBeGreaterThan(0);
       expect(res.stop_reason).toBe("end_turn");
+    },
+    100_000,
+  );
+});
+
+describe.skipIf(!LIVE)("complete — live subscription (per-turn usage, spec 2026-10-08)", () => {
+  it(
+    "the first tool turn reports real output tokens and the served model id",
+    async () => {
+      const warn = vi.spyOn(console, "warn");
+      const store = new SessionStore();
+      const res = await complete(
+        {
+          model: "haiku", // family alias: the bridge must report the RESOLVED id
+          max_tokens: 512,
+          effort: "off",
+          system: "You must call the ping tool exactly once before answering.",
+          messages: [{ role: "user", content: "Call the ping tool with value 1." }],
+          tools: [
+            {
+              name: "ping",
+              description: "Ping with a number.",
+              input_schema: { type: "object", properties: { value: { type: "number" } } },
+            },
+          ],
+        },
+        { sessions: store, timeoutMs: 90_000 },
+      );
+      try {
+        expect(res.stop_reason).toBe("tool_use");
+        expect(res.usage.output_tokens).toBeGreaterThan(0);
+        expect(res.model).toMatch(/^claude-/);
+        expect(res.requested_model).toBe("haiku");
+        // Proves the drain ends at message_stop and never stalls behind the parked MCP handler.
+        expect(warn.mock.calls.some((c) => String(c[0]).includes("usage_drain_timeout"))).toBe(false);
+      } finally {
+        warn.mockRestore();
+        if (res.session_id) store.close(res.session_id);
+      }
     },
     100_000,
   );

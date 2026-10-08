@@ -12,6 +12,7 @@ import {
 } from "./types.js";
 import type { PendingTool, Session, SessionRuntime, SessionStore, ToolResult } from "./sessions.js";
 import { API_ERROR, AUTH, QUOTA, apiErrorFrom, clampApiStatus, mapSdkError } from "./errors.js";
+import { UsageAccumulator, usageFrom, zeroUsage } from "./usage.js";
 
 /**
  * Flatten the (opaque) Vistierie message history into one content-block list
@@ -67,6 +68,13 @@ export interface CompleteOptions {
    */
   timeoutMs?: number;
   /**
+   * Upper bound (ms) on draining a tool turn to its `message_stop` after the `tool_use`
+   * snapshot, so the message's final usage (`message_delta`) and any parallel `tool_use`
+   * snapshots land in the same response. Defaults to `BRIDGE_USAGE_DRAIN_MS` or 30000. Measured
+   * real gap: ~19 ms. The per-call `timeoutMs` stays the hard ceiling (504) above it.
+   */
+  drainTimeoutMs?: number;
+  /**
    * Session store for tool mode. Required when the request carries `tools` or a
    * `session_id`; unused for plain completions.
    */
@@ -79,13 +87,40 @@ function resolveTimeoutMs(override?: number): number {
   return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : 290000;
 }
 
-function zeroUsage(): CompleteResponse["usage"] {
-  return {
-    input_tokens: 0,
-    output_tokens: 0,
-    cache_creation_input_tokens: 0,
-    cache_read_input_tokens: 0,
-  };
+function resolveDrainTimeoutMs(override?: number): number {
+  if (typeof override === "number") return override;
+  const fromEnv = Number(process.env.BRIDGE_USAGE_DRAIN_MS);
+  return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : 30000;
+}
+
+/** The usage/model/quota fields every successful response carries (spec §3.1.4/§3.1.5). */
+type TurnReport = Pick<CompleteResponse, "usage" | "model" | "requested_model" | "rate_limit">;
+
+/**
+ * Close out one HTTP turn: report the messages that closed during it — never `result.usage`,
+ * which is the session total and would double-count tool turns. Without any closed message
+ * (old CLI, option ignored) fall back to the result's usage when one was consumed, else zeros,
+ * and say so once per session. Fallback and log apply only while the accumulator has NEVER closed
+ * a message: once earlier turns reported their deltas, result.usage (the session total) would
+ * double-count them, so an empty later turn reports zeros (turn.usage) and logs nothing.
+ * `rate_limit` is the latest event of the request/session (absent when none was seen).
+ */
+function finishTurn(
+  acc: UsageAccumulator,
+  req: CompleteRequest,
+  result?: Record<string, any>,
+): TurnReport {
+  const turn = acc.takeTurn();
+  let usage = turn.usage;
+  if (turn.closed === 0 && !acc.hasEverClosed()) {
+    // Events really missing: nothing has ever closed in this session.
+    usage = result ? usageFrom(result.usage) : zeroUsage();
+    if (acc.claimMissingLog()) console.warn(`usage_events_missing model=${req.model}`);
+  }
+  const report: TurnReport = { usage, model: turn.model ?? req.model, requested_model: req.model };
+  const rateLimit = acc.latestRateLimit();
+  if (rateLimit) report.rate_limit = rateLimit;
+  return report;
 }
 
 /** Apply effort / max_tokens knobs shared by plain and tool paths. */
@@ -111,12 +146,11 @@ function applyModelKnobs(options: Options, req: CompleteRequest): void {
  * payload must never mask an exhausted subscription or an expired token. */
 function resultToResponse(
   msg: Record<string, any>,
-  model: string,
+  report: () => TurnReport,
   structuredToolName?: string,
 ): CompleteResponse {
   if (msg.subtype === "success") {
     const text = String(msg.result ?? "");
-    const outputTokens = msg.usage?.output_tokens ?? 0;
 
     // 1. Kontingent-Erschoepfung. Neu ist NUR der Praefix-Ausschluss: der transiente 429
     //    der CLI traegt "API Error:" UND matcht QUOTA (sein Text enthaelt "not your usage
@@ -153,12 +187,9 @@ function resultToResponse(
     const fromText = apiErrorFrom(text);
     if (fromText) throw fromText;
 
-    const usage = {
-      input_tokens: msg.usage?.input_tokens ?? 0,
-      output_tokens: outputTokens,
-      cache_creation_input_tokens: msg.usage?.cache_creation_input_tokens ?? 0,
-      cache_read_input_tokens: msg.usage?.cache_read_input_tokens ?? 0,
-    };
+    // REPORTED usage is this turn's own (message_delta sums, see finishTurn). The quota gate
+    // above deliberately keeps reading result.usage — exhaustion is signalled there (spec m5).
+    const turn = report();
 
     if (structuredToolName !== undefined) {
       // `subtype: "success"` with no structured_output is real upstream behaviour
@@ -183,10 +214,10 @@ function resultToResponse(
         name: structuredToolName,
         input: structured,
       };
-      return { text: "", stop_reason: "tool_use", model, usage, content_blocks: [block] };
+      return { text: "", stop_reason: "tool_use", ...turn, content_blocks: [block] };
     }
 
-    return { text, stop_reason: "end_turn", model, usage };
+    return { text, stop_reason: "end_turn", ...turn };
   }
   // SDKResultError carries its error text in `errors: string[]` (no `result` field).
   const errorText =
@@ -327,6 +358,9 @@ async function completePlain(
     allowedTools: [],
     settingSources: [],
     abortController: controller,
+    // Stream events carry the served model (message_start) and each API message's final
+    // usage (message_delta) — the only correct per-turn usage source (spec §2, E1/E2/E6).
+    includePartialMessages: true,
   };
   applyModelKnobs(options, req);
   if (structuredTool) {
@@ -346,9 +380,11 @@ async function completePlain(
 
   async function consume(): Promise<CompleteResponse> {
     const q = query({ prompt: promptStream(), options });
+    const acc = new UsageAccumulator();
     for await (const msg of q as AsyncIterable<Record<string, any>>) {
+      acc.observe(msg);
       if (msg.type !== "result") continue;
-      return resultToResponse(msg, req.model, structuredTool?.name);
+      return resultToResponse(msg, () => finishTurn(acc, req, msg), structuredTool?.name);
     }
     throw new BridgeError(500, "no_result", "SDK stream ended without a result message");
   }
@@ -748,6 +784,8 @@ async function startSession(
     tools: [],
     allowedTools: toolDefs.map((t) => `${MCP_PREFIX}${t.name}`),
     abortController: controller,
+    // See completePlain: per-turn usage and the served model come from stream events.
+    includePartialMessages: true,
   };
   applyModelKnobs(options, req);
 
@@ -777,7 +815,7 @@ async function startSession(
       abort: controller,
       iterator,
       pending,
-      runtime: { matcher, closeInput },
+      runtime: { matcher, closeInput, usage: new UsageAccumulator() },
     });
   } catch (err) {
     // At cap (or any create failure): abort so the spawned CLI child is torn down.
@@ -829,6 +867,75 @@ function continueSession(
   return runWithGuards(req, opts, store, session);
 }
 
+/** Wire blocks of an assistant message, MCP prefix stripped from tool_use names. */
+function wireBlocks(msg: Record<string, any>): ContentBlockWire[] {
+  return ((msg.message?.content ?? []) as ContentBlockWire[]).map((b) =>
+    b.type === "tool_use" ? { ...b, name: stripPrefix(String(b.name)) } : b,
+  );
+}
+
+/** Next SDK message, honouring a read a timed-out drain left in flight (or pushed back). */
+function nextMessage(session: Session): Promise<IteratorResult<Record<string, any>>> {
+  const rt = session.runtime!;
+  const pending = rt.pendingNext;
+  rt.pendingNext = undefined;
+  return pending ?? session.iterator.next();
+}
+
+/**
+ * Keep consuming after a tool_use snapshot until the open API message's `message_stop`.
+ *
+ * The CLI emits `message_delta` (the message's final usage) and further parallel `tool_use`
+ * snapshots (same message id) AFTER the first snapshot (spec §3.1, E7), while the MCP handler
+ * is still parked — message_stop came 19 ms later on the probe, so there is no deadlock. Every
+ * new tool_use block is appended to `blocks` and registered exactly like the first. A
+ * `result`/end of stream is pushed back for the regular pump loop. On timeout the open message
+ * is closed with the usage seen so far, and the in-flight read is kept for the next pump.
+ */
+async function drainToMessageStop(
+  req: CompleteRequest,
+  session: Session,
+  blocks: ContentBlockWire[],
+  seen: Set<string>,
+  timeoutMs: number,
+): Promise<void> {
+  const rt = session.runtime!;
+  const deadline = Date.now() + timeoutMs;
+  while (rt.usage.isOpen()) {
+    const next = nextMessage(session);
+    let timer: NodeJS.Timeout | undefined;
+    const timedOut = new Promise<"timeout">((resolve) => {
+      timer = setTimeout(() => resolve("timeout"), Math.max(0, deadline - Date.now()));
+    });
+    let r: IteratorResult<Record<string, any>> | "timeout";
+    try {
+      r = await Promise.race([next, timedOut]);
+    } finally {
+      clearTimeout(timer);
+    }
+    if (r === "timeout") {
+      next.catch(() => {}); // an abandoned read that later rejects must not go unhandled
+      rt.pendingNext = next;
+      rt.usage.closeOpen();
+      console.warn(`usage_drain_timeout model=${req.model} session=${session.id}`);
+      return;
+    }
+    if (r.done || r.value?.type === "result") {
+      rt.pendingNext = Promise.resolve(r);
+      return;
+    }
+    const msg = r.value;
+    rt.usage.observe(msg);
+    if (msg.type !== "assistant") continue;
+    for (const b of wireBlocks(msg)) {
+      if (b.type !== "tool_use" || seen.has(String(b.id))) continue;
+      seen.add(String(b.id));
+      rt.matcher.registerPending({ id: String(b.id), name: String(b.name) });
+      blocks.push(b);
+    }
+  }
+}
+
 /**
  * Consume the parked SDK stream one message at a time. Returns a tool_use
  * response (leaving the session live) when the model calls tools, or the final
@@ -838,29 +945,35 @@ async function pump(
   req: CompleteRequest,
   store: SessionStore,
   session: Session,
+  drainTimeoutMs: number,
 ): Promise<CompleteResponse> {
+  const rt = session.runtime!;
   for (;;) {
-    const { value: msg, done } = await session.iterator.next();
+    const { value: msg, done } = await nextMessage(session);
     if (done) {
       store.close(session.id);
       throw new BridgeError(500, "no_result", "SDK stream ended without a result message");
     }
+    rt.usage.observe(msg);
     if (msg.type === "assistant") {
       // Strip the MCP server prefix from tool_use names; all other blocks
       // (text, thinking, ...) pass through untouched.
-      const blocks = ((msg.message?.content ?? []) as ContentBlockWire[]).map((b) =>
-        b.type === "tool_use" ? { ...b, name: stripPrefix(String(b.name)) } : b,
-      );
+      const blocks = wireBlocks(msg);
       const toolUses = blocks.filter((b) => b.type === "tool_use");
       if (toolUses.length > 0) {
+        const seen = new Set<string>();
         for (const tu of toolUses) {
-          session.runtime!.matcher.registerPending({ id: String(tu.id), name: String(tu.name) });
+          seen.add(String(tu.id));
+          rt.matcher.registerPending({ id: String(tu.id), name: String(tu.name) });
+        }
+        // Without stream events nothing is open: return immediately, exactly as before.
+        if (rt.usage.isOpen()) {
+          await drainToMessageStop(req, session, blocks, seen, drainTimeoutMs);
         }
         return {
           text: "",
           stop_reason: "tool_use",
-          model: req.model,
-          usage: zeroUsage(),
+          ...finishTurn(rt.usage, req),
           content_blocks: blocks,
           session_id: session.id,
         };
@@ -868,9 +981,9 @@ async function pump(
       // Assistant text with no tool_use (e.g. interstitial thinking) — keep going.
     }
     if (msg.type === "result") {
-      session.runtime!.closeInput();
+      rt.closeInput();
       store.close(session.id);
-      return resultToResponse(msg, req.model);
+      return resultToResponse(msg, () => finishTurn(rt.usage, req, msg));
     }
   }
 }
@@ -913,7 +1026,7 @@ async function runWithGuards(
   }
 
   session.busy = true;
-  const pumping = pump(req, store, session);
+  const pumping = pump(req, store, session, resolveDrainTimeoutMs(opts.drainTimeoutMs));
   // If the failure branch wins the race, the losing pump promise may still
   // reject later (e.g. the aborted iterator throws) — swallow that so it never
   // surfaces as an unhandledRejection.
