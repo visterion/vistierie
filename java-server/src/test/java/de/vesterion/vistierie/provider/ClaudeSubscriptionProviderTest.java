@@ -307,4 +307,50 @@ class ClaudeSubscriptionProviderTest {
         assertThat(res.contentBlocks().get(0).path("id").asText()).isEqualTo("tu1");
         assertThat(res.sessionId()).isEqualTo("s-9");
     }
+
+    @Test void parsesServedModelAndRateLimit() {
+        stubFor(post(urlEqualTo("/v1/complete")).willReturn(okJson("""
+                {"text":"hi","stop_reason":"end_turn","model":"claude-opus-5-5","requested_model":"opus",
+                 "usage":{"input_tokens":4,"output_tokens":290,
+                          "cache_creation_input_tokens":3984,"cache_read_input_tokens":28101},
+                 "rate_limit":{"status":"allowed","five_hour_utilization":0.03,"seven_day_utilization":0.57}}
+                """)));
+        var res = provider.complete(new ProviderRequest("opus", 10, null, null,
+                List.of(Map.of("role", "user", "content", "hi")), null, null, null));
+        assertThat(res.servedModel()).isEqualTo("claude-opus-5-5");
+        assertThat(res.rateLimit()).isEqualTo(new RateLimitInfo("allowed", 0.03, 0.57));
+        assertThat(res.usage()).isEqualTo(new Usage(4, 290, 3984, 28101));
+    }
+
+    @Test void oldBridgeWithoutModelOrRateLimitYieldsNullTelemetry() {
+        stubFor(post(urlEqualTo("/v1/complete")).willReturn(okJson("""
+                {"text":"hi","stop_reason":"end_turn",
+                 "usage":{"input_tokens":10,"output_tokens":4,
+                          "cache_creation_input_tokens":0,"cache_read_input_tokens":2}}
+                """)));
+        var res = provider.complete(minimalReq());
+        assertThat(res.servedModel()).isNull();
+        assertThat(res.rateLimit()).isNull();
+        assertThat(res.usage()).isEqualTo(new Usage(10, 4, 0, 2));
+    }
+
+    @Test void rateLimitWithUnknownUtilizationsKeepsStatus() {
+        stubFor(post(urlEqualTo("/v1/complete")).willReturn(okJson("""
+                {"text":"hi","stop_reason":"end_turn","model":"claude-haiku-5-5",
+                 "usage":{"input_tokens":1,"output_tokens":1,
+                          "cache_creation_input_tokens":0,"cache_read_input_tokens":0},
+                 "rate_limit":{"status":"allowed_warning","five_hour_utilization":null}}
+                """)));
+        var res = provider.complete(minimalReq());
+        assertThat(res.rateLimit()).isEqualTo(new RateLimitInfo("allowed_warning", null, null));
+    }
+
+    @Test void nonObjectRateLimitIsIgnored() {
+        stubFor(post(urlEqualTo("/v1/complete")).willReturn(okJson("""
+                {"text":"hi","stop_reason":"end_turn","model":"claude-haiku-5-5","rate_limit":"weird",
+                 "usage":{"input_tokens":1,"output_tokens":1,
+                          "cache_creation_input_tokens":0,"cache_read_input_tokens":0}}
+                """)));
+        assertThat(provider.complete(minimalReq()).rateLimit()).isNull();
+    }
 }

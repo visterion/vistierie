@@ -152,12 +152,30 @@ public class ClaudeSubscriptionProvider implements LlmProvider {
                 Math.max(0, u.path("cache_read_input_tokens").asInt(0)));
         JsonNode contentBlocks = resp.has("content_blocks") ? resp.get("content_blocks") : null;
         String sessionId = resp.has("session_id") ? resp.path("session_id").asText(null) : null;
+        // `model` is the SERVED model on a current bridge (message_start of the turn's last API
+        // message). `requested_model` is ignored: Vistierie knows what it routed. An old bridge
+        // without the field yields a null servedModel (blank -> null in ProviderResponse).
+        String model = resp.path("model").asText("");
         return new ProviderResponse(
                 resp.path("text").asText(""),
                 resp.path("stop_reason").asText("end_turn"),
                 usage,
-                resp.path("model").asText(""),
+                model,
                 contentBlocks,
-                sessionId);
+                sessionId,
+                model,
+                parseRateLimit(resp.get("rate_limit")));
+    }
+
+    /** Tolerant: a missing or non-object {@code rate_limit} is null, unknown utilisations are null. */
+    private static RateLimitInfo parseRateLimit(JsonNode rl) {
+        if (rl == null || !rl.isObject()) return null;
+        String status = rl.path("status").isString() ? rl.path("status").asText() : null;
+        return new RateLimitInfo(status, fraction(rl.get("five_hour_utilization")),
+                fraction(rl.get("seven_day_utilization")));
+    }
+
+    private static Double fraction(JsonNode n) {
+        return n != null && n.isNumber() ? n.asDouble() : null;
     }
 }
