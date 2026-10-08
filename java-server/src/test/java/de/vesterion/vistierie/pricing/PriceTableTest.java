@@ -1,10 +1,15 @@
 package de.vesterion.vistierie.pricing;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.within;
 
+@ExtendWith(OutputCaptureExtension.class)
 class PriceTableTest {
     PriceTable table = new PriceTable(1.0);
 
@@ -66,10 +71,11 @@ class PriceTableTest {
     @Test
     void sonnet5IsPricedAtAll() {
         // Vorher fehlte das Modell komplett — 751 Calls ohne Shadow-Cost, obwohl es die
-        // Prioritaets-1000-Default-Regel ALLER drei Tenants ist.
+        // Prioritaets-1000-Default-Regel ALLER drei Tenants ist. 2 $ / 10 $ ist der Dauerpreis
+        // (Probe 2026-10-08: (2, 4, 0, 28172) -> costUSD 0.0056784).
         var t = new PriceTable(1.0);
-        assertThat(t.costMicros("claude-sonnet-5", new Usage(1_000_000, 0, 0, 0))).isEqualTo(2_760_000L);
-        assertThat(t.costMicros("claude-sonnet-5", new Usage(0, 1_000_000, 0, 0))).isEqualTo(13_800_000L);
+        assertThat(t.costMicros("claude-sonnet-5", new Usage(1_000_000, 0, 0, 0))).isEqualTo(1_840_000L);
+        assertThat(t.costMicros("claude-sonnet-5", new Usage(0, 1_000_000, 0, 0))).isEqualTo(9_200_000L);
     }
 
     @Test
@@ -104,5 +110,78 @@ class PriceTableTest {
         var t = new PriceTable(1.0);
         assertThat(t.costMicros("eu.anthropic.claude-opus-5", new Usage(1_000_000, 0, 0, 0)))
                 .isEqualTo(4_600_000L);
+    }
+
+    /**
+     * Oracle: the CLI's own result.modelUsage[*].costUSD (costBasis "list"), measured on the bridge
+     * on 2026-10-08 (spec §5). EUR micros / 0.92 must land within 1e-6 USD of it.
+     */
+    private void assertMatchesCliCost(String model, int in, int out, int cacheWrite, int cacheRead,
+                                      double cliCostUsd) {
+        long eurMicros = table.costMicros(model, new Usage(in, out, cacheWrite, cacheRead));
+        double usd = eurMicros / 0.92 / 1_000_000d;
+        assertThat(usd).as("%s (%d, %d, %d, %d)", model, in, out, cacheWrite, cacheRead)
+                .isCloseTo(cliCostUsd, within(1e-6));
+    }
+
+    @Test
+    void matchesTheCliCostUsdOracleOnAllFiveMeasuredTuples() {
+        assertMatchesCliCost("claude-opus-5-5",   4, 290, 3984, 28101, 0.0433082);
+        assertMatchesCliCost("claude-opus-5-5",   4, 177, 5658, 26393, 0.0540986);
+        assertMatchesCliCost("claude-sonnet-5-5", 4,  60, 5527, 27174, 0.0281508);
+        assertMatchesCliCost("claude-haiku-5-5",  2,   4, 6186, 10869, 0.00134809);
+        assertMatchesCliCost("claude-sonnet-5",   2,   4,    0, 28172, 0.0056784);
+    }
+
+    @Test
+    void fiveFiveModelsHaveTheirRates() {
+        var mtok = 1_000_000;
+        assertThat(table.costMicros("claude-opus-5-5",   new Usage(mtok, 0, 0, 0))).isEqualTo(3_680_000L);
+        assertThat(table.costMicros("claude-opus-5-5",   new Usage(0, mtok, 0, 0))).isEqualTo(18_400_000L);
+        assertThat(table.costMicros("claude-opus-5-5",   new Usage(0, 0, mtok, 0))).isEqualTo(7_360_000L);
+        assertThat(table.costMicros("claude-opus-5-5",   new Usage(0, 0, 0, mtok))).isEqualTo(184_000L);
+        assertThat(table.costMicros("claude-sonnet-5-5", new Usage(mtok, 0, 0, 0))).isEqualTo(1_840_000L);
+        assertThat(table.costMicros("claude-sonnet-5-5", new Usage(0, mtok, 0, 0))).isEqualTo(9_200_000L);
+        assertThat(table.costMicros("claude-sonnet-5-5", new Usage(0, 0, mtok, 0))).isEqualTo(3_680_000L);
+        assertThat(table.costMicros("claude-sonnet-5-5", new Usage(0, 0, 0, mtok))).isEqualTo(184_000L);
+        assertThat(table.costMicros("claude-haiku-5-5",  new Usage(mtok, 0, 0, 0))).isEqualTo(92_000L);
+        assertThat(table.costMicros("claude-haiku-5-5",  new Usage(0, mtok, 0, 0))).isEqualTo(460_000L);
+        assertThat(table.costMicros("claude-haiku-5-5",  new Usage(0, 0, mtok, 0))).isEqualTo(184_000L);
+        assertThat(table.costMicros("claude-haiku-5-5",  new Usage(0, 0, 0, mtok))).isEqualTo(9_200L);
+    }
+
+    @Test
+    void sonnet5CacheReadIsTwentyCents() {
+        assertThat(table.costMicros("claude-sonnet-5", new Usage(0, 0, 0, 1_000_000))).isEqualTo(184_000L);
+        assertThat(table.costMicros("claude-sonnet-5", new Usage(0, 0, 1_000_000, 0))).isEqualTo(3_680_000L);
+    }
+
+    @Test
+    void subscriptionDatedIdNormalizes() {
+        // The subscription serves claude-haiku-4-5 as claude-haiku-4-5-20251001 (spec review M1).
+        var u = new Usage(1_000_000, 0, 0, 0);
+        assertThat(table.costMicros("claude-haiku-4-5-20251001", u))
+                .isEqualTo(table.costMicros("claude-haiku-4-5", u));
+        // The Bedrock "-YYYYMMDD-vN:N" suffix still normalizes as before.
+        assertThat(table.costMicros("eu.anthropic.claude-haiku-4-5-20251001-v1:0", u))
+                .isEqualTo(table.costMicros("claude-haiku-4-5", u));
+    }
+
+    @Test
+    void costMicrosOrNullPricesKnownAndNullsUnknown() {
+        assertThat(table.costMicrosOrNull("claude-opus-5-5", new Usage(1_000_000, 0, 0, 0)))
+                .isEqualTo(3_680_000L);
+        assertThat(table.costMicrosOrNull("opus", new Usage(1, 1, 0, 0))).isNull();
+        assertThat(table.costMicrosOrNull(null, new Usage(1, 1, 0, 0))).isNull();
+    }
+
+    @Test
+    void unpricedModelWarnsExactlyOnce(CapturedOutput output) {
+        var t = new PriceTable(1.0);
+        for (int i = 0; i < 3; i++) {
+            assertThat(t.costMicrosOrNull("synthetic-unpriced-model", new Usage(1, 1, 0, 0))).isNull();
+        }
+        int count = output.getOut().split("shadow cost: unpriced model synthetic-unpriced-model", -1).length - 1;
+        assertThat(count).isEqualTo(1);
     }
 }

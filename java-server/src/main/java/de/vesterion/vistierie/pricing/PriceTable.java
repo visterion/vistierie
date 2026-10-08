@@ -1,9 +1,13 @@
 package de.vesterion.vistierie.pricing;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * EUR-micros (1 EUR = 1_000_000 micros) per million input/output tokens.
@@ -14,6 +18,11 @@ import java.util.Map;
  */
 @Component
 public class PriceTable {
+
+    private static final Logger log = LoggerFactory.getLogger(PriceTable.class);
+
+    /** Models already reported as unpriced — one WARN per model per process (spec §3.2.5). */
+    private final Set<String> warnedUnpriced = ConcurrentHashMap.newKeySet();
 
     private final double costMultiplier;
 
@@ -43,11 +52,15 @@ public class PriceTable {
             Map.entry("claude-opus-4-7",   new Rates( 4_600_000, 23_000_000,  9_200_000,   460_000)),
             Map.entry("claude-opus-4-8",   new Rates( 4_600_000, 23_000_000,  9_200_000,   460_000)),
             Map.entry("claude-opus-5",     new Rates( 4_600_000, 23_000_000,  9_200_000,   460_000)),
-            // Sonnet 5 zum REGULAERPREIS 3 $/15 $. Bis 2026-08-31 gilt ein Einfuehrungspreis
-            // von 2 $/10 $; PriceTable kennt keine Gueltigkeitszeitraeume, und ein zum 1.9.
-            // still veraltender Sonderpreis waere schlechter als eine fuer einen Monat um
-            // 50 % zu hohe Shadow-Cost. Fehlerrichtung bewusst konservativ.
-            Map.entry("claude-sonnet-5",   new Rates( 2_760_000, 13_800_000,  5_520_000,   276_000)),
+            // Sonnet 5: 2 $ / 10 $ ist der Dauerpreis, Cache-Read 0,20 $ (Probe 2026-10-08:
+            // (2, 4, 0, 28172) -> costUSD 0.0056784 der CLI).
+            Map.entry("claude-sonnet-5",   new Rates( 1_840_000,  9_200_000,  3_680_000,   184_000)),
+            // 5.5-Familie, gegen result.modelUsage[*].costUSD der CLI nachgerechnet (Spec §5).
+            // Haiku 5.5 kostet fuer Prompts > 100k Tokens mehr; die Tabelle preist nur die
+            // <= 100k-Stufe — bekannte Unterschaetzung, bewusst nicht modelliert.
+            Map.entry("claude-opus-5-5",   new Rates( 3_680_000, 18_400_000,  7_360_000,   184_000)),
+            Map.entry("claude-sonnet-5-5", new Rates( 1_840_000,  9_200_000,  3_680_000,   184_000)),
+            Map.entry("claude-haiku-5-5",  new Rates(    92_000,    460_000,    184_000,     9_200)),
             // OpenAI — no cache_creation cost; only cache_read discount.
             Map.entry("gpt-4o",            new Rates( 2_300_000,  9_200_000,          0, 1_150_000)),
             Map.entry("gpt-4o-mini",       new Rates(   138_000,    552_000,          0,    69_000)),
@@ -76,8 +89,26 @@ public class PriceTable {
     }
 
     /**
+     * {@link #costMicros} for audit figures that may stay empty: null for an unpriced (or null)
+     * model instead of throwing. Logs one WARN per model per process so a new model id the CLI
+     * starts serving is visible instead of silently producing null shadow costs.
+     */
+    public Long costMicrosOrNull(String model, Usage u) {
+        if (model == null) return null;
+        try {
+            return costMicros(model, u);
+        } catch (UnknownModelException e) {
+            if (warnedUnpriced.add(model)) {
+                log.warn("shadow cost: unpriced model {}", model);
+            }
+            return null;
+        }
+    }
+
+    /**
      * Strips Bedrock inference-profile prefixes and version suffixes so that
-     * e.g. "eu.anthropic.claude-haiku-4-5-20251001-v1:0" maps to "claude-haiku-4-5".
+     * e.g. "eu.anthropic.claude-haiku-4-5-20251001-v1:0" maps to "claude-haiku-4-5", and the
+     * subscription's dated id "claude-haiku-4-5-20251001" maps to "claude-haiku-4-5".
      */
     private static String normalize(String model) {
         String m = model;
@@ -86,6 +117,8 @@ public class PriceTable {
         }
         // strip -YYYYMMDD-vN:N Bedrock version suffix
         m = m.replaceAll("-\\d{8}-v\\d+:\\d+$", "");
+        // strip a bare -YYYYMMDD date suffix (subscription-served ids)
+        m = m.replaceAll("-\\d{8}$", "");
         return m;
     }
 
