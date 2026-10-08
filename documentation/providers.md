@@ -100,9 +100,9 @@ schema-constrained `tool_use` block back to the caller unvalidated, so callers p
 it exactly as they parse the other providers' tool calls and are responsible for
 validating it against the schema themselves. The reply is a single, complete turn:
 it carries no `session_id`, so there is nothing to continue — forcing a tool is a
-one-shot request, not an agent loop. It also reports real token usage, unlike the
-agentic tool path's `tool_use` responses, which report zero usage because the run is
-still in progress. Any request outside the narrow shape above — no `tool_choice`,
+one-shot request, not an agent loop. Like every bridge response it reports that
+turn's real token usage (see "Usage, served model and quota" below). Any request
+outside the narrow shape above — no `tool_choice`,
 another choice type, more than one tool, an unknown tool name, a non-object
 `input_schema`, or a request continuing a session (`session_id` set) — keeps the
 ordinary agentic tool path instead. If the SDK returns no structured payload, the
@@ -132,6 +132,50 @@ when adopting this.
 
 Off by default. Enable it only once the `claude-bridge` sidecar is deployed
 and reachable at `base-url`.
+
+**Usage, served model and quota:** the bridge runs the Agent SDK with stream events on
+(`includePartialMessages`) and builds each response's accounting from them:
+
+- `usage` is the sum of the final `message_delta` usage of every API message that
+  *closed during this HTTP turn*. A `tool_use` turn therefore reports its own tokens, and
+  so does the final `submit_result` turn, which Vistierie never continues. The bridge
+  never reports the session-cumulative `result.usage`, which would double-count tool
+  turns. If a turn closed no message at all (an old CLI without stream events, or a
+  drain that times out before anything closes) and the session has never closed a
+  message before, the bridge falls back to `result.usage` when a result was consumed,
+  else zeros, and logs `usage_events_missing model=<m>` once per session. Once any
+  earlier turn in the session has closed a message, a later empty turn reports zero
+  instead of falling back, because `result.usage` is the session total and would
+  double-count the earlier turns.
+- On a tool turn the bridge keeps reading after the first `tool_use` snapshot until that
+  message's `message_stop`. The message's final usage, and any parallel `tool_use` blocks
+  (further snapshots with the same message id), arrive only after the first snapshot. All
+  of them go into the same response, and each one is matched to its tool handler. The
+  drain is bounded by `BRIDGE_USAGE_DRAIN_MS` (default `30000`; the measured gap is ~19 ms).
+  On expiry the bridge returns the blocks with the usage seen so far, logs
+  `usage_drain_timeout`, and keeps the in-flight read for the next turn.
+- `model` is the model the CLI actually served: the `message_start` model of the turn's
+  last closed API message, e.g. `claude-opus-5-5` for a routed `opus`. `requested_model`
+  echoes the request's `model` and doubles as the marker that this is a current bridge —
+  Vistierie only trusts `model` as a served model when `requested_model` is also present,
+  so an old bridge that merely echoes `model` back never gets recorded as a served model.
+  If the CLI switches models mid-turn (a refusal fallback), the whole turn is priced on
+  the last closed message's model.
+- `rate_limit` is `{status, five_hour_utilization, seven_day_utilization}` from the
+  session's latest `rate_limit_event`. The utilisations are fractions 0..1 and either may
+  be null. The field is absent when no event was seen, or when the event carried neither a
+  `status` nor either utilisation. The CLI emits the event only when the info changes.
+  Vistierie drops a utilisation outside `[0, 9.9999]` to null before storing it (the
+  column is `NUMERIC(5,4)`).
+- The quota-exhaustion check (`429 subscription_exhausted`) still reads the result's own
+  usage. Only the reported usage comes from the stream events.
+
+Vistierie keeps `llm_calls.model` as the **routed** model. It stores the served model in
+`llm_calls.served_model` and the quota in `quota_status`, `quota_five_hour_util` and
+`quota_seven_day_util`. It prices `shadow_cost_micros` on the served model, falling back
+to the routed model when the bridge does not report one, so an older bridge keeps today's
+behaviour. An unpriced model leaves the shadow cost null and logs
+`shadow cost: unpriced model <m>` once per model and process.
 
 **Error semantics:**
 
@@ -169,6 +213,7 @@ it. A timeout is surfaced as HTTP `504` `{"error":{"code":"timeout",...}}`.
 | `vistierie.claude-subscription.timeout-seconds` | — | `300` | no |
 | `vistierie.claude-subscription.cooldown-seconds` | `CLAUDE_SUBSCRIPTION_COOLDOWN_SECONDS` | `3600` | no |
 | _(bridge sidecar)_ query timeout | `BRIDGE_QUERY_TIMEOUT_MS` | `290000` | no |
+| _(bridge sidecar)_ tool-turn usage drain | `BRIDGE_USAGE_DRAIN_MS` | `30000` | no |
 
 **Typical pairing:** a routing rule targets `claude-subscription` as the primary
 provider with `anthropic` configured as its fallback, so subscription-quota
