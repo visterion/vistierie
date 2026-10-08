@@ -62,6 +62,7 @@ export class UsageAccumulator {
   private open: OpenMessage | null = null;
   private closed: ClosedMessage[] = [];
   private missingLogged = false;
+  private everClosed = false;
 
   observe(msg: Record<string, any>): void {
     if (msg?.type !== "stream_event") return;
@@ -101,6 +102,12 @@ export class UsageAccumulator {
     if (!this.open) return;
     this.closed.push({ model: this.open.model, usage: this.open.final ?? zeroUsage() });
     this.open = null;
+    this.everClosed = true;
+  }
+
+  /** Any message has ever closed on this accumulator (survives {@link takeTurn}). */
+  hasEverClosed(): boolean {
+    return this.everClosed;
   }
 
   /** Report and clear the messages closed since the previous call. */

@@ -249,3 +249,162 @@ describe("per-turn usage from message_delta", () => {
     expect(warnings("usage_events_missing")).toBe(1);
   });
 });
+
+describe("tool turn drains to message_stop (real event order E7)", () => {
+  it("first tool turn and the never-continued submit_result turn carry their own deltas; Σ = result.usage", async () => {
+    queryMock.mockReturnValue(
+      sdkStream([
+        messageStart("m1"), toolSnapshot("m1", "tu_1", "fetch_x"), messageDelta(M1), messageStop(),
+        messageStart("m2"), toolSnapshot("m2", "tu_2", "submit_result", { a: 1 }), messageDelta(M2), messageStop(),
+        result(TOTAL),
+      ]),
+    );
+    const store = new SessionStore();
+    const first = await complete({ model: "opus", tools: TOOLS, messages: ask }, { sessions: store });
+    expect(first.stop_reason).toBe("tool_use");
+    expect(first.usage).toEqual(M1);
+    expect(first.model).toBe(SERVED);
+    expect(first.requested_model).toBe("opus");
+
+    const last = await complete(
+      {
+        model: "opus",
+        session_id: first.session_id,
+        messages: [{ role: "user", content: [{ type: "tool_result", tool_use_id: "tu_1", content: "ok" }] }],
+      },
+      { sessions: store },
+    );
+    expect(last.stop_reason).toBe("tool_use");
+    expect(last.content_blocks?.[0]).toMatchObject({ id: "tu_2", name: "submit_result" });
+    expect(last.usage).toEqual(M2);
+
+    const sum = Object.fromEntries(
+      Object.keys(TOTAL).map((k) => [k, (first.usage as any)[k] + (last.usage as any)[k]]),
+    );
+    expect(sum).toEqual(TOTAL); // although the result message is never consumed
+    expect(warnings("usage_events_missing")).toBe(0);
+    store.close(last.session_id!);
+  });
+
+  it("parallel tool calls: both snapshots land in ONE response, both handlers resolve, no hang", async () => {
+    queryMock.mockReturnValue(
+      sdkStream([
+        messageStart("m1"),
+        toolSnapshot("m1", "tu_A", "fetch_x"),
+        toolResultEcho("tu_A"),
+        toolSnapshot("m1", "tu_B", "fetch_y"),
+        messageDelta(M1),
+        messageStop(),
+        messageStart("m2"), textSnapshot("m2", "all done"), messageDelta(M2), messageStop(),
+        result(TOTAL, { result: "all done" }),
+      ]),
+    );
+    const store = new SessionStore();
+    const first = await complete({ model: "opus", tools: TOOLS, messages: ask }, { sessions: store });
+    expect(first.content_blocks).toHaveLength(2);
+    expect(first.content_blocks?.[0]).toMatchObject({ type: "tool_use", id: "tu_A", name: "fetch_x" });
+    expect(first.content_blocks?.[1]).toMatchObject({ type: "tool_use", id: "tu_B", name: "fetch_y" });
+    expect(first.usage).toEqual(M1);
+
+    // Tools were built in TOOLS order: [0] fetch_x, [1] fetch_y.
+    const hx = (toolMock.mock.results[0].value as any).handler({}, {});
+    const hy = (toolMock.mock.results[1].value as any).handler({}, {});
+
+    const last = await complete(
+      {
+        model: "opus",
+        session_id: first.session_id,
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "tool_result", tool_use_id: "tu_A", content: "result-A" },
+              { type: "tool_result", tool_use_id: "tu_B", content: "result-B" },
+            ],
+          },
+        ],
+      },
+      { sessions: store },
+    );
+    expect(last.text).toBe("all done");
+    expect(last.usage).toEqual(M2);
+    expect(store.size()).toBe(0);
+    await expect(hx).resolves.toEqual({ content: [{ type: "text", text: "result-A" }], isError: false });
+    await expect(hy).resolves.toEqual({ content: [{ type: "text", text: "result-B" }], isError: false });
+  });
+
+  it("a drain timeout returns the blocks plus the usage seen so far and logs usage_drain_timeout", async () => {
+    queryMock.mockReturnValue(
+      scriptedIterator([
+        { msg: messageStart("m1") },
+        { msg: toolSnapshot("m1", "tu_1", "fetch_x") },
+        { msg: messageDelta(M1) },
+        { hang: true },
+      ]),
+    );
+    const store = new SessionStore();
+    const res = await complete(
+      { model: "opus", tools: TOOLS, messages: ask },
+      { sessions: store, drainTimeoutMs: 20 },
+    );
+    expect(res.stop_reason).toBe("tool_use");
+    expect(res.content_blocks).toHaveLength(1);
+    expect(res.usage).toEqual(M1);
+    expect(warnings("usage_drain_timeout")).toBe(1);
+    expect(warnings("usage_events_missing")).toBe(0);
+    store.close(res.session_id!);
+  });
+
+  it("a drain timeout keeps its in-flight read for the next call instead of skipping it", async () => {
+    queryMock.mockReturnValue(
+      scriptedIterator([
+        { msg: messageStart("m1") },
+        { msg: toolSnapshot("m1", "tu_1", "fetch_x") },
+        { msg: messageDelta(M1) },
+        { msg: result(TOTAL, { result: "late" }), delayMs: 100 },
+      ]),
+    );
+    const store = new SessionStore();
+    const first = await complete(
+      { model: "opus", tools: TOOLS, messages: ask },
+      { sessions: store, drainTimeoutMs: 20 },
+    );
+    const last = await complete(
+      {
+        model: "opus",
+        session_id: first.session_id,
+        messages: [{ role: "user", content: [{ type: "tool_result", tool_use_id: "tu_1", content: "ok" }] }],
+      },
+      { sessions: store },
+    );
+    // Without the kept read, the next iterator.next() would report `done` → 500 no_result.
+    expect(last.text).toBe("late");
+    expect(store.size()).toBe(0);
+  });
+
+  it("a later turn that closes no message reports zero, not the session-total result.usage", async () => {
+    // Events were present (turn 1 closed m1), so result.usage — the session TOTAL — would
+    // double-count M1 already reported by the tool turn. Only a session that never closed a
+    // message falls back to result.usage.
+    queryMock.mockReturnValue(
+      sdkStream([
+        messageStart("m1"), toolSnapshot("m1", "tu_1", "fetch_x"), messageDelta(M1), messageStop(),
+        result(TOTAL, { result: "fin" }),
+      ]),
+    );
+    const store = new SessionStore();
+    const first = await complete({ model: "opus", tools: TOOLS, messages: ask }, { sessions: store });
+    expect(first.usage).toEqual(M1);
+    const last = await complete(
+      {
+        model: "opus",
+        session_id: first.session_id,
+        messages: [{ role: "user", content: [{ type: "tool_result", tool_use_id: "tu_1", content: "ok" }] }],
+      },
+      { sessions: store },
+    );
+    expect(last.text).toBe("fin");
+    expect(last.usage).toEqual(ZERO);
+    expect(store.size()).toBe(0);
+  });
+});

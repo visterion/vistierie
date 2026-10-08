@@ -64,6 +64,24 @@ describe("UsageAccumulator", () => {
     expect(acc.takeTurn()).toEqual({ usage: zeroUsage(), model: "claude-opus-5-5", closed: 1 });
   });
 
+  it("hasEverClosed stays true after takeTurn clears the closed messages", () => {
+    const acc = new UsageAccumulator();
+    expect(acc.hasEverClosed()).toBe(false);
+    acc.observe(start("m1"));
+    expect(acc.hasEverClosed()).toBe(false); // open is not closed
+    acc.observe(stop());
+    expect(acc.hasEverClosed()).toBe(true);
+    acc.takeTurn();
+    expect(acc.hasEverClosed()).toBe(true);
+  });
+
+  it("hasEverClosed is set by a forced closeOpen too", () => {
+    const acc = new UsageAccumulator();
+    acc.observe(start("m1"));
+    acc.closeOpen();
+    expect(acc.hasEverClosed()).toBe(true);
+  });
+
   it("claimMissingLog is true exactly once", () => {
     const acc = new UsageAccumulator();
     expect(acc.claimMissingLog()).toBe(true);
