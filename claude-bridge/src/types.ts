@@ -36,7 +36,10 @@ export interface ContentBlockWire {
 export interface CompleteResponse {
   text: string;
   stop_reason: string;
+  /** Served model: `message_start` model of the turn's last API message, else the request's. */
   model: string;
+  /** The model string the caller sent (`req.model`), echoed verbatim. */
+  requested_model: string;
   usage: {
     input_tokens: number;
     output_tokens: number;
