@@ -375,4 +375,17 @@ class ClaudeSubscriptionProviderTest {
                 """)));
         assertThat(provider.complete(minimalReq()).rateLimit()).isNull();
     }
+
+    @Test void outOfRangeUtilizationIsDroppedButInRangeIsKept() {
+        // quota_five_hour_util / quota_seven_day_util are NUMERIC(5,4); an out-of-range value would
+        // fail the INSERT and lose the whole llm_calls cost row, so it must become null instead.
+        stubFor(post(urlEqualTo("/v1/complete")).willReturn(okJson("""
+                {"text":"hi","stop_reason":"end_turn","model":"claude-haiku-5-5",
+                 "usage":{"input_tokens":1,"output_tokens":1,
+                          "cache_creation_input_tokens":0,"cache_read_input_tokens":0},
+                 "rate_limit":{"status":"allowed","five_hour_utilization":57,"seven_day_utilization":0.57}}
+                """)));
+        var res = provider.complete(minimalReq());
+        assertThat(res.rateLimit()).isEqualTo(new RateLimitInfo("allowed", null, 0.57));
+    }
 }

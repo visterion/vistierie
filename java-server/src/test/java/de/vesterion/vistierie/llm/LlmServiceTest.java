@@ -16,6 +16,7 @@ import de.vesterion.vistierie.provider.LlmProvider;
 import de.vesterion.vistierie.provider.ProviderRegistry;
 import de.vesterion.vistierie.provider.ProviderRequest;
 import de.vesterion.vistierie.provider.ProviderResponse;
+import de.vesterion.vistierie.provider.RateLimitInfo;
 import de.vesterion.vistierie.provider.SubscriptionCooldown;
 import de.vesterion.vistierie.routing.RoutingDecision;
 import de.vesterion.vistierie.routing.RoutingResolver;
@@ -660,5 +661,110 @@ class LlmServiceTest {
         var rows = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
         verify(recorder).insertWithBody(rows.capture(), any(), any(ProviderResponse.class));
         assertThat(rows.getValue().shadowCostMicros()).isNull();
+    }
+
+    @Test void subscriptionAliasRecordsServedModelPricesItAndKeepsRoutedModel() {
+        when(routing.resolve(any(), any(), any(), any())).thenReturn(
+                new RoutingDecision("claude-subscription", "opus", false, null, null));
+        when(providers.get("claude-subscription")).thenReturn(provider);
+        when(provider.complete(any())).thenReturn(new ProviderResponse(
+                "ok", "end_turn", new Usage(4, 290, 3984, 28101), "claude-opus-5-5",
+                null, null, "claude-opus-5-5", new RateLimitInfo("allowed", 0.03, 0.57)));
+
+        var res = svc.complete(completeReq());
+
+        assertThat(res.response().model()).isEqualTo("opus");          // API callers unchanged
+        var rows = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
+        verify(recorder).insertWithBody(rows.capture(), any(), any(ProviderResponse.class));
+        var row = rows.getValue();
+        assertThat(row.model()).isEqualTo("opus");
+        assertThat(row.servedModel()).isEqualTo("claude-opus-5-5");
+        // Opus 5.5 oracle tuple (spec §5): 15 + 5336 + 29322 + 5171 EUR micros
+        assertThat(row.shadowCostMicros()).isEqualTo(39_844L);
+        assertThat(row.quotaStatus()).isEqualTo("allowed");
+        assertThat(row.quotaFiveHourUtil()).isEqualTo(0.03);
+        assertThat(row.quotaSevenDayUtil()).isEqualTo(0.57);
+        verify(metrics).recordShadowCost("claude-subscription", "opus", "complete", 39_844L);
+    }
+
+    @Test void subscriptionDatedServedIdIsPriced() {
+        when(routing.resolve(any(), any(), any(), any())).thenReturn(
+                new RoutingDecision("claude-subscription", "haiku", false, null, null));
+        when(providers.get("claude-subscription")).thenReturn(provider);
+        when(provider.complete(any())).thenReturn(new ProviderResponse(
+                "ok", "end_turn", new Usage(1_000_000, 0, 0, 0), "claude-haiku-4-5-20251001",
+                null, null, "claude-haiku-4-5-20251001", null));
+
+        svc.complete(completeReq());
+
+        var rows = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
+        verify(recorder).insertWithBody(rows.capture(), any(), any(ProviderResponse.class));
+        assertThat(rows.getValue().shadowCostMicros()).isEqualTo(920_000L);
+        assertThat(rows.getValue().quotaStatus()).isNull();
+    }
+
+    @Test void oldBridgeResponseLeavesServedModelNullAndPricesTheRoutedModel() {
+        when(routing.resolve(any(), any(), any(), any())).thenReturn(
+                new RoutingDecision("claude-subscription", "claude-opus-4-8", false, null, null));
+        when(providers.get("claude-subscription")).thenReturn(provider);
+        when(provider.complete(any())).thenReturn(new ProviderResponse(
+                "ok", "end_turn", new Usage(1_000_000, 0, 0, 0), "claude-opus-4-8"));
+
+        svc.complete(completeReq());
+
+        var rows = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
+        verify(recorder).insertWithBody(rows.capture(), any(), any(ProviderResponse.class));
+        var row = rows.getValue();
+        assertThat(row.model()).isEqualTo("claude-opus-4-8");
+        assertThat(row.servedModel()).isNull();
+        assertThat(row.shadowCostMicros()).isEqualTo(4_600_000L);
+        assertThat(row.quotaStatus()).isNull();
+        assertThat(row.quotaFiveHourUtil()).isNull();
+        assertThat(row.quotaSevenDayUtil()).isNull();
+    }
+
+    @Test void failureRowHasNoServedModel() {
+        when(routing.resolve(any(), any(), any(), any())).thenReturn(
+                new RoutingDecision("claude-subscription", "opus", false, null, null));
+        when(providers.get("claude-subscription")).thenReturn(provider);
+        when(provider.complete(any())).thenThrow(
+                new LlmProvider.ProviderException(502, "bridge_error", "synthetic failure"));
+
+        assertThatThrownBy(() -> svc.complete(completeReq()))
+                .isInstanceOf(LlmProvider.ProviderException.class);
+
+        var rows = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
+        verify(recorder).insertWithBody(rows.capture(), any(), eq("synthetic failure"));
+        assertThat(rows.getValue().servedModel()).isNull();
+        assertThat(rows.getValue().quotaStatus()).isNull();
+    }
+
+    @Test void nonSubscriptionProviderIsUnchanged() {
+        when(routing.resolve(any(), any(), any(), any()))
+                .thenReturn(new RoutingDecision("anthropic", "claude-haiku-4-5", false));
+        when(providers.get("anthropic")).thenReturn(provider);
+        when(provider.complete(any())).thenReturn(new ProviderResponse(
+                "ok", "end_turn", new Usage(1_000_000, 0, 0, 0), "claude-haiku-4-5"));
+
+        var res = svc.complete(completeReq());
+
+        assertThat(res.response().cost_micros()).isEqualTo(920_000L);
+        var rows = ArgumentCaptor.forClass(LlmCallRecorder.Row.class);
+        verify(recorder).insertWithBody(rows.capture(), any(), any(ProviderResponse.class));
+        assertThat(rows.getValue().servedModel()).isNull();
+        assertThat(rows.getValue().shadowCostMicros()).isNull();
+    }
+
+    @Test void okLogCarriesServedModel(CapturedOutput output) {
+        when(routing.resolve(any(), any(), any(), any())).thenReturn(
+                new RoutingDecision("claude-subscription", "opus", false, null, null));
+        when(providers.get("claude-subscription")).thenReturn(provider);
+        when(provider.complete(any())).thenReturn(new ProviderResponse(
+                "ok", "end_turn", new Usage(1, 1, 0, 0), "claude-opus-5-5",
+                null, null, "claude-opus-5-5", null));
+
+        svc.complete(completeReq());
+
+        assertThat(output.getOut()).contains("model=opus").contains("served=claude-opus-5-5");
     }
 }

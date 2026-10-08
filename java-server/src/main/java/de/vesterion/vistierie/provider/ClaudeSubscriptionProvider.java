@@ -184,7 +184,17 @@ public class ClaudeSubscriptionProvider implements LlmProvider {
         return new RateLimitInfo(status, fiveHour, sevenDay);
     }
 
+    /**
+     * Tolerant numeric extraction, guarded against the DB column's range: {@code quota_five_hour_util}
+     * / {@code quota_seven_day_util} are {@code NUMERIC(5,4)}, so a value outside [0, 9.9999] (or
+     * NaN/infinite) would fail the INSERT and lose the whole llm_calls cost row. Out-of-range becomes
+     * null rather than risking that.
+     */
     private static Double fraction(JsonNode n) {
-        return n != null && n.isNumber() ? n.asDouble() : null;
+        if (n == null || !n.isNumber()) return null;
+        double v = n.asDouble();
+        if (Double.isNaN(v) || Double.isInfinite(v)) return null;
+        if (v < 0 || v > 9.9999) return null;
+        return v;
     }
 }

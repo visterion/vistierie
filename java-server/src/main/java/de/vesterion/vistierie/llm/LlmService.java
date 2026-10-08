@@ -205,8 +205,12 @@ public class LlmService {
                 var pRes = call.run(provider, model);
                 var dur = (int) ((System.nanoTime() - start) / 1_000_000);
                 boolean subscription = ClaudeSubscriptionProvider.NAME.equals(providerName);
-                long cost = subscription ? 0L : prices.costMicros(model, pRes.usage());
-                Long shadow = subscription ? shadowCost(model, pRes.usage()) : null;
+                // llm_calls.model stays the ROUTED model; prices follow the served model when the
+                // provider reports one (claude-bridge), else the routed model.
+                String servedModel = pRes.servedModel();
+                String priceModel = servedModel != null ? servedModel : model;
+                long cost = subscription ? 0L : prices.costMicros(priceModel, pRes.usage());
+                Long shadow = subscription ? prices.costMicrosOrNull(priceModel, pRes.usage()) : null;
                 // Post-success audit write is non-fatal (finding #11): the provider call already
                 // succeeded and was billed, so an audit-write failure must degrade to "no audit row"
                 // rather than surface as a 500 that would prompt a retry and double the real spend.
@@ -216,7 +220,8 @@ public class LlmService {
                             providerName, model, ctx.endpoint(),
                             pRes.usage().inputTokens(), pRes.usage().outputTokens(),
                             pRes.usage().cacheCreationInputTokens(), pRes.usage().cacheReadInputTokens(),
-                            cost, shadow, dur, "ok", null, null, null), pReq, pRes);
+                            cost, shadow, dur, "ok", null, null, null)
+                            .withProviderTelemetry(servedModel, pRes.rateLimit()), pReq, pRes);
                 } catch (RuntimeException auditEx) {
                     log.warn("audit write failed for successful call id={} provider={} model={}: {}",
                             id, providerName, model, auditEx.toString());
@@ -226,9 +231,10 @@ public class LlmService {
                     metrics.recordShadowCost(providerName, model, ctx.endpoint(), shadow);
                 }
                 log.info("LLM call id={} tenant={} agent={} purpose={} endpoint={} provider={} model={} "
-                                + "in={} out={} cost=${} shadow={} dur={}ms status=ok",
+                                + "served={} in={} out={} cost=${} shadow={} dur={}ms status=ok",
                         id, ctx.tenantName(), ctx.agentName(), ctx.purpose(), ctx.endpoint(),
-                        providerName, model, pRes.usage().inputTokens(), pRes.usage().outputTokens(),
+                        providerName, model, servedModel == null ? "-" : servedModel,
+                        pRes.usage().inputTokens(), pRes.usage().outputTokens(),
                         usd(cost), shadow == null ? "-" : usd(shadow), dur);
                 boolean requestedTools = pReq.tools() != null && !pReq.tools().isEmpty();
                 return new InvocationResult(new LlmResponse(pRes.text(), pRes.stopReason(),
@@ -304,14 +310,6 @@ public class LlmService {
     private static String fallbackReason(RuntimeException e) {
         if (e instanceof UnsupportedOperationException) return "unsupported";
         return ((LlmProvider.ProviderException) e).statusCode() == 429 ? "rate_limited" : "error";
-    }
-
-    private Long shadowCost(String model, de.vesterion.vistierie.pricing.Usage usage) {
-        try {
-            return prices.costMicros(model, usage);
-        } catch (PriceTable.UnknownModelException e) {
-            return null;
-        }
     }
 
     private KillSwitchService.KilledException isKilled(UUID tenantId) {

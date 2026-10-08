@@ -314,26 +314,30 @@ public class AgentRunner {
                     }
                     fellBack = true;
                 }
-                // Subscription calls are free: real cost 0, the equivalent API-key cost logged as a
-                // shadow figure. Other providers bill the real per-turn cost.
                 boolean subscription = ClaudeSubscriptionProvider.NAME.equals(usedProvider);
-                long cost = subscription ? 0L : prices.costMicros(usedModel, pRes.usage());
-                Long shadow = subscription ? shadowCost(usedModel, pRes.usage()) : null;
+                // llm_calls.model stays the ROUTED model (usedModel); prices follow the model the
+                // provider actually served when it tells us (claude-bridge), else the routed one.
+                // A mid-turn model switch is priced on the turn's last message's model (spec m6).
+                String servedModel = pRes.servedModel();
+                String priceModel = servedModel != null ? servedModel : usedModel;
+                long cost = subscription ? 0L : prices.costMicros(priceModel, pRes.usage());
+                Long shadow = subscription ? prices.costMicrosOrNull(priceModel, pRes.usage()) : null;
                 recorder.insertWithBody(new LlmCallRecorder.Row(
                         callId, run.tenantId(), run.agentId(), modelPurpose, null,
                         usedProvider, usedModel, "complete",
                         pRes.usage().inputTokens(), pRes.usage().outputTokens(),
                         pRes.usage().cacheCreationInputTokens(), pRes.usage().cacheReadInputTokens(),
-                        cost, shadow, 0, "ok", null, runId, null), usedReq, pRes);
+                        cost, shadow, 0, "ok", null, runId, null)
+                        .withProviderTelemetry(servedModel, pRes.rateLimit()), usedReq, pRes);
                 // Session threading: a fallback turn ALWAYS drops the threaded id — even one the
                 // fallback itself returned — so a fallback-issued session is never sent to the
                 // primary on a later turn. Otherwise adopt a fresh id whenever the provider returns
                 // one. (end_turn responses return null, which is fine — the run ends.)
                 if (fellBack) providerSessionId = null;
                 else if (pRes.sessionId() != null) providerSessionId = pRes.sessionId();
-                log.info("LLM turn run={} turn={} provider={} model={} in={} out={} cost=${} shadow={} "
-                                + "stop_reason={}",
-                        runId, turn, usedProvider, usedModel,
+                log.info("LLM turn run={} turn={} provider={} model={} served={} in={} out={} cost=${} "
+                                + "shadow={} stop_reason={}",
+                        runId, turn, usedProvider, usedModel, servedModel == null ? "-" : servedModel,
                         pRes.usage().inputTokens(), pRes.usage().outputTokens(),
                         usd(cost), shadow == null ? "-" : usd(shadow), pRes.stopReason());
             } catch (BudgetException e) {
@@ -708,15 +712,6 @@ public class AgentRunner {
             return pe.statusCode() == 429 || pe.statusCode() >= 500;
         }
         return false;
-    }
-
-    /** What the API-key path would have cost for a free subscription call; null for unpriced models. */
-    private Long shadowCost(String model, de.vesterion.vistierie.pricing.Usage usage) {
-        try {
-            return prices.costMicros(model, usage);
-        } catch (PriceTable.UnknownModelException e) {
-            return null;
-        }
     }
 
     /** Formats a micros cost value as a decimal USD string, e.g. {@code 1500000} -> {@code "1.500000"}. */
