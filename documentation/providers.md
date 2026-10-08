@@ -140,39 +140,47 @@ and reachable at `base-url`.
   *closed during this HTTP turn*. A `tool_use` turn therefore reports its own tokens, and
   so does the final `submit_result` turn, which Vistierie never continues. The bridge
   never reports the session-cumulative `result.usage`, which would double-count tool
-  turns. If a turn closed no message at all (an old CLI without stream events, or a
-  drain that times out before anything closes) and the session has never closed a
-  message before, the bridge falls back to `result.usage` when a result was consumed,
-  else zeros, and logs `usage_events_missing model=<m>` once per session. Once any
-  earlier turn in the session has closed a message, a later empty turn reports zero
-  instead of falling back, because `result.usage` is the session total and would
-  double-count the earlier turns.
+  turns. If a turn closed no message at all (no stream events at all — an old CLI, or
+  the option was never applied) and the session has never closed a message before, the
+  bridge falls back to `result.usage` when a result was consumed, else zeros, and logs
+  `usage_events_missing model=<m>` once per session. Once any earlier turn in the
+  session has closed a message, a later empty turn reports zero instead of falling
+  back, because `result.usage` is the session total and would double-count the
+  earlier turns. A drain timeout (below) always closes the open message itself before
+  returning, so it can never trigger this fallback.
 - On a tool turn the bridge keeps reading after the first `tool_use` snapshot until that
   message's `message_stop`. The message's final usage, and any parallel `tool_use` blocks
   (further snapshots with the same message id), arrive only after the first snapshot. All
   of them go into the same response, and each one is matched to its tool handler. The
   drain is bounded by `BRIDGE_USAGE_DRAIN_MS` (default `30000`; the measured gap is ~19 ms).
-  On expiry the bridge returns the blocks with the usage seen so far, logs
-  `usage_drain_timeout`, and keeps the in-flight read for the next turn.
+  On expiry the bridge closes the open message with the usage seen so far, returns the
+  blocks collected up to that point, logs `usage_drain_timeout`, and keeps the in-flight
+  read for the next turn.
 - `model` is the model the CLI actually served: the `message_start` model of the turn's
-  last closed API message, e.g. `claude-opus-5-5` for a routed `opus`. `requested_model`
-  echoes the request's `model` and doubles as the marker that this is a current bridge —
-  Vistierie only trusts `model` as a served model when `requested_model` is also present,
-  so an old bridge that merely echoes `model` back never gets recorded as a served model.
-  If the CLI switches models mid-turn (a refusal fallback), the whole turn is priced on
-  the last closed message's model.
+  last closed API message, e.g. `claude-opus-5-5` for a routed `opus`. If no message
+  closed this turn, `model` falls back to the request's own `model` (the routed alias);
+  since `requested_model` is still sent, Vistierie then records that routed alias as the
+  served model too (shadow cost null for an alias, one `unpriced model` WARN).
+  `requested_model` echoes the request's `model` and doubles as the marker that this is
+  a current bridge — Vistierie only trusts `model` as a served model when
+  `requested_model` is also present, so an old bridge that merely echoes `model` back
+  never gets recorded as a served model. If the CLI switches models mid-turn (a refusal
+  fallback), the whole turn is priced on the last closed message's model.
 - `rate_limit` is `{status, five_hour_utilization, seven_day_utilization}` from the
-  session's latest `rate_limit_event`. The utilisations are fractions 0..1 and either may
-  be null. The field is absent when no event was seen, or when the event carried neither a
-  `status` nor either utilisation. The CLI emits the event only when the info changes.
-  Vistierie drops a utilisation outside `[0, 9.9999]` to null before storing it (the
-  column is `NUMERIC(5,4)`).
+  session's latest `rate_limit_event`; the bridge reports an object for any object
+  `rate_limit_info` it sees, defaulting `status` to `"unknown"` when the event itself
+  omits it, so the wire field is absent only when no `rate_limit_event` was seen at all
+  (or the event's info was not an object). The utilisations are fractions 0..1 and
+  either may be null. The CLI emits the event only when the info changes.
 - The quota-exhaustion check (`429 subscription_exhausted`) still reads the result's own
   usage. Only the reported usage comes from the stream events.
 
 Vistierie keeps `llm_calls.model` as the **routed** model. It stores the served model in
 `llm_calls.served_model` and the quota in `quota_status`, `quota_five_hour_util` and
-`quota_seven_day_util`. It prices `shadow_cost_micros` on the served model, falling back
+`quota_seven_day_util`. On the Java side, a `rate_limit` whose `status` and both
+utilisations are all absent/null is treated as no information and stored as null rather
+than an all-null row, and a utilisation outside `[0, 9.9999]` is dropped to null before
+storing (the columns are `NUMERIC(5,4)`). It prices `shadow_cost_micros` on the served model, falling back
 to the routed model when the bridge does not report one, so an older bridge keeps today's
 behaviour. An unpriced model leaves the shadow cost null and logs
 `shadow cost: unpriced model <m>` once per model and process.
