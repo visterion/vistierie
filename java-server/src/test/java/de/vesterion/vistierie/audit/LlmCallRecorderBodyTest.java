@@ -4,12 +4,14 @@ import de.vesterion.vistierie.PostgresTestBase;
 import de.vesterion.vistierie.pricing.Usage;
 import de.vesterion.vistierie.provider.ProviderRequest;
 import de.vesterion.vistierie.provider.ProviderResponse;
+import de.vesterion.vistierie.provider.RateLimitInfo;
 import de.vesterion.vistierie.tenants.TenantRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
+import java.math.BigDecimal;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -120,5 +122,40 @@ class LlmCallRecorderBodyTest extends PostgresTestBase {
         } catch (Exception expected) { /* ignore — duplicate PK on llm_calls */ }
 
         assertThat(bodies.findByCallId(callId)).isPresent();
+    }
+
+    @Test
+    void persistsServedModelAndQuotaTelemetry() {
+        var callId = UUID.randomUUID().toString();
+        recorder.insert(row(callId).withProviderTelemetry(
+                "claude-opus-5-5", new RateLimitInfo("allowed", 0.03, 0.57)));
+
+        var r = jdbc.sql("""
+                SELECT model, served_model, quota_status, quota_five_hour_util, quota_seven_day_util
+                FROM vistierie.llm_calls WHERE id = ?
+                """).param(callId).query().singleRow();
+        assertThat(r).containsEntry("model", "claude-haiku-4-5")
+                .containsEntry("served_model", "claude-opus-5-5")
+                .containsEntry("quota_status", "allowed");
+        assertThat((BigDecimal) r.get("quota_five_hour_util")).isEqualByComparingTo("0.03");
+        assertThat((BigDecimal) r.get("quota_seven_day_util")).isEqualByComparingTo("0.57");
+    }
+
+    @Test
+    void compatibilityRowLeavesTelemetryNull() {
+        var callId = UUID.randomUUID().toString();
+        recorder.insert(row(callId));
+        recorder.insert(row(callId + "-b").withProviderTelemetry(null, null));
+
+        for (String id : new String[]{callId, callId + "-b"}) {
+            var r = jdbc.sql("""
+                    SELECT served_model, quota_status, quota_five_hour_util, quota_seven_day_util
+                    FROM vistierie.llm_calls WHERE id = ?
+                    """).param(id).query().singleRow();
+            assertThat(r.get("served_model")).isNull();
+            assertThat(r.get("quota_status")).isNull();
+            assertThat(r.get("quota_five_hour_util")).isNull();
+            assertThat(r.get("quota_seven_day_util")).isNull();
+        }
     }
 }

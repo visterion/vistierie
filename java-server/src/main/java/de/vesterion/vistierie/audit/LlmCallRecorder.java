@@ -2,6 +2,7 @@ package de.vesterion.vistierie.audit;
 
 import de.vesterion.vistierie.provider.ProviderRequest;
 import de.vesterion.vistierie.provider.ProviderResponse;
+import de.vesterion.vistierie.provider.RateLimitInfo;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,7 +32,24 @@ public class LlmCallRecorder {
             int inputTokens, int outputTokens, int cacheCreate, int cacheRead,
             long costMicros, Long shadowCostMicros, int durationMs, String status, String errorCode,
             String runId,
-            String batchId) {
+            String batchId,
+            /** Model the provider actually served (claude-bridge); {@code model} stays the ROUTED one. */
+            String servedModel,
+            Double quotaFiveHourUtil,
+            Double quotaSevenDayUtil,
+            String quotaStatus) {
+
+        /** Compatibility constructor: no served model and no quota telemetry. */
+        public Row(String id, UUID tenantId, UUID agentId, String purpose, String realm,
+                   String provider, String model, String endpoint,
+                   int inputTokens, int outputTokens, int cacheCreate, int cacheRead,
+                   long costMicros, Long shadowCostMicros, int durationMs, String status,
+                   String errorCode, String runId, String batchId) {
+            this(id, tenantId, agentId, purpose, realm, provider, model, endpoint,
+                    inputTokens, outputTokens, cacheCreate, cacheRead,
+                    costMicros, shadowCostMicros, durationMs, status, errorCode, runId, batchId,
+                    null, null, null, null);
+        }
 
         /** Compatibility constructor: no shadow cost (all non-subscription call sites). */
         public Row(String id, UUID tenantId, UUID agentId, String purpose, String realm,
@@ -42,6 +60,17 @@ public class LlmCallRecorder {
             this(id, tenantId, agentId, purpose, realm, provider, model, endpoint,
                     inputTokens, outputTokens, cacheCreate, cacheRead,
                     costMicros, null, durationMs, status, errorCode, runId, batchId);
+        }
+
+        /** Copy carrying the provider's served model and quota telemetry (both nullable). */
+        public Row withProviderTelemetry(String servedModel, RateLimitInfo rateLimit) {
+            return new Row(id, tenantId, agentId, purpose, realm, provider, model, endpoint,
+                    inputTokens, outputTokens, cacheCreate, cacheRead,
+                    costMicros, shadowCostMicros, durationMs, status, errorCode, runId, batchId,
+                    servedModel,
+                    rateLimit == null ? null : rateLimit.fiveHourUtilization(),
+                    rateLimit == null ? null : rateLimit.sevenDayUtilization(),
+                    rateLimit == null ? null : rateLimit.status());
         }
     }
 
@@ -74,14 +103,16 @@ public class LlmCallRecorder {
                 INSERT INTO vistierie.llm_calls
                   (id, tenant_id, agent_id, purpose, realm, provider, model, endpoint,
                    input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens,
-                   cost_micros, shadow_cost_micros, duration_ms, status, error_code, run_id, batch_id)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                   cost_micros, shadow_cost_micros, duration_ms, status, error_code, run_id, batch_id,
+                   served_model, quota_five_hour_util, quota_seven_day_util, quota_status)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """)
                 .params(r.id(), r.tenantId(), r.agentId(), r.purpose(), r.realm(),
                         r.provider(), r.model(), r.endpoint(),
                         r.inputTokens(), r.outputTokens(), r.cacheCreate(), r.cacheRead(),
                         r.costMicros(), r.shadowCostMicros(), r.durationMs(), r.status(), r.errorCode(),
-                        r.runId(), r.batchId())
+                        r.runId(), r.batchId(),
+                        r.servedModel(), r.quotaFiveHourUtil(), r.quotaSevenDayUtil(), r.quotaStatus())
                 .update();
     }
 }

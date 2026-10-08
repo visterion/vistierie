@@ -119,4 +119,21 @@ class MigrationTest extends PostgresTestBase {
                 VALUES (?, ?)
                 """).params(agentId, 101).update()).isInstanceOf(Exception.class);
     }
+
+    @Test
+    void v16AddsServedModelAndQuotaColumns() {
+        var cols = jdbc.sql("""
+                SELECT column_name || ':' || data_type || ':' || is_nullable
+                FROM information_schema.columns
+                WHERE table_schema='vistierie' AND table_name='llm_calls'
+                  AND column_name IN ('served_model','quota_five_hour_util',
+                                      'quota_seven_day_util','quota_status')
+                ORDER BY column_name
+                """).query(String.class).list();
+        assertThat(cols).containsExactly(
+                "quota_five_hour_util:numeric:YES",
+                "quota_seven_day_util:numeric:YES",
+                "quota_status:text:YES",
+                "served_model:text:YES");
+    }
 }
