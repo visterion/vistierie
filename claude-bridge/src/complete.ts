@@ -100,9 +100,9 @@ type TurnReport = Pick<CompleteResponse, "usage" | "model" | "requested_model">;
  * Close out one HTTP turn: report the messages that closed during it — never `result.usage`,
  * which is the session total and would double-count tool turns. Without any closed message
  * (old CLI, option ignored) fall back to the result's usage when one was consumed, else zeros,
- * and say so once per session. The fallback applies only while the accumulator has NEVER closed
+ * and say so once per session. Fallback and log apply only while the accumulator has NEVER closed
  * a message: once earlier turns reported their deltas, result.usage (the session total) would
- * double-count them, so an empty later turn reports zeros.
+ * double-count them, so an empty later turn reports zeros (turn.usage) and logs nothing.
  */
 function finishTurn(
   acc: UsageAccumulator,
@@ -111,8 +111,9 @@ function finishTurn(
 ): TurnReport {
   const turn = acc.takeTurn();
   let usage = turn.usage;
-  if (turn.closed === 0) {
-    usage = result && !acc.hasEverClosed() ? usageFrom(result.usage) : zeroUsage();
+  if (turn.closed === 0 && !acc.hasEverClosed()) {
+    // Events really missing: nothing has ever closed in this session.
+    usage = result ? usageFrom(result.usage) : zeroUsage();
     if (acc.claimMissingLog()) console.warn(`usage_events_missing model=${req.model}`);
   }
   return { usage, model: turn.model ?? req.model, requested_model: req.model };

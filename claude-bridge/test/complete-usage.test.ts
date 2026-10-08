@@ -382,7 +382,7 @@ describe("tool turn drains to message_stop (real event order E7)", () => {
     expect(store.size()).toBe(0);
   });
 
-  it("a later turn that closes no message reports zero, not the session-total result.usage", async () => {
+  it("a later turn that closes no message reports zero, not the session-total result.usage, and logs nothing", async () => {
     // Events were present (turn 1 closed m1), so result.usage — the session TOTAL — would
     // double-count M1 already reported by the tool turn. Only a session that never closed a
     // message falls back to result.usage.
@@ -406,5 +406,6 @@ describe("tool turn drains to message_stop (real event order E7)", () => {
     expect(last.text).toBe("fin");
     expect(last.usage).toEqual(ZERO);
     expect(store.size()).toBe(0);
+    expect(warnings("usage_events_missing")).toBe(0); // events were present, not missing
   });
 });
