@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { UsageAccumulator, usageFrom, zeroUsage } from "../src/usage.js";
+import { UsageAccumulator, usageFrom, zeroUsage, parseRateLimit } from "../src/usage.js";
 
 const ev = (event: Record<string, unknown>) => ({ type: "stream_event", parent_tool_use_id: null, event });
 const start = (id: string, model = "claude-opus-5-5") =>
@@ -93,5 +93,52 @@ describe("usageFrom", () => {
   it("defaults missing or invalid fields to 0", () => {
     expect(usageFrom({ input_tokens: 10, output_tokens: -1 })).toEqual(U(10, 0, 0, 0));
     expect(usageFrom(undefined)).toEqual(zeroUsage());
+  });
+});
+
+describe("parseRateLimit", () => {
+  it("prefers unifiedWindows", () => {
+    expect(
+      parseRateLimit({
+        status: "allowed",
+        resetsAt: 1700000000,
+        rateLimitType: "five_hour",
+        utilization: 0.99,
+        unifiedWindows: {
+          five_hour: { utilization: 0.03, resetsAt: 1700000000 },
+          seven_day: { utilization: 0.57, resetsAt: 1700090000 },
+        },
+      }),
+    ).toEqual({ status: "allowed", five_hour_utilization: 0.03, seven_day_utilization: 0.57 });
+  });
+
+  it("falls back to the top-level utilization by rateLimitType", () => {
+    expect(parseRateLimit({ status: "allowed", rateLimitType: "five_hour", utilization: 0.4 })).toEqual({
+      status: "allowed",
+      five_hour_utilization: 0.4,
+      seven_day_utilization: null,
+    });
+    expect(
+      parseRateLimit({ status: "allowed_warning", rateLimitType: "seven_day_opus", utilization: 0.8 }),
+    ).toEqual({ status: "allowed_warning", five_hour_utilization: null, seven_day_utilization: 0.8 });
+  });
+
+  it("leaves unknown utilizations null and rejects non-objects", () => {
+    expect(parseRateLimit({ status: "rejected" })).toEqual({
+      status: "rejected",
+      five_hour_utilization: null,
+      seven_day_utilization: null,
+    });
+    expect(parseRateLimit(undefined)).toBeUndefined();
+    expect(parseRateLimit("x")).toBeUndefined();
+  });
+
+  it("the accumulator keeps the latest event across turns", () => {
+    const acc = new UsageAccumulator();
+    expect(acc.latestRateLimit()).toBeUndefined();
+    acc.observe({ type: "rate_limit_event", rate_limit_info: { status: "allowed", rateLimitType: "five_hour", utilization: 0.1 } });
+    acc.observe({ type: "rate_limit_event", rate_limit_info: { status: "allowed", rateLimitType: "five_hour", utilization: 0.2 } });
+    acc.takeTurn();
+    expect(acc.latestRateLimit()).toEqual({ status: "allowed", five_hour_utilization: 0.2, seven_day_utilization: null });
   });
 });

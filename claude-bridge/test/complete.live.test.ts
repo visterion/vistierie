@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 // NOTE: no vi.mock here — this file drives the REAL @anthropic-ai/claude-agent-sdk
 // (and the Claude Code CLI child it spawns) against a live Claude subscription.
 import { complete } from "../src/complete.js";
@@ -46,6 +46,7 @@ describe.skipIf(!LIVE)("complete — live subscription (per-turn usage, spec 202
   it(
     "the first tool turn reports real output tokens and the served model id",
     async () => {
+      const warn = vi.spyOn(console, "warn");
       const store = new SessionStore();
       const res = await complete(
         {
@@ -69,7 +70,10 @@ describe.skipIf(!LIVE)("complete — live subscription (per-turn usage, spec 202
         expect(res.usage.output_tokens).toBeGreaterThan(0);
         expect(res.model).toMatch(/^claude-/);
         expect(res.requested_model).toBe("haiku");
+        // Proves the drain ends at message_stop and never stalls behind the parked MCP handler.
+        expect(warn.mock.calls.some((c) => String(c[0]).includes("usage_drain_timeout"))).toBe(false);
       } finally {
+        warn.mockRestore();
         if (res.session_id) store.close(res.session_id);
       }
     },

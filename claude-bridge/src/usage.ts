@@ -1,4 +1,4 @@
-import type { CompleteResponse } from "./types.js";
+import type { CompleteResponse, RateLimitWire } from "./types.js";
 
 export type WireUsage = CompleteResponse["usage"];
 
@@ -28,6 +28,38 @@ export function usageFrom(raw: unknown): WireUsage {
   const out = zeroUsage();
   for (const f of USAGE_FIELDS) out[f] = count(u[f]) ?? 0;
   return out;
+}
+
+function asObj(v: unknown): Record<string, unknown> | undefined {
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
+}
+
+function fraction(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+/**
+ * `rate_limit_info` → wire. `unifiedWindows` is NOT in the SDK type (sdk.d.ts SDKRateLimitInfo
+ * only has `utilization` + `rateLimitType`), but the CLI 2.1.293 sends it (spec E5), so prefer it
+ * and fall back to the top-level `utilization`, mapped by `rateLimitType`.
+ */
+export function parseRateLimit(info: unknown): RateLimitWire | undefined {
+  const i = asObj(info);
+  if (!i) return undefined;
+  const windows = asObj(i.unifiedWindows);
+  let five = fraction(asObj(windows?.five_hour)?.utilization);
+  let seven = fraction(asObj(windows?.seven_day)?.utilization);
+  const top = fraction(i.utilization);
+  const type = typeof i.rateLimitType === "string" ? i.rateLimitType : "";
+  if (top !== null) {
+    if (five === null && type === "five_hour") five = top;
+    if (seven === null && type.startsWith("seven_day")) seven = top;
+  }
+  return {
+    status: typeof i.status === "string" ? i.status : "unknown",
+    five_hour_utilization: five,
+    seven_day_utilization: seven,
+  };
 }
 
 interface OpenMessage {
@@ -63,8 +95,14 @@ export class UsageAccumulator {
   private closed: ClosedMessage[] = [];
   private missingLogged = false;
   private everClosed = false;
+  private rateLimit: RateLimitWire | undefined;
 
   observe(msg: Record<string, any>): void {
+    if (msg?.type === "rate_limit_event") {
+      const rl = parseRateLimit(msg.rate_limit_info);
+      if (rl) this.rateLimit = rl; // the latest event wins; kept across turns
+      return;
+    }
     if (msg?.type !== "stream_event") return;
     const ev = msg.event as Record<string, any> | undefined;
     switch (ev?.type) {
@@ -128,5 +166,10 @@ export class UsageAccumulator {
     if (this.missingLogged) return false;
     this.missingLogged = true;
     return true;
+  }
+
+  /** The session's latest rate-limit info, undefined when no event was seen. */
+  latestRateLimit(): RateLimitWire | undefined {
+    return this.rateLimit;
   }
 }

@@ -409,3 +409,79 @@ describe("tool turn drains to message_stop (real event order E7)", () => {
     expect(warnings("usage_events_missing")).toBe(0); // events were present, not missing
   });
 });
+
+const rateLimitEvent = (info: Record<string, unknown>) => ({
+  type: "rate_limit_event",
+  rate_limit_info: info,
+  uuid: "00000000-0000-0000-0000-000000000001",
+  session_id: "synthetic",
+});
+// Shape of spec E5 with synthetic values.
+const E5 = {
+  status: "allowed",
+  resetsAt: 1700000000,
+  rateLimitType: "five_hour",
+  overageStatus: "rejected",
+  isUsingOverage: false,
+  unifiedWindows: {
+    five_hour: { utilization: 0.03, resetsAt: 1700000000 },
+    seven_day: { utilization: 0.57, resetsAt: 1700090000 },
+  },
+};
+
+describe("rate_limit on the wire", () => {
+  it("reports unifiedWindows utilisation", async () => {
+    queryMock.mockReturnValue(sdkStream([rateLimitEvent(E5), result(TOTAL)]));
+    const res = await complete({ model: "opus", messages: ask });
+    expect(res.rate_limit).toEqual({ status: "allowed", five_hour_utilization: 0.03, seven_day_utilization: 0.57 });
+  });
+
+  it("falls back to top-level utilization without unifiedWindows", async () => {
+    queryMock.mockReturnValue(
+      sdkStream([rateLimitEvent({ status: "allowed_warning", rateLimitType: "seven_day", utilization: 0.81 }), result(TOTAL)]),
+    );
+    const res = await complete({ model: "opus", messages: ask });
+    expect(res.rate_limit).toEqual({ status: "allowed_warning", five_hour_utilization: null, seven_day_utilization: 0.81 });
+  });
+
+  it("the latest event wins", async () => {
+    queryMock.mockReturnValue(
+      sdkStream([
+        rateLimitEvent(E5),
+        rateLimitEvent({ ...E5, unifiedWindows: { five_hour: { utilization: 0.05 }, seven_day: { utilization: 0.58 } } }),
+        result(TOTAL),
+      ]),
+    );
+    const res = await complete({ model: "opus", messages: ask });
+    expect(res.rate_limit).toEqual({ status: "allowed", five_hour_utilization: 0.05, seven_day_utilization: 0.58 });
+  });
+
+  it("is absent when no event was seen", async () => {
+    queryMock.mockReturnValue(sdkStream([result(TOTAL)]));
+    const res = await complete({ model: "opus", messages: ask });
+    expect(res).not.toHaveProperty("rate_limit");
+  });
+
+  it("a session keeps reporting the last event on later turns", async () => {
+    queryMock.mockReturnValue(
+      sdkStream([
+        rateLimitEvent(E5),
+        messageStart("m1"), toolSnapshot("m1", "tu_1", "fetch_x"), messageDelta(M1), messageStop(),
+        messageStart("m2"), textSnapshot("m2", "fin"), messageDelta(M2), messageStop(),
+        result(TOTAL, { result: "fin" }),
+      ]),
+    );
+    const store = new SessionStore();
+    const first = await complete({ model: "opus", tools: TOOLS, messages: ask }, { sessions: store });
+    expect(first.rate_limit?.seven_day_utilization).toBe(0.57);
+    const last = await complete(
+      {
+        model: "opus",
+        session_id: first.session_id,
+        messages: [{ role: "user", content: [{ type: "tool_result", tool_use_id: "tu_1", content: "ok" }] }],
+      },
+      { sessions: store },
+    );
+    expect(last.rate_limit).toEqual({ status: "allowed", five_hour_utilization: 0.03, seven_day_utilization: 0.57 });
+  });
+});

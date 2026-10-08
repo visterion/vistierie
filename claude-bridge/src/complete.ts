@@ -93,8 +93,8 @@ function resolveDrainTimeoutMs(override?: number): number {
   return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : 30000;
 }
 
-/** The usage/model fields every successful response carries (spec §3.1.4). */
-type TurnReport = Pick<CompleteResponse, "usage" | "model" | "requested_model">;
+/** The usage/model/quota fields every successful response carries (spec §3.1.4/§3.1.5). */
+type TurnReport = Pick<CompleteResponse, "usage" | "model" | "requested_model" | "rate_limit">;
 
 /**
  * Close out one HTTP turn: report the messages that closed during it — never `result.usage`,
@@ -103,6 +103,7 @@ type TurnReport = Pick<CompleteResponse, "usage" | "model" | "requested_model">;
  * and say so once per session. Fallback and log apply only while the accumulator has NEVER closed
  * a message: once earlier turns reported their deltas, result.usage (the session total) would
  * double-count them, so an empty later turn reports zeros (turn.usage) and logs nothing.
+ * `rate_limit` is the latest event of the request/session (absent when none was seen).
  */
 function finishTurn(
   acc: UsageAccumulator,
@@ -116,7 +117,10 @@ function finishTurn(
     usage = result ? usageFrom(result.usage) : zeroUsage();
     if (acc.claimMissingLog()) console.warn(`usage_events_missing model=${req.model}`);
   }
-  return { usage, model: turn.model ?? req.model, requested_model: req.model };
+  const report: TurnReport = { usage, model: turn.model ?? req.model, requested_model: req.model };
+  const rateLimit = acc.latestRateLimit();
+  if (rateLimit) report.rate_limit = rateLimit;
+  return report;
 }
 
 /** Apply effort / max_tokens knobs shared by plain and tool paths. */

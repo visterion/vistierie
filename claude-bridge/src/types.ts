@@ -33,6 +33,16 @@ export interface ContentBlockWire {
   [k: string]: unknown;
 }
 
+/**
+ * Claude Max subscription quota as of the session's latest `rate_limit_event` (the CLI emits
+ * one only when the info changes). Utilisations are fractions 0..1, null when not reported.
+ */
+export interface RateLimitWire {
+  status: string;
+  five_hour_utilization: number | null;
+  seven_day_utilization: number | null;
+}
+
 export interface CompleteResponse {
   text: string;
   stop_reason: string;
@@ -48,6 +58,8 @@ export interface CompleteResponse {
   };
   content_blocks?: ContentBlockWire[];
   session_id?: string;
+  /** Absent when no `rate_limit_event` was seen in this request/session. */
+  rate_limit?: RateLimitWire;
 }
 
 export class BridgeError extends Error {
