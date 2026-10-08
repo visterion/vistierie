@@ -152,10 +152,13 @@ public class ClaudeSubscriptionProvider implements LlmProvider {
                 Math.max(0, u.path("cache_read_input_tokens").asInt(0)));
         JsonNode contentBlocks = resp.has("content_blocks") ? resp.get("content_blocks") : null;
         String sessionId = resp.has("session_id") ? resp.path("session_id").asText(null) : null;
-        // `model` is the SERVED model on a current bridge (message_start of the turn's last API
-        // message). `requested_model` is ignored: Vistierie knows what it routed. An old bridge
-        // without the field yields a null servedModel (blank -> null in ProviderResponse).
+        // `model` keeps meaning what it always has: the provider echo (resp.model), unchanged.
+        // `requested_model` is the new-bridge marker: an old bridge echoes `model` = req.model
+        // (complete.ts:862), which is indistinguishable from a real served-model observation, so
+        // servedModel is only trusted when `requested_model` is also present (current bridge,
+        // message_start of the turn's last API message).
         String model = resp.path("model").asText("");
+        String servedModel = resp.has("requested_model") ? model : null;
         return new ProviderResponse(
                 resp.path("text").asText(""),
                 resp.path("stop_reason").asText("end_turn"),
@@ -163,16 +166,22 @@ public class ClaudeSubscriptionProvider implements LlmProvider {
                 model,
                 contentBlocks,
                 sessionId,
-                model,
+                servedModel,
                 parseRateLimit(resp.get("rate_limit")));
     }
 
-    /** Tolerant: a missing or non-object {@code rate_limit} is null, unknown utilisations are null. */
+    /**
+     * Tolerant: a missing or non-object {@code rate_limit} is null, unknown utilisations are
+     * null, and a {@code rate_limit} whose status and both utilisations are all absent/null
+     * carries no information, so it is null too rather than {@code RateLimitInfo(null,null,null)}.
+     */
     private static RateLimitInfo parseRateLimit(JsonNode rl) {
         if (rl == null || !rl.isObject()) return null;
         String status = rl.path("status").isString() ? rl.path("status").asText() : null;
-        return new RateLimitInfo(status, fraction(rl.get("five_hour_utilization")),
-                fraction(rl.get("seven_day_utilization")));
+        Double fiveHour = fraction(rl.get("five_hour_utilization"));
+        Double sevenDay = fraction(rl.get("seven_day_utilization"));
+        if (status == null && fiveHour == null && sevenDay == null) return null;
+        return new RateLimitInfo(status, fiveHour, sevenDay);
     }
 
     private static Double fraction(JsonNode n) {

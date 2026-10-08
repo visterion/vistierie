@@ -323,8 +323,11 @@ class ClaudeSubscriptionProviderTest {
     }
 
     @Test void oldBridgeWithoutModelOrRateLimitYieldsNullTelemetry() {
+        // Real old-bridge shape: `model` is always present (it echoes req.model, complete.ts:862),
+        // but `requested_model` and `rate_limit` are absent. Without the requested_model gate this
+        // would wrongly surface the routed alias as an observed servedModel.
         stubFor(post(urlEqualTo("/v1/complete")).willReturn(okJson("""
-                {"text":"hi","stop_reason":"end_turn",
+                {"text":"hi","stop_reason":"end_turn","model":"opus",
                  "usage":{"input_tokens":10,"output_tokens":4,
                           "cache_creation_input_tokens":0,"cache_read_input_tokens":2}}
                 """)));
@@ -332,6 +335,25 @@ class ClaudeSubscriptionProviderTest {
         assertThat(res.servedModel()).isNull();
         assertThat(res.rateLimit()).isNull();
         assertThat(res.usage()).isEqualTo(new Usage(10, 4, 0, 2));
+    }
+
+    @Test void newBridgeWithRequestedModelMarkerYieldsServedModel() {
+        stubFor(post(urlEqualTo("/v1/complete")).willReturn(okJson("""
+                {"text":"hi","stop_reason":"end_turn","model":"claude-opus-5-5","requested_model":"opus",
+                 "usage":{"input_tokens":1,"output_tokens":1,
+                          "cache_creation_input_tokens":0,"cache_read_input_tokens":0}}
+                """)));
+        var res = provider.complete(minimalReq());
+        assertThat(res.servedModel()).isEqualTo("claude-opus-5-5");
+    }
+
+    @Test void emptyRateLimitObjectIsNull() {
+        stubFor(post(urlEqualTo("/v1/complete")).willReturn(okJson("""
+                {"text":"hi","stop_reason":"end_turn","model":"claude-haiku-5-5","rate_limit":{},
+                 "usage":{"input_tokens":1,"output_tokens":1,
+                          "cache_creation_input_tokens":0,"cache_read_input_tokens":0}}
+                """)));
+        assertThat(provider.complete(minimalReq()).rateLimit()).isNull();
     }
 
     @Test void rateLimitWithUnknownUtilizationsKeepsStatus() {
